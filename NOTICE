@@ -1,0 +1,17 @@
+IBM i Member Workspace
+
+This project is derived from IBMi Source Member Checkout,
+originally created by Ricky Thompson (GitHub: thomprl):
+
+https://github.com/thomprl/ibmi-source-member-checkout
+
+IBM i Member Workspace is maintained as an independent project by Vinhry:
+
+https://github.com/vinhry/ibmi-member-workspace
+
+The original work and IBM i Member Workspace are distributed under the
+GNU General Public License version 3. See LICENSE for the complete terms.
+This repository begins with a new project history, so this notice preserves
+the origin and authorship information for the work from which it was derived.
+IBM i Member Workspace has its own release and support lifecycle and is not
+synchronized with the original project.

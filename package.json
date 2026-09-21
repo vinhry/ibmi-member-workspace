@@ -1,0 +1,470 @@
+{
+  "name": "ibmi-member-workspace",
+  "displayName": "IBM i Member Workspace",
+  "description": "Work with IBM i source members locally, compare changes, and synchronize them safely. Works with Code for IBM i.",
+  "version": "1.0.0",
+  "publisher": "vinhry",
+  "author": "Vinhry",
+  "license": "GPL-3.0",
+  "pricing": "Free",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vinhry/ibmi-member-workspace.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vinhry/ibmi-member-workspace/issues"
+  },
+  "homepage": "https://github.com/vinhry/ibmi-member-workspace#readme",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ibmi",
+    "as400",
+    "iseries",
+    "rpgle",
+    "cobol",
+    "source member",
+    "checkout"
+  ],
+  "extensionDependencies": [
+    "halcyontechltd.code-for-ibmi"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "submenus": [
+      {
+        "id": "ibmi-member-workspace.compareWith",
+        "label": "Compare With"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ibmi-member-workspace",
+          "title": "Member Workspace",
+          "icon": "resources/checkout.svg"
+        }
+      ]
+    },
+    "views": {
+      "ibmi-member-workspace": [
+        {
+          "id": "ibmi-member-workspace.checkoutView",
+          "name": "Checked Out Members",
+          "when": "code-for-ibmi:connected"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "ibmi-member-workspace.checkoutMember",
+        "title": "Check Out Member",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.checkoutAllMembers",
+        "title": "Check Out All Members",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.mergeBack",
+        "title": "Merge Back to IBM i",
+        "category": "IBM i Member Workspace",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "ibmi-member-workspace.openLocalFile",
+        "title": "Open Local File",
+        "category": "IBM i Member Workspace",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "ibmi-member-workspace.revealInExplorer",
+        "title": "Reveal in File Explorer",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.refreshRemote",
+        "title": "Refresh Remote Status",
+        "category": "IBM i Member Workspace",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "ibmi-member-workspace.discardCheckout",
+        "title": "Discard Checkout",
+        "category": "IBM i Member Workspace",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "ibmi-member-workspace.copyMemberPath",
+        "title": "Copy Member Path",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.selectForCompare",
+        "title": "Select for Compare",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.compareWithActive",
+        "title": "Compare with Active File",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.compareWithSelected",
+        "title": "Compare with Selected",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.compareWithLocalFile",
+        "title": "Compare with Local File",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.compareWithIfsFile",
+        "title": "Compare with IFS File",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.compareWithMember",
+        "title": "Compare with Member",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.openRemoteFile",
+        "title": "Open Remote File",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.uploadToRemote",
+        "title": "Upload to IBM i",
+        "category": "IBM i Member Workspace",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "ibmi-member-workspace.runAction",
+        "title": "Run Action",
+        "category": "IBM i Member Workspace",
+        "icon": "$(play)"
+      },
+      {
+        "command": "ibmi-member-workspace.refreshSourceFileRemote",
+        "title": "Refresh Remote Status",
+        "category": "IBM i Member Workspace",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "ibmi-member-workspace.refreshAllRemote",
+        "title": "Refresh All Remote Status",
+        "category": "IBM i Member Workspace",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "ibmi-member-workspace.refreshView",
+        "title": "Refresh",
+        "category": "IBM i Member Workspace",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ibmi-member-workspace.expandAll",
+        "title": "Expand All",
+        "category": "IBM i Member Workspace",
+        "icon": "$(expand-all)"
+      },
+      {
+        "command": "ibmi-member-workspace.search",
+        "title": "Search Checked Out Members",
+        "category": "IBM i Member Workspace",
+        "icon": "$(search)"
+      },
+      {
+        "command": "ibmi-member-workspace.clearSearch",
+        "title": "Clear Search Filter",
+        "category": "IBM i Member Workspace",
+        "icon": "$(clear-all)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "ibmi-member-workspace.checkoutMember",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.checkoutAllMembers",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.mergeBack",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.openLocalFile",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.refreshRemote",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.discardCheckout",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.copyMemberPath",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.refreshView",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.selectForCompare",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithActive",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithSelected",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithLocalFile",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithIfsFile",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithMember",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.revealInExplorer",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.runAction",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.openRemoteFile",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.uploadToRemote",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.refreshAllRemote",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.refreshSourceFileRemote",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.expandAll",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.search",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.clearSearch",
+          "when": "false"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ibmi-member-workspace.checkoutMember",
+          "when": "view == objectBrowser && (viewItem == member || (viewItem == member_readonly && config.ibmi-member-workspace.allowCheckoutFromProtectedFilter))",
+          "group": "ibmiCheckout@1"
+        },
+        {
+          "command": "ibmi-member-workspace.checkoutAllMembers",
+          "when": "view == objectBrowser && (viewItem == SPF || (viewItem == SPF_readonly && config.ibmi-member-workspace.allowCheckoutFromProtectedFilter))",
+          "group": "ibmiCheckout@1"
+        },
+        {
+          "command": "ibmi-member-workspace.refreshRemote",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "group": "inline@1"
+        },
+        {
+          "command": "ibmi-member-workspace.mergeBack",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "group": "inline@2"
+        },
+        {
+          "command": "ibmi-member-workspace.openLocalFile",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "group": "1_open@1"
+        },
+        {
+          "command": "ibmi-member-workspace.openRemoteFile",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "group": "1_open@2"
+        },
+        {
+          "command": "ibmi-member-workspace.revealInExplorer",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "group": "1_open@3"
+        },
+        {
+          "command": "ibmi-member-workspace.mergeBack",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "group": "2_merge@1"
+        },
+        {
+          "command": "ibmi-member-workspace.uploadToRemote",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "group": "2_merge@2"
+        },
+        {
+          "command": "ibmi-member-workspace.runAction",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "group": "2_merge@3"
+        },
+        {
+          "command": "ibmi-member-workspace.selectForCompare",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "group": "3_compare@1"
+        },
+        {
+          "submenu": "ibmi-member-workspace.compareWith",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "group": "3_compare@2"
+        },
+        {
+          "command": "ibmi-member-workspace.refreshRemote",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "group": "4_status@1"
+        },
+        {
+          "command": "ibmi-member-workspace.copyMemberPath",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "group": "5_util@1"
+        },
+        {
+          "command": "ibmi-member-workspace.discardCheckout",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "group": "6_danger@1"
+        },
+        {
+          "command": "ibmi-member-workspace.refreshSourceFileRemote",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem == sourceFileGroup",
+          "group": "inline"
+        },
+        {
+          "command": "ibmi-member-workspace.refreshSourceFileRemote",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem == sourceFileGroup",
+          "group": "1_status@1"
+        }
+      ],
+      "ibmi-member-workspace.compareWith": [
+        {
+          "command": "ibmi-member-workspace.compareWithActive",
+          "group": "compare@1"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithSelected",
+          "when": "ibmi-member-workspace:hasCompareSelection",
+          "group": "compare@2"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithLocalFile",
+          "group": "compare@3"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithIfsFile",
+          "group": "compare@4"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithMember",
+          "group": "compare@5"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "ibmi-member-workspace.refreshAllRemote",
+          "when": "view == ibmi-member-workspace.checkoutView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ibmi-member-workspace.refreshView",
+          "when": "view == ibmi-member-workspace.checkoutView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "ibmi-member-workspace.expandAll",
+          "when": "view == ibmi-member-workspace.checkoutView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "ibmi-member-workspace.search",
+          "when": "view == ibmi-member-workspace.checkoutView && !ibmi-member-workspace:searchActive",
+          "group": "navigation@4"
+        },
+        {
+          "command": "ibmi-member-workspace.clearSearch",
+          "when": "view == ibmi-member-workspace.checkoutView && ibmi-member-workspace:searchActive",
+          "group": "navigation@4"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "IBM i Member Workspace",
+      "properties": {
+        "ibmi-member-workspace.localFolder": {
+          "type": "string",
+          "default": "",
+          "description": "Custom folder for checked-out files. Leave empty to use extension storage."
+        },
+        "ibmi-member-workspace.warnOnRedownload": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show warning when checking out a member that is already checked out."
+        },
+        "ibmi-member-workspace.autoOpenOnCheckout": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open the file in the editor after checkout."
+        },
+        "ibmi-member-workspace.allowCheckoutFromProtectedFilter": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow checking out source members from protected (read-only) filters. Off by default to prevent accidental edits to protected sources."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src",
+    "test": "npm run compile && node --test \"out/test/**/*.test.js\"",
+    "package": "vsce package",
+    "package:list": "vsce ls"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@halcyontech/vscode-ibmi-types": "^3.0.13",
+    "@types/node": "^20.19.43",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "4.0.0",
+    "eslint": "^10.11.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.70.0"
+  }
+}
