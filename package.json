@@ -2,7 +2,7 @@
   "name": "ibmi-member-workspace",
   "displayName": "IBM i Member Workspace",
   "description": "Work with IBM i source members locally, compare changes, and synchronize them safely. Works with Code for IBM i.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "vinhry",
   "author": "Vinhry",
   "license": "GPL-3.0",
@@ -60,6 +60,13 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "ibmi-member-workspace.checkoutView",
+        "contents": "Choose where checked-out member files will be stored for this workspace.\n[Choose Checkout Folder](command:ibmi-member-workspace.configureCheckoutFolder)",
+        "when": "!ibmi-member-workspace:checkoutFolderConfigured"
+      }
+    ],
     "commands": [
       {
         "command": "ibmi-member-workspace.checkoutMember",
@@ -70,6 +77,12 @@
         "command": "ibmi-member-workspace.checkoutAllMembers",
         "title": "Check Out All Members",
         "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.configureCheckoutFolder",
+        "title": "Configure Checkout Folder",
+        "category": "IBM i Member Workspace",
+        "icon": "$(folder-opened)"
       },
       {
         "command": "ibmi-member-workspace.mergeBack",
@@ -396,6 +409,11 @@
       ],
       "view/title": [
         {
+          "command": "ibmi-member-workspace.configureCheckoutFolder",
+          "when": "view == ibmi-member-workspace.checkoutView",
+          "group": "navigation@0"
+        },
+        {
           "command": "ibmi-member-workspace.refreshAllRemote",
           "when": "view == ibmi-member-workspace.checkoutView",
           "group": "navigation@1"
@@ -425,11 +443,6 @@
     "configuration": {
       "title": "IBM i Member Workspace",
       "properties": {
-        "ibmi-member-workspace.localFolder": {
-          "type": "string",
-          "default": "",
-          "description": "Custom folder for checked-out files. Leave empty to use extension storage."
-        },
         "ibmi-member-workspace.warnOnRedownload": {
           "type": "boolean",
           "default": true,

@@ -10,6 +10,7 @@ interface ExtensionManifest {
   contributes: {
     commands: Array<{ command: string }>;
     configuration: { properties: Record<string, unknown> };
+    viewsWelcome: Array<{ view: string; contents: string; when: string }>;
   };
 }
 
@@ -27,7 +28,7 @@ describe("extension manifest", () => {
 
     assert.equal(manifest.name, "ibmi-member-workspace");
     assert.equal(manifest.publisher, "vinhry");
-    assert.equal(manifest.version, "1.0.0");
+    assert.equal(manifest.version, "1.0.1");
   });
 
   it("contributes exactly the commands registered by the extension", () => {
@@ -50,6 +51,13 @@ describe("extension manifest", () => {
 
     assert.ok(commands.every((command) => command.startsWith("ibmi-member-workspace.")));
     assert.ok(settings.every((setting) => setting.startsWith("ibmi-member-workspace.")));
+    assert.ok(commands.includes("ibmi-member-workspace.configureCheckoutFolder"));
+    assert.ok(!settings.includes("ibmi-member-workspace.localFolder"));
+    assert.ok(
+      manifest.contributes.viewsWelcome.some(
+        ({ when }) => when === "!ibmi-member-workspace:checkoutFolderConfigured"
+      )
+    );
 
     const runtimeFiles = [manifestPath, ...[
       "checkoutService.ts",
@@ -61,5 +69,14 @@ describe("extension manifest", () => {
     for (const file of runtimeFiles) {
       assert.doesNotMatch(readFileSync(file, "utf8"), /ibmi-checkout/);
     }
+  });
+
+  it("does not fall back to extension-global storage for member files", () => {
+    const serviceSource = readFileSync(join(root, "src", "checkoutService.ts"), "utf8");
+
+    assert.doesNotMatch(serviceSource, /globalStorageUri/);
+    assert.doesNotMatch(serviceSource, /get<string>\("localFolder"/);
+    assert.match(serviceSource, /context\.storageUri/);
+    assert.match(serviceSource, /workspaceState\.get<string>\("checkoutRoot"\)/);
   });
 });

@@ -12,7 +12,15 @@ Bring IBM i source members into a local workspace, edit them offline, and synchr
 
 Editing source members directly through Code for IBM i saves straight to the IBM i on every keystroke-save. This extension lets you **check out a local copy**, work at your own pace, and **merge changes back** when ready — with full diff support and source date preservation. This allows AI tools to work with your source files locally.
 
-By default, local copies are stored in this extension's private storage. Set **Local Folder** if you want the files in an easier-to-open workspace location.
+Before the first checkout in each VS Code workspace, choose a visible local folder for member files. The extension never silently stores checked-out members inside its installation or private storage.
+
+## First-Time Setup
+
+1. Open a folder or `.code-workspace` file in VS Code.
+2. When prompted, select **Choose Folder**, or run **IBM i Member Workspace: Configure Checkout Folder** from the Command Palette.
+3. Select the directory that should contain checked-out members for this workspace.
+
+The folder selection and checkout index are private to the current VS Code workspace and are not written to `.vscode/settings.json`. To change the folder later, first merge or discard every tracked checkout, then run **Configure Checkout Folder** again.
 
 ## Features
 
@@ -71,15 +79,14 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `ibmi-member-workspace.localFolder` | *(empty)* | Custom folder for checked-out files. Leave empty to use extension storage. |
 | `ibmi-member-workspace.warnOnRedownload` | `true` | Show warning when checking out a member that is already checked out. |
 | `ibmi-member-workspace.autoOpenOnCheckout` | `true` | Automatically open the file in the editor after a single-member checkout. |
 | `ibmi-member-workspace.allowCheckoutFromProtectedFilter` | `false` | Allow checking out members from protected (read-only) filters. |
 
 ## Local File Structure
 
-```
-checkouts/
+```text
+<selected checkout folder>/
   myhost.company.com/
     MYLIB/
       QRPGLESRC/
@@ -160,10 +167,10 @@ IBM i Member Workspace has its own command IDs, settings, views, and extension s
 
 1. Finish or back up any local work in the original extension.
 2. Install **IBM i Member Workspace** from the Marketplace or its VSIX.
-3. Configure `ibmi-member-workspace.localFolder` if desired.
+3. Open your VS Code workspace and choose its checkout folder when prompted.
 4. Check out the members you want this extension to track.
 
-Do not configure two checkout extensions to use the same local folder. Existing files are not tracked until they are checked out with IBM i Member Workspace.
+Do not configure two checkout extensions to use the same local folder. Existing files are not tracked until they are checked out with IBM i Member Workspace, and each VS Code workspace maintains its own checkout index.
 
 ## Releases
 

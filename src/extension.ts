@@ -26,6 +26,7 @@ import {
 } from "./types";
 
 let outputChannel: vscode.OutputChannel;
+const checkoutFolderContext = "ibmi-member-workspace:checkoutFolderConfigured";
 
 export async function activate(
   context: vscode.ExtensionContext
@@ -36,6 +37,7 @@ export async function activate(
   const service = new CheckoutService(context, outputChannel);
   context.subscriptions.push(service);
   await service.initialize();
+  await updateCheckoutFolderContext(service);
 
   const treeProvider = new CheckoutTreeProvider(service);
   context.subscriptions.push(treeProvider);
@@ -51,6 +53,9 @@ export async function activate(
   onConnectionChange(context, () => treeProvider.refresh());
 
   registerCommands(context, service, treeProvider, mergeHandler, treeView);
+  void offerCheckoutFolderSetup(context, service).catch((err) => {
+    outputChannel.appendLine(`[setup] Could not show checkout folder setup: ${errorMessage(err)}`);
+  });
 }
 
 function resolveMemberSelections(
@@ -72,8 +77,21 @@ function registerCommands(
 ): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(
+      "ibmi-member-workspace.configureCheckoutFolder",
+      async () => {
+        await configureCheckoutFolder(context, service);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
       "ibmi-member-workspace.checkoutMember",
       async (node: BrowserNode, allSelections?: BrowserNode[]) => {
+        if (!(await ensureCheckoutFolder(context, service))) {
+          return;
+        }
+
         const selections = allSelections && allSelections.length > 1 ? allSelections : [node];
         const isBatch = selections.length > 1;
 
@@ -133,6 +151,10 @@ function registerCommands(
     vscode.commands.registerCommand(
       "ibmi-member-workspace.checkoutAllMembers",
       async (node: BrowserNode) => {
+        if (!(await ensureCheckoutFolder(context, service))) {
+          return;
+        }
+
         const sourceFileInfo = sourceFileInfoOf(node);
         if (!sourceFileInfo) {
           outputChannel.appendLine(
@@ -912,6 +934,139 @@ function registerCommands(
       updateSearchState();
     })
   );
+}
+
+function hasOpenWorkspace(context: vscode.ExtensionContext): boolean {
+  return Boolean(context.storageUri && vscode.workspace.workspaceFolders?.length);
+}
+
+async function updateCheckoutFolderContext(service: CheckoutService): Promise<void> {
+  await vscode.commands.executeCommand(
+    "setContext",
+    checkoutFolderContext,
+    Boolean(service.getCheckoutRoot())
+  );
+}
+
+async function promptToOpenWorkspace(modal: boolean): Promise<void> {
+  const choice = await vscode.window.showInformationMessage(
+    "Open a folder or workspace before configuring IBM i member checkouts.",
+    { modal },
+    "Open Folder"
+  );
+  if (choice === "Open Folder") {
+    await vscode.commands.executeCommand("workbench.action.files.openFolder");
+  }
+}
+
+async function configureCheckoutFolder(
+  context: vscode.ExtensionContext,
+  service: CheckoutService
+): Promise<boolean> {
+  if (!hasOpenWorkspace(context)) {
+    await promptToOpenWorkspace(true);
+    return false;
+  }
+
+  const currentRoot = service.getCheckoutRoot();
+  if (currentRoot && service.hasEntries()) {
+    vscode.window.showWarningMessage(
+      `The checkout folder cannot be changed while members are tracked. Merge or discard all checkouts first. Current folder: ${currentRoot.fsPath}`
+    );
+    return false;
+  }
+
+  const picks = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    defaultUri: currentRoot ?? vscode.workspace.workspaceFolders?.[0]?.uri,
+    openLabel: "Use as Checkout Folder",
+    title: "Choose a checkout folder for this workspace",
+  });
+  const selected = picks?.[0];
+  if (!selected) {
+    return false;
+  }
+
+  try {
+    await service.setCheckoutRoot(selected);
+    await updateCheckoutFolderContext(service);
+    vscode.window.showInformationMessage(
+      `Checkout folder configured for this workspace: ${selected.fsPath}`
+    );
+    return true;
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `Could not use ${selected.fsPath} as the checkout folder: ${errorMessage(err)}`
+    );
+    return false;
+  }
+}
+
+async function ensureCheckoutFolder(
+  context: vscode.ExtensionContext,
+  service: CheckoutService
+): Promise<boolean> {
+  if (!hasOpenWorkspace(context)) {
+    await promptToOpenWorkspace(true);
+    return false;
+  }
+
+  if (!service.getCheckoutRoot()) {
+    const choice = await vscode.window.showWarningMessage(
+      "Choose where checked-out member files will be stored before continuing.",
+      {
+        modal: true,
+        detail: "No member will be downloaded until a checkout folder is selected for this workspace.",
+      },
+      "Choose Folder"
+    );
+    if (choice !== "Choose Folder") {
+      return false;
+    }
+    return configureCheckoutFolder(context, service);
+  }
+
+  try {
+    await service.validateCheckoutRoot();
+    return true;
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `The configured checkout folder is not accessible: ${errorMessage(err)}`
+    );
+    return false;
+  }
+}
+
+async function offerCheckoutFolderSetup(
+  context: vscode.ExtensionContext,
+  service: CheckoutService
+): Promise<void> {
+  if (service.getCheckoutRoot()) {
+    return;
+  }
+
+  if (!hasOpenWorkspace(context)) {
+    const choice = await vscode.window.showInformationMessage(
+      "IBM i Member Workspace requires an open folder or workspace before members can be checked out.",
+      "Open Folder",
+      "Later"
+    );
+    if (choice === "Open Folder") {
+      await vscode.commands.executeCommand("workbench.action.files.openFolder");
+    }
+    return;
+  }
+
+  const choice = await vscode.window.showInformationMessage(
+    "Choose a local folder for IBM i member checkouts in this workspace.",
+    "Choose Folder",
+    "Later"
+  );
+  if (choice === "Choose Folder") {
+    await configureCheckoutFolder(context, service);
+  }
 }
 
 async function checkoutMembersBatch(

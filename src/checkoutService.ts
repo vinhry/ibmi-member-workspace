@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { randomUUID } from "node:crypto";
 import {
   CheckedOutMember,
   CheckoutIndex,
@@ -24,10 +25,9 @@ type RefreshProgress = vscode.Progress<{ message?: string; increment?: number }>
 
 export class CheckoutService implements vscode.Disposable {
   private index: CheckoutIndex = { version: 1, entries: [] };
-  private storageUri: vscode.Uri;
-  private checkoutsUri: vscode.Uri;
-  private indexUri: vscode.Uri;
-  private indexTempUri: vscode.Uri;
+  private readonly storageUri: vscode.Uri | undefined;
+  private readonly indexUri: vscode.Uri | undefined;
+  private readonly indexTempUri: vscode.Uri | undefined;
 
   private batchDepth = 0;
   private dirty = false;
@@ -40,18 +40,21 @@ export class CheckoutService implements vscode.Disposable {
     private readonly context: vscode.ExtensionContext,
     private readonly log: vscode.OutputChannel
   ) {
-    this.storageUri = context.globalStorageUri;
-    this.checkoutsUri = vscode.Uri.joinPath(this.storageUri, "checkouts");
-    this.indexUri = vscode.Uri.joinPath(this.storageUri, "checkout-index.json");
-    this.indexTempUri = vscode.Uri.joinPath(this.storageUri, "checkout-index.json.tmp");
+    this.storageUri = context.storageUri;
+    this.indexUri = this.storageUri
+      ? vscode.Uri.joinPath(this.storageUri, "checkout-index.json")
+      : undefined;
+    this.indexTempUri = this.storageUri
+      ? vscode.Uri.joinPath(this.storageUri, "checkout-index.json.tmp")
+      : undefined;
   }
 
   async initialize(): Promise<void> {
-    try {
-      await vscode.workspace.fs.createDirectory(this.checkoutsUri);
-    } catch {
-      // already exists
+    if (!this.storageUri) {
+      this.index = { version: 1, entries: [] };
+      return;
     }
+    await vscode.workspace.fs.createDirectory(this.storageUri);
     await this.loadIndex();
   }
 
@@ -81,6 +84,39 @@ export class CheckoutService implements vscode.Disposable {
     );
   }
 
+  hasEntries(): boolean {
+    return this.index.entries.length > 0;
+  }
+
+  getCheckoutRoot(): vscode.Uri | undefined {
+    const folder = this.context.workspaceState.get<string>("checkoutRoot");
+    return folder ? vscode.Uri.file(folder) : undefined;
+  }
+
+  async setCheckoutRoot(folder: vscode.Uri): Promise<void> {
+    await this.assertWritableFolder(folder);
+    await this.context.workspaceState.update("checkoutRoot", folder.fsPath);
+  }
+
+  async validateCheckoutRoot(): Promise<vscode.Uri> {
+    const root = this.getCheckoutRoot();
+    if (!root) {
+      throw new Error("Choose a checkout folder before checking out members.");
+    }
+    await this.assertWritableFolder(root);
+    return root;
+  }
+
+  private async assertWritableFolder(folder: vscode.Uri): Promise<void> {
+    await vscode.workspace.fs.createDirectory(folder);
+    const probe = vscode.Uri.joinPath(
+      folder,
+      `.ibmi-member-workspace-write-test-${randomUUID()}`
+    );
+    await vscode.workspace.fs.writeFile(probe, new Uint8Array());
+    await vscode.workspace.fs.delete(probe);
+  }
+
   findEntry(
     system: string,
     library: string,
@@ -99,6 +135,10 @@ export class CheckoutService implements vscode.Disposable {
     options?: { redownloadBehavior?: "ask" | "skip" | "force"; suppressAutoOpen?: boolean }
   ): Promise<CheckedOutMember> {
     const { redownloadBehavior = "ask", suppressAutoOpen = false } = options ?? {};
+    const checkoutRoot = this.getCheckoutRoot();
+    if (!checkoutRoot) {
+      throw new Error("Choose a checkout folder before checking out members.");
+    }
 
     const system = getSystemName();
     if (!system) {
@@ -158,7 +198,7 @@ export class CheckoutService implements vscode.Disposable {
       status: "checked-out",
     };
 
-    const localPath = await this.getLocalPath(entry);
+    const localPath = existing?.localPath ?? await this.getLocalPath(checkoutRoot, entry);
     entry.localPath = localPath;
 
     const hash = this.hash(content, vscode.Uri.file(localPath));
@@ -403,35 +443,30 @@ export class CheckoutService implements vscode.Disposable {
     return Buffer.from(await vscode.workspace.fs.readFile(localUri)).toString("utf-8");
   }
 
-  private async getLocalPath(entry: CheckedOutMember): Promise<string> {
-    const config = vscode.workspace.getConfiguration("ibmi-member-workspace");
-    const customFolder = config.get<string>("localFolder", "");
+  private async getLocalPath(
+    checkoutRoot: vscode.Uri,
+    entry: CheckedOutMember
+  ): Promise<string> {
     const systemFolder = sanitizeSystemName(entry.system);
     const fileName = buildLocalFileName(entry);
+    const baseDir = vscode.Uri.joinPath(
+      checkoutRoot,
+      systemFolder,
+      entry.library,
+      entry.sourceFile
+    );
 
-    let baseDir: vscode.Uri;
-    if (customFolder) {
-      baseDir = vscode.Uri.joinPath(
-        vscode.Uri.file(customFolder),
-        systemFolder, entry.library, entry.sourceFile
-      );
-    } else {
-      baseDir = vscode.Uri.joinPath(
-        this.checkoutsUri,
-        systemFolder, entry.library, entry.sourceFile
-      );
-    }
-
-    try {
-      await vscode.workspace.fs.createDirectory(baseDir);
-    } catch {
-      // already exists
-    }
+    await vscode.workspace.fs.createDirectory(baseDir);
 
     return vscode.Uri.joinPath(baseDir, fileName).fsPath;
   }
 
   private async loadIndex(): Promise<void> {
+    if (!this.storageUri || !this.indexUri) {
+      this.index = { version: 1, entries: [] };
+      return;
+    }
+
     let data: Uint8Array;
     try {
       data = await vscode.workspace.fs.readFile(this.indexUri);
@@ -474,10 +509,15 @@ export class CheckoutService implements vscode.Disposable {
   /** Writes the index atomically (temp file + rename), one write at a time. */
   private saveIndex(): Promise<void> {
     this.dirty = false;
+    if (!this.indexUri || !this.indexTempUri) {
+      return Promise.reject(new Error("Open a folder or workspace before saving checkouts."));
+    }
+    const indexUri = this.indexUri;
+    const indexTempUri = this.indexTempUri;
     const data = Buffer.from(JSON.stringify(this.index, null, 2), "utf-8");
     const write = async () => {
-      await vscode.workspace.fs.writeFile(this.indexTempUri, data);
-      await vscode.workspace.fs.rename(this.indexTempUri, this.indexUri, { overwrite: true });
+      await vscode.workspace.fs.writeFile(indexTempUri, data);
+      await vscode.workspace.fs.rename(indexTempUri, indexUri, { overwrite: true });
     };
     const result = this.saveQueue.then(write);
     this.saveQueue = result.catch(() => undefined);

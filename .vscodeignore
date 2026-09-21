@@ -1,6 +1,7 @@
 .vscode/**
 .vscode-test/**
 .claude/**
+temp/**
 src/**
 .gitignore
 tsconfig.json

@@ -1,5 +1,12 @@
 # Change Log
 
+## 1.0.1 - 2026-09-21
+
+- Require a visible, user-selected checkout folder before downloading any member.
+- Store the selected folder and checkout index per VS Code workspace without changing project settings.
+- Add first-run guidance and a **Configure Checkout Folder** command.
+- Require an open folder or workspace for checkout operations.
+
 # 1.0.0 - IBM i Member Workspace
 
 - First release under the independent **IBM i Member Workspace** product identity.
