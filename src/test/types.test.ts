@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseCheckoutIndex, sanitizeSystemName } from "../types";
+import { CheckedOutMember, buildCheckoutId, parseCheckoutIndex, sanitizeSystemName } from "../types";
 
 describe("parseCheckoutIndex", () => {
   it("parses a valid index", () => {
@@ -75,5 +75,58 @@ describe("sanitizeSystemName", () => {
     assert.equal(sanitizeSystemName("."), "_");
     assert.equal(sanitizeSystemName(".."), "_");
     assert.equal(sanitizeSystemName("host/name"), "host_name");
+  });
+});
+
+describe("buildCheckoutId", () => {
+  it("does not collide for names containing underscores", () => {
+    assert.notEqual(
+      buildCheckoutId("SYS", "MY_LIB", "SRC", "X"),
+      buildCheckoutId("SYS", "MY", "LIB_SRC", "X")
+    );
+  });
+
+  it("is case-insensitive", () => {
+    assert.equal(buildCheckoutId("sys", "lib", "src", "x"), buildCheckoutId("SYS", "LIB", "SRC", "X"));
+  });
+});
+
+describe("parseCheckoutIndex id migration", () => {
+  const legacy: CheckedOutMember = {
+    id: "SYS_MYLIB_QRPGLESRC_PROG",
+    system: "SYS",
+    library: "MYLIB",
+    sourceFile: "QRPGLESRC",
+    memberName: "PROG",
+    extension: "rpgle",
+    localPath: "/tmp/PROG.RPGLE",
+    checkedOutAt: "2026-01-01T00:00:00.000Z",
+    remoteHashAtCheckout: "abc",
+    status: "checked-out",
+  };
+  const currentId = buildCheckoutId("SYS", "MYLIB", "QRPGLESRC", "PROG");
+
+  it("rewrites legacy underscore-joined ids when migrating a version 1 index", () => {
+    const index = parseCheckoutIndex(JSON.stringify({ version: 1, entries: [legacy] }));
+    const [entry] = index.systems.SYS.workItems.workspace;
+    assert.equal(entry.id, currentId);
+    assert.equal(entry.localPath, legacy.localPath);
+  });
+
+  it("rewrites legacy ids in every work item of a version 3 index", () => {
+    const index = parseCheckoutIndex(JSON.stringify({
+      version: 3,
+      systems: {
+        SYS: {
+          system: "SYS",
+          directory: "SYS",
+          activeWorkItem: "A",
+          workItems: { A: [legacy], B: [legacy] },
+        },
+      },
+      unassignedWorkItems: {},
+    }));
+    assert.equal(index.systems.SYS.workItems.A[0].id, currentId);
+    assert.equal(index.systems.SYS.workItems.B[0].id, currentId);
   });
 });

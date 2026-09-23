@@ -170,6 +170,7 @@ export class CheckoutTreeProvider
       `${library}/${sourceFile}`,
       collapsibleState
     );
+    item.id = `sourceFile:${library}/${sourceFile}`;
     item.contextValue = "sourceFileGroup";
     item.iconPath = new vscode.ThemeIcon("folder-library");
     return item;
@@ -181,6 +182,8 @@ export class CheckoutTreeProvider
       vscode.TreeItemCollapsibleState.None
     );
 
+    item.id = `member:${entry.id}`;
+    item.resourceUri = vscode.Uri.file(entry.localPath);
     item.description = this.getStatusDescription(entry);
     item.tooltip = this.getTooltip(entry);
     item.iconPath = this.getStatusIcon(entry);

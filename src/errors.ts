@@ -6,6 +6,14 @@ export class CheckoutCancelledError extends Error {
   }
 }
 
+/** Thrown when a checkout's local file no longer exists on disk. */
+export class LocalFileMissingError extends Error {
+  constructor(readonly localPath: string) {
+    super(`Local file not found: ${localPath}`);
+    this.name = "LocalFileMissingError";
+  }
+}
+
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

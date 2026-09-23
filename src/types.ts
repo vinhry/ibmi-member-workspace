@@ -48,6 +48,10 @@ export function emptyTally(): RefreshTally {
 
 /** Parses the persisted checkout index and upgrades older formats to per-system storage. */
 export function parseCheckoutIndex(json: string): CheckoutIndex {
+  return withCurrentIds(parseIndexStructure(json));
+}
+
+function parseIndexStructure(json: string): CheckoutIndex {
   const parsed: unknown = JSON.parse(json);
   if (typeof parsed !== "object" || parsed === null) {
     throw new Error("Checkout index is not an object");
@@ -81,6 +85,27 @@ export function parseCheckoutIndex(json: string): CheckoutIndex {
     throw new Error("Checkout index is missing its entries list");
   }
   return migrateWorkItems("workspace", { workspace: value.entries });
+}
+
+/** Recomputes ids so entries written with the older "_"-joined format keep matching. */
+function withCurrentIds(index: CheckoutIndex): CheckoutIndex {
+  const reid = (entries: CheckedOutMember[]) =>
+    entries.map((e) => ({
+      ...e,
+      id: buildCheckoutId(e.system, e.library, e.sourceFile, e.memberName),
+    }));
+  const mapValues = (items: Record<string, CheckedOutMember[]>) =>
+    Object.fromEntries(Object.entries(items).map(([name, entries]) => [name, reid(entries)]));
+  return {
+    version: 3,
+    systems: Object.fromEntries(
+      Object.entries(index.systems).map(([key, state]) => [
+        key,
+        { ...state, workItems: mapValues(state.workItems) },
+      ])
+    ),
+    unassignedWorkItems: mapValues(index.unassignedWorkItems),
+  };
 }
 
 function migrateWorkItems(
@@ -133,7 +158,8 @@ export function buildCheckoutId(
   sourceFile: string,
   memberName: string
 ): string {
-  return `${system}_${library}_${sourceFile}_${memberName}`.toUpperCase();
+  // "/" cannot appear in IBM i object names, so ids of different members never collide.
+  return `${system}/${library}/${sourceFile}/${memberName}`.toUpperCase();
 }
 
 export function buildLocalFileName(entry: CheckedOutMember): string {

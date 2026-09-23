@@ -20,8 +20,14 @@ import {
   uploadMemberContent,
   getSystemName,
 } from "./codeForIBMi";
-import { CheckoutCancelledError, errorMessage } from "./errors";
-import { RemoteStatus, classifyStatus, hashContent } from "./sync";
+import { CheckoutCancelledError, LocalFileMissingError, errorMessage } from "./errors";
+import {
+  RemoteStatus,
+  classifyStatus,
+  hashContent,
+  nextBaseline,
+  statusAfterLocalSave,
+} from "./sync";
 import {
   GitOperationResult,
   GitService,
@@ -429,7 +435,12 @@ export class CheckoutService implements vscode.Disposable {
     } finally {
       this.batchDepth--;
       if (this.batchDepth === 0 && this.dirty) {
-        await this.saveIndex();
+        try {
+          await this.saveIndex();
+        } catch (err) {
+          this.log.appendLine(`[index] Could not save checkout index: ${errorMessage(err)}`);
+          vscode.window.showErrorMessage(`Could not save the checkout index: ${errorMessage(err)}`);
+        }
       }
     }
   }
@@ -494,9 +505,18 @@ export class CheckoutService implements vscode.Disposable {
     sourceFile: string,
     memberName: string,
     memberExtension: string,
-    options?: { redownloadBehavior?: "ask" | "skip" | "force"; suppressAutoOpen?: boolean }
+    options?: {
+      redownloadBehavior?: "ask" | "skip" | "force";
+      suppressAutoOpen?: boolean;
+      /** With "force": overwrite local edits not yet sent to the IBM i instead of skipping the member. */
+      discardLocalChanges?: boolean;
+    }
   ): Promise<CheckedOutMember> {
-    const { redownloadBehavior = "ask", suppressAutoOpen = false } = options ?? {};
+    const {
+      redownloadBehavior = "ask",
+      suppressAutoOpen = false,
+      discardLocalChanges = false,
+    } = options ?? {};
     const checkoutRoot = this.getCheckoutRoot();
     if (!checkoutRoot) {
       throw new Error("Choose a checkout folder before checking out members.");
@@ -541,8 +561,24 @@ export class CheckoutService implements vscode.Disposable {
             throw new CheckoutCancelledError();
           }
         }
+
+        if (await this.hasLocalChanges(existing)) {
+          const confirm = await vscode.window.showWarningMessage(
+            `${formatMemberPath(existing)} has local changes that have not been sent to the IBM i.`,
+            { modal: true, detail: "Re-downloading will discard them." },
+            "Discard Local Changes"
+          );
+          if (confirm !== "Discard Local Changes") {
+            throw new CheckoutCancelledError();
+          }
+        }
+      } else if (!discardLocalChanges && (await this.hasLocalChanges(existing))) {
+        this.log.appendLine(
+          `[checkout] Skipped ${formatMemberPath(existing)}: local changes not yet sent to the IBM i`
+        );
+        return existing;
       }
-      // redownloadBehavior === "force" falls through to re-download below
+      // Otherwise re-download below
     }
 
     const content = await downloadMemberContent(
@@ -629,6 +665,7 @@ export class CheckoutService implements vscode.Disposable {
     const localHash = this.hash(await this.readLocal(localUri), localUri);
 
     const status = classifyStatus(localHash, remoteHash, entry.remoteHashAtCheckout);
+    entry.remoteHashAtCheckout = nextBaseline(localHash, remoteHash, entry.remoteHashAtCheckout);
 
     this.log.appendLine(
       `[refresh] ${entry.library}/${entry.sourceFile}/${entry.memberName}` +
@@ -652,10 +689,12 @@ export class CheckoutService implements vscode.Disposable {
       entry.sourceFile,
       entry.memberName
     );
-    const hash = this.hash(content, vscode.Uri.file(entry.localPath));
+    const localUri = vscode.Uri.file(entry.localPath);
+    const hash = this.hash(content, localUri);
 
+    await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(localUri, ".."));
     await vscode.workspace.fs.writeFile(
-      vscode.Uri.file(entry.localPath),
+      localUri,
       Buffer.from(content, "utf-8")
     );
 
@@ -692,7 +731,8 @@ export class CheckoutService implements vscode.Disposable {
         entry.memberName
       );
       const remoteHash = this.hash(remoteContent, localUri);
-      if (remoteHash !== entry.remoteHashAtCheckout && remoteHash !== localHash) {
+      entry.remoteHashAtCheckout = nextBaseline(localHash, remoteHash, entry.remoteHashAtCheckout);
+      if (remoteHash !== entry.remoteHashAtCheckout) {
         this.log.appendLine(
           `[upload] ${formatMemberPath(entry)} changed on the remote since checkout — not uploaded`
         );
@@ -797,9 +837,12 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   async discardCheckout(entry: CheckedOutMember): Promise<void> {
+    const detail = (await this.hasLocalChanges(entry))
+      ? "This member has local changes that have not been sent to the IBM i. They will be lost."
+      : "Make sure you've already merged any changes back to the IBM i.";
     const choice = await vscode.window.showWarningMessage(
       `Delete ${formatMemberPath(entry)} and remove from checkouts?`,
-      { detail: "Make sure you've already merged any changes back to the IBM i.", modal: true },
+      { detail, modal: true },
       "Delete"
     );
 
@@ -831,8 +874,44 @@ export class CheckoutService implements vscode.Disposable {
     ) : { status: "noChanges" as const };
     this.logGitFailure(result);
 
+    await this.forgetEntries(entries);
+  }
+
+  /** Whether the local copy differs from the baseline. A missing local file has nothing to lose. */
+  async hasLocalChanges(entry: CheckedOutMember): Promise<boolean> {
+    const localUri = vscode.Uri.file(entry.localPath);
+    try {
+      return this.hash(await this.readLocal(localUri), localUri) !== entry.remoteHashAtCheckout;
+    } catch (err) {
+      if (err instanceof LocalFileMissingError) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  findEntryById(id: string): CheckedOutMember | undefined {
+    return this.entries.find((e) => e.id === id);
+  }
+
+  findEntryByLocalPath(localPath: string): CheckedOutMember | undefined {
+    const target = vscode.Uri.file(localPath).fsPath;
+    return this.entries.find((e) => vscode.Uri.file(e.localPath).fsPath === target);
+  }
+
+  /** Updates a checkout's status after its local file is saved, without contacting the IBM i. */
+  async updateStatusAfterLocalSave(entry: CheckedOutMember): Promise<void> {
+    const status = statusAfterLocalSave(entry.status, await this.hasLocalChanges(entry));
+    if (status !== entry.status) {
+      entry.status = status;
+      await this.persist();
+    }
+  }
+
+  /** Removes checkouts from their system's active work item without touching their local files. */
+  async forgetEntries(entries: CheckedOutMember[]): Promise<void> {
     const ids = new Set(entries.map((e) => e.id));
-    if (system) {
+    for (const system of new Set(entries.map((e) => e.system))) {
       const state = this.ensureSystemState(system);
       state.workItems[state.activeWorkItem] = (state.workItems[state.activeWorkItem] ?? [])
         .filter((entry) => !ids.has(entry.id));
@@ -848,7 +927,14 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   private async readLocal(localUri: vscode.Uri): Promise<string> {
-    return Buffer.from(await vscode.workspace.fs.readFile(localUri)).toString("utf-8");
+    try {
+      return Buffer.from(await vscode.workspace.fs.readFile(localUri)).toString("utf-8");
+    } catch (err) {
+      if (err instanceof vscode.FileSystemError && err.code === "FileNotFound") {
+        throw new LocalFileMissingError(localUri.fsPath);
+      }
+      throw err;
+    }
   }
 
   private logGitFailure(result: GitOperationResult): void {
@@ -1008,6 +1094,9 @@ export class CheckoutService implements vscode.Disposable {
       await vscode.workspace.fs.rename(indexTempUri, indexUri, { overwrite: true });
     };
     const result = this.saveQueue.then(write);
+    result.catch(() => {
+      this.dirty = true;
+    });
     this.saveQueue = result.catch(() => undefined);
     return result;
   }

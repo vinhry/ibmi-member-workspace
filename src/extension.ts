@@ -10,7 +10,7 @@ import {
   memberUri,
   onConnectionChange,
 } from "./codeForIBMi";
-import { CheckoutCancelledError, errorMessage } from "./errors";
+import { CheckoutCancelledError, LocalFileMissingError, errorMessage } from "./errors";
 import {
   BrowserNode,
   MemberInfo,
@@ -116,6 +116,18 @@ export async function activate(
   const pendingMergeBacks = new Map<string, CheckedOutMember>();
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (doc) => {
+      if (doc.uri.scheme === "file") {
+        const saved = service.findEntryByLocalPath(doc.uri.fsPath);
+        if (!saved) {
+          return;
+        }
+        try {
+          await service.updateStatusAfterLocalSave(saved);
+        } catch (err) {
+          outputChannel.appendLine(`[status] Could not update ${formatMemberPath(saved)}: ${errorMessage(err)}`);
+        }
+        return;
+      }
       const entry = pendingMergeBacks.get(mergeDocumentKey(doc.uri));
       if (!entry) {
         return;
@@ -440,6 +452,9 @@ function registerCommands(
           if (confirm !== "Upload") {
             return;
           }
+          if (!(await saveDirtyLocalFiles([entry]))) {
+            return;
+          }
 
           try {
             let result = await service.uploadToRemote(entry);
@@ -486,6 +501,9 @@ function registerCommands(
           "Upload All"
         );
         if (confirm !== "Upload All") {
+          return;
+        }
+        if (!(await saveDirtyLocalFiles(selections.map((s) => s.entry)))) {
           return;
         }
 
@@ -563,6 +581,9 @@ function registerCommands(
           vscode.window.showInformationMessage("No checkouts to refresh.");
           return;
         }
+        if (!(await saveDirtyLocalFiles(entries))) {
+          return;
+        }
 
         await vscode.window.withProgress(
           {
@@ -584,6 +605,12 @@ function registerCommands(
       "ibmi-member-workspace.refreshSourceFileRemote",
       async (item: TreeItemType) => {
         if (item?.kind !== "sourceFile") {
+          return;
+        }
+        const groupEntries = service
+          .getEntriesForSystem(item.system)
+          .filter((e) => e.library === item.library && e.sourceFile === item.sourceFile);
+        if (!(await saveDirtyLocalFiles(groupEntries))) {
           return;
         }
         await vscode.window.withProgress(
@@ -651,6 +678,10 @@ function registerCommands(
           return;
         }
 
+        if (!(await saveDirtyLocalFiles(selections.map((s) => s.entry)))) {
+          return;
+        }
+
         if (selections.length === 1) {
           const entry = selections[0].entry;
           try {
@@ -700,9 +731,13 @@ function registerCommands(
               }
             }
           } catch (err) {
-            vscode.window.showErrorMessage(
-              `Refresh failed: ${errorMessage(err)}`
-            );
+            if (err instanceof LocalFileMissingError) {
+              await handleMissingLocalFile(service, entry);
+            } else {
+              vscode.window.showErrorMessage(
+                `Refresh failed: ${errorMessage(err)}`
+              );
+            }
           }
           return;
         }
@@ -754,11 +789,14 @@ function registerCommands(
           return;
         }
 
+        const withLocalChanges = await countLocalChanges(service, entries);
         const confirm = await vscode.window.showWarningMessage(
           `Delete ${entries.length} checked-out members and remove them from checkouts?`,
           {
             modal: true,
-            detail: "Make sure you've already merged any changes back to the IBM i.",
+            detail: withLocalChanges > 0
+              ? `${withLocalChanges} of them have local changes that have not been sent to the IBM i. Those changes will be lost.`
+              : "Make sure you've already merged any changes back to the IBM i.",
           },
           "Delete"
         );
@@ -777,7 +815,14 @@ function registerCommands(
     )
   );
 
-  let selectedForCompare: CheckedOutMember | undefined;
+  let selectedForCompareId: string | undefined;
+  const clearCompareSelectionIfGone = () => {
+    if (selectedForCompareId && !service.findEntryById(selectedForCompareId)) {
+      selectedForCompareId = undefined;
+      void vscode.commands.executeCommand("setContext", "ibmi-member-workspace:hasCompareSelection", false);
+    }
+  };
+  context.subscriptions.push(service.onDidChange(clearCompareSelectionIfGone));
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
@@ -801,7 +846,7 @@ function registerCommands(
         if (item?.kind !== "member") {
           return;
         }
-        selectedForCompare = item.entry;
+        selectedForCompareId = item.entry.id;
         await vscode.commands.executeCommand("setContext", "ibmi-member-workspace:hasCompareSelection", true);
         treeProvider.refresh();
         vscode.window.setStatusBarMessage(
@@ -839,6 +884,9 @@ function registerCommands(
     vscode.commands.registerCommand(
       "ibmi-member-workspace.compareWithSelected",
       async (item: TreeItemType) => {
+        const selectedForCompare = selectedForCompareId
+          ? service.findEntryById(selectedForCompareId)
+          : undefined;
         if (item?.kind !== "member" || !selectedForCompare) {
           return;
         }
@@ -925,11 +973,11 @@ function registerCommands(
           return;
         }
         const parts = input.trim().toUpperCase().split("/");
-        let memberUri: vscode.Uri;
+        let otherMemberUri: vscode.Uri;
         if (parts.length === 3) {
-          memberUri = vscode.Uri.from({ scheme: "member", path: `/${parts[0]}/${parts[1]}/${parts[2]}` });
+          otherMemberUri = vscode.Uri.from({ scheme: "member", path: `/${parts[0]}/${parts[1]}/${parts[2]}` });
         } else if (parts.length === 4) {
-          memberUri = vscode.Uri.from({ scheme: "member", path: `/${parts[0]}/${parts[1]}/${parts[2]}/${parts[3]}` });
+          otherMemberUri = vscode.Uri.from({ scheme: "member", path: `/${parts[0]}/${parts[1]}/${parts[2]}/${parts[3]}` });
         } else {
           vscode.window.showErrorMessage("Invalid member path. Use format: LIBRARY/FILE/NAME.EXT");
           return;
@@ -938,7 +986,7 @@ function registerCommands(
         await vscode.commands.executeCommand(
           "vscode.diff",
           localUri,
-          memberUri,
+          otherMemberUri,
           `${buildLocalFileName(entry)} ↔ Member`
         );
       }
@@ -1503,6 +1551,80 @@ async function offerCheckoutFolderSetup(
   }
 }
 
+/**
+ * Offers to save open editors with unsaved edits to the given checkouts, so
+ * operations that read the local file see what the user sees. Returns false if
+ * the user cancels.
+ */
+async function saveDirtyLocalFiles(entries: CheckedOutMember[]): Promise<boolean> {
+  const paths = new Set(entries.map((e) => vscode.Uri.file(e.localPath).fsPath));
+  const dirty = vscode.workspace.textDocuments.filter(
+    (doc) => doc.isDirty && doc.uri.scheme === "file" && paths.has(doc.uri.fsPath)
+  );
+  if (dirty.length === 0) {
+    return true;
+  }
+
+  const choice = await vscode.window.showWarningMessage(
+    dirty.length === 1
+      ? `${vscode.workspace.asRelativePath(dirty[0].uri)} has unsaved changes.`
+      : `${dirty.length} checked-out files have unsaved changes.`,
+    { modal: true, detail: "Save them before continuing so the IBM i is compared with your latest edits." },
+    "Save and Continue"
+  );
+  if (choice !== "Save and Continue") {
+    return false;
+  }
+
+  for (const doc of dirty) {
+    if (!(await doc.save())) {
+      vscode.window.showErrorMessage(`Could not save ${doc.uri.fsPath}.`);
+      return false;
+    }
+  }
+  return true;
+}
+
+async function countLocalChanges(
+  service: CheckoutService,
+  entries: CheckedOutMember[]
+): Promise<number> {
+  let count = 0;
+  for (const entry of entries) {
+    try {
+      if (await service.hasLocalChanges(entry)) {
+        count++;
+      }
+    } catch (err) {
+      outputChannel.appendLine(`[status] Could not read ${entry.localPath}: ${errorMessage(err)}`);
+    }
+  }
+  return count;
+}
+
+async function handleMissingLocalFile(
+  service: CheckoutService,
+  entry: CheckedOutMember
+): Promise<void> {
+  const memberPath = formatMemberPath(entry);
+  const choice = await vscode.window.showWarningMessage(
+    `The local copy of ${memberPath} no longer exists.`,
+    { detail: entry.localPath },
+    "Re-checkout",
+    "Remove from Checkouts"
+  );
+  try {
+    if (choice === "Re-checkout") {
+      await service.recheckout(entry);
+      vscode.window.showInformationMessage(`Re-checked out ${memberPath} from IBM i.`);
+    } else if (choice === "Remove from Checkouts") {
+      await service.forgetEntries([entry]);
+    }
+  } catch (err) {
+    vscode.window.showErrorMessage(`${choice} failed: ${errorMessage(err)}`);
+  }
+}
+
 async function checkoutMembersBatch(
   service: CheckoutService,
   system: string,
@@ -1514,6 +1636,7 @@ async function checkoutMembersBatch(
   );
 
   let redownloadBehavior: "skip" | "force" = "force";
+  let discardLocalChanges = false;
   if (alreadyCheckedOut.length > 0) {
     const choice = await vscode.window.showWarningMessage(
       `${alreadyCheckedOut.length} of ${memberInfoList.length} selected member(s) are already checked out. What would you like to do?`,
@@ -1525,6 +1648,28 @@ async function checkoutMembersBatch(
       return;
     }
     redownloadBehavior = choice === "Re-download All" ? "force" : "skip";
+
+    if (redownloadBehavior === "force") {
+      const existingEntries = alreadyCheckedOut
+        .map((m) => service.findEntry(system, m.library, m.sourceFile, m.memberName))
+        .filter((e): e is CheckedOutMember => e !== undefined);
+      if (!(await saveDirtyLocalFiles(existingEntries))) {
+        return;
+      }
+      const withLocalChanges = await countLocalChanges(service, existingEntries);
+      if (withLocalChanges > 0) {
+        const discard = await vscode.window.showWarningMessage(
+          `${withLocalChanges} of the already checked-out member(s) have local changes that have not been sent to the IBM i.`,
+          { modal: true, detail: "Discarding re-downloads them and loses those changes. Keeping skips them." },
+          "Discard Local Changes",
+          "Keep Local Changes"
+        );
+        if (!discard) {
+          return;
+        }
+        discardLocalChanges = discard === "Discard Local Changes";
+      }
+    }
   }
 
   await vscode.window.withProgress(
@@ -1545,7 +1690,7 @@ async function checkoutMembersBatch(
           try {
             await service.checkoutMember(
               m.library, m.sourceFile, m.memberName, m.extension,
-              { redownloadBehavior, suppressAutoOpen: true }
+              { redownloadBehavior, suppressAutoOpen: true, discardLocalChanges }
             );
             succeeded++;
           } catch (err) {

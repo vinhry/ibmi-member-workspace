@@ -56,7 +56,8 @@
         {
           "id": "ibmi-member-workspace.checkoutView",
           "name": "Checked Out Members",
-          "when": "code-for-ibmi:connected"
+          "when": "code-for-ibmi:connected",
+          "icon": "resources/checkout.svg"
         }
       ]
     },
@@ -65,6 +66,11 @@
         "view": "ibmi-member-workspace.checkoutView",
         "contents": "Choose where checked-out member files will be stored for this workspace.\n[Choose Checkout Folder](command:ibmi-member-workspace.configureCheckoutFolder)",
         "when": "!ibmi-member-workspace:checkoutFolderConfigured"
+      },
+      {
+        "view": "ibmi-member-workspace.checkoutView",
+        "contents": "No members are checked out yet.\nRight-click a source member (or a source file) in the Code for IBM i Object Browser and choose Check Out.",
+        "when": "ibmi-member-workspace:checkoutFolderConfigured"
       }
     ],
     "commands": [
@@ -536,5 +542,8 @@
     "eslint": "^10.11.0",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.70.0"
+  },
+  "allowScripts": {
+    "@vscode/vsce-sign@2.1.0": true
   }
 }

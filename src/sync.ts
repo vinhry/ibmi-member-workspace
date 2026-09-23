@@ -1,4 +1,5 @@
 import * as crypto from "crypto";
+import { CheckoutStatus } from "./types";
 
 export type RemoteStatus = "in-sync" | "modified" | "remote-changed" | "conflict";
 
@@ -33,4 +34,47 @@ export function classifyStatus(
     return "remote-changed";
   }
   return "conflict";
+}
+
+/**
+ * The baseline to record after comparing local and remote. When both sides are
+ * identical (e.g. after a Merge Back save) that content is the new common
+ * ancestor; otherwise the existing baseline stands.
+ */
+export function nextBaseline(
+  localHash: string,
+  remoteHash: string,
+  baselineHash: string
+): string {
+  return localHash === remoteHash ? remoteHash : baselineHash;
+}
+
+/**
+ * Status after the local copy is saved, assuming the remote is unchanged since
+ * it was last checked. `localChanged` is whether local now differs from the baseline.
+ */
+export function statusAfterLocalSave(
+  status: CheckoutStatus,
+  localChanged: boolean
+): CheckoutStatus {
+  if (localChanged) {
+    switch (status) {
+      case "checked-out":
+      case "in-sync":
+      case "merged":
+        return "modified";
+      case "remote-changed":
+        return "conflict";
+      default:
+        return status;
+    }
+  }
+  switch (status) {
+    case "modified":
+      return "in-sync";
+    case "conflict":
+      return "remote-changed";
+    default:
+      return status;
+  }
 }

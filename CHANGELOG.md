@@ -1,5 +1,17 @@
 # Change Log
 
+## Unreleased
+
+- Fix: whenever local and remote match (for example after a Merge Back or an identical edit on the IBM i), that content becomes the new baseline, so later local edits show as **local changes** instead of a false **conflict**, and **Upload** is no longer blocked.
+- Fix: **Upload** and **Refresh** offer to save unsaved edits to checked-out files first, instead of using the stale copy on disk.
+- Fix: re-downloading a member with local changes that were not sent to the IBM i now asks before discarding them. Multi-member re-downloads can keep those members instead.
+- Fix: checkout ids no longer collide for names containing underscores (e.g. `MY_LIB/SRC` vs `MY/LIB_SRC`). Existing checkout indexes are converted automatically.
+- **Discard Checkout** warns when members have local changes that were not sent to the IBM i.
+- Saving a checked-out file updates its status to **local changes** right away, without contacting the IBM i.
+- Refreshing a member whose local file was deleted offers **Re-checkout** or **Remove from Checkouts**.
+- The Checked Out Members view explains how to check out a member when it is empty.
+- A failed index save at the end of a batch is reported instead of hiding the batch summary.
+
 ## 1.1.0 - 2026-09-22
 
 - **Local Change History** — opt-in Git history stored at each system working directory (`checkout/<system>`), with guided author setup and actionable errors. This corrects the initial 1.1.0 layout, which could place `.git` at the checkout container.
