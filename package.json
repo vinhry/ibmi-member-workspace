@@ -2,7 +2,7 @@
   "name": "ibmi-member-workspace",
   "displayName": "IBM i Member Workspace",
   "description": "Work with IBM i source members locally, compare changes, and synchronize them safely. Works with Code for IBM i.",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "publisher": "vinhry",
   "author": "Vinhry",
   "license": "GPL-3.0",

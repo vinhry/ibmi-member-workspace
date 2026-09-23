@@ -1,5 +1,10 @@
 # Change Log
 
+## 1.1.2 - 2026-09-23
+
+- Fix: on Windows, **Switch Work Item** and Local Change History setup no longer fail with "Could not create an isolated history repository in the checkout folder".
+- When Git rejects a checkout folder owned by another account (common on network drives), the error explains how to trust it with `safe.directory`.
+
 ## 1.1.1 - 2026-09-22
 
 - Fix: whenever local and remote match (for example after a Merge Back or an identical edit on the IBM i), that content becomes the new baseline, so later local edits show as **local changes** instead of a false **conflict**, and **Upload** is no longer blocked.
