@@ -118,22 +118,19 @@ export class GitService {
     return this.gitAvailable;
   }
 
-  async repositoryRoot(folder: string): Promise<string | undefined> {
-    const result = await this.run(folder, ["rev-parse", "--show-toplevel"], false);
-    return result.ok ? path.resolve(result.stdout) : undefined;
-  }
-
   async isExactRepository(folder: string): Promise<boolean> {
-    const root = await this.repositoryRoot(folder);
-    return root !== undefined && this.canonicalPath(root) === this.canonicalPath(folder);
+    return (await this.checkExactRepository(folder)).ok;
   }
 
-  private canonicalPath(folder: string): string {
-    try {
-      return fs.realpathSync(folder);
-    } catch {
-      return path.resolve(folder);
-    }
+  /**
+   * Asks Git whether `folder` is a work tree root rather than comparing paths: on Windows,
+   * VS Code reports "c:\..." while Git reports "C:/...", and 8.3 short names or subst drives differ too.
+   */
+  private async checkExactRepository(folder: string): Promise<CommandResult> {
+    const result = await this.run(folder, ["rev-parse", "--show-cdup"], false);
+    return result.ok && result.stdout !== ""
+      ? { ok: false, stdout: result.stdout, stderr: "The folder is inside another repository." }
+      : result;
   }
 
   async isManagedRepository(folder: string): Promise<boolean> {
@@ -319,11 +316,20 @@ export class GitService {
       const markerPath = path.join(folder, ".git", "ibmi-member-workspace");
       if (!exactRepository) {
         const init = await this.run(folder, ["init"]);
-        if (!init.ok || !(await this.isExactRepository(folder))) {
+        const created = init.ok ? await this.checkExactRepository(folder) : init;
+        if (!created.ok) {
+          if (created.stderr.includes("dubious ownership")) {
+            this.log.appendLine(`[git] Repository setup failed: ${created.stderr}`);
+            return {
+              status: "failure",
+              message: `Git does not trust the checkout folder because another account owns it (common on network drives). Run "git config --global --add safe.directory ${folder.replace(/\\/g, "/")}", then try again.`,
+              details: created.stderr,
+            };
+          }
           return {
             status: "failure",
             message: "Could not create an isolated history repository in the checkout folder.",
-            details: init.stderr,
+            details: created.stderr,
           };
         }
         await this.run(folder, ["symbolic-ref", "HEAD", "refs/heads/workspace"]);

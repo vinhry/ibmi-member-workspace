@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
 import {
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
-  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -39,10 +39,68 @@ describe("GitService", () => {
       const service = new GitService({ appendLine: () => undefined });
 
       assert.ok(["success", "setupRequired"].includes((await service.prepareRepository(checkout)).status));
-      assert.equal(realpathSync((await service.repositoryRoot(checkout))!), realpathSync(checkout));
+      assert.equal(await service.isExactRepository(checkout), true);
+      assert.equal(await service.isExactRepository(parent), true);
       assert.equal(await service.isManagedRepository(checkout), true);
     } finally {
       rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("recognizes its repository when the folder path is spelled with different case", async (t) => {
+    const parent = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-case-"));
+    try {
+      const checkout = join(parent, "checkouts");
+      mkdirSync(checkout);
+      const respelled = join(parent, "CHECKOUTS");
+      if (!existsSync(respelled)) {
+        t.skip("file system is case-sensitive");
+        return;
+      }
+      const service = new GitService({ appendLine: () => undefined });
+
+      assert.ok(["success", "setupRequired"].includes((await service.prepareRepository(checkout)).status));
+      assert.ok(["success", "setupRequired"].includes((await service.prepareRepository(respelled)).status));
+      assert.equal(await service.isExactRepository(respelled), true);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("recognizes its repository through a VS Code-style lowercase drive letter", async (t) => {
+    if (process.platform !== "win32") {
+      t.skip("drive letters exist only on Windows");
+      return;
+    }
+    const folder = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-drive-"));
+    try {
+      const vscodePath = folder[0].toLowerCase() + folder.slice(1);
+      const service = new GitService({ appendLine: () => undefined });
+
+      assert.ok(["success", "setupRequired"].includes((await service.prepareRepository(vscodePath)).status));
+      assert.equal(await service.isExactRepository(vscodePath), true);
+      assert.equal(await service.isExactRepository(folder), true);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("explains how to trust a checkout folder that Git considers owned by another account", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-owner-"));
+    const previous = process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER;
+    process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = "1";
+    try {
+      const service = new GitService({ appendLine: () => undefined });
+      const result = await service.prepareRepository(folder);
+      assert.equal(result.status, "failure");
+      assert.match(result.message ?? "", /safe\.directory/);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER;
+      } else {
+        process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = previous;
+      }
+      rmSync(folder, { recursive: true, force: true });
     }
   });
 

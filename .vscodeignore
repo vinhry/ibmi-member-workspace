@@ -12,3 +12,4 @@ node_modules/**
 eslint.config.mjs
 git-integration-plan.md
 out/test/**
+.github/**
