@@ -1,8 +1,11 @@
 import * as vscode from "vscode";
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   CheckedOutMember,
   CheckoutIndex,
+  SystemCheckoutState,
   RefreshTally,
   buildCheckoutId,
   buildLocalFileName,
@@ -10,6 +13,7 @@ import {
   formatMemberPath,
   parseCheckoutIndex,
   sanitizeSystemName,
+  systemKey,
 } from "./types";
 import {
   downloadMemberContent,
@@ -18,13 +22,23 @@ import {
 } from "./codeForIBMi";
 import { CheckoutCancelledError, errorMessage } from "./errors";
 import { RemoteStatus, classifyStatus, hashContent } from "./sync";
+import {
+  GitOperationResult,
+  GitService,
+  LegacyMigrationResult,
+  RepositoryInspection,
+} from "./gitService";
 
 export type UploadResult = "uploaded" | "failed" | "remote-changed";
 
 type RefreshProgress = vscode.Progress<{ message?: string; increment?: number }>;
 
 export class CheckoutService implements vscode.Disposable {
-  private index: CheckoutIndex = { version: 1, entries: [] };
+  private index: CheckoutIndex = {
+    version: 3,
+    systems: {},
+    unassignedWorkItems: {},
+  };
   private readonly storageUri: vscode.Uri | undefined;
   private readonly indexUri: vscode.Uri | undefined;
   private readonly indexTempUri: vscode.Uri | undefined;
@@ -32,13 +46,18 @@ export class CheckoutService implements vscode.Disposable {
   private batchDepth = 0;
   private dirty = false;
   private saveQueue: Promise<void> = Promise.resolve();
+  private gitWarningShown = false;
+  private readonly gitSetupDeclinedSystems = new Set<string>();
+  private gitOperationWarningShown = false;
+  private readonly gitPreparations = new Map<string, Promise<GitOperationResult>>();
 
   private readonly _onDidChange = new vscode.EventEmitter<void>();
   readonly onDidChange = this._onDidChange.event;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
-    private readonly log: vscode.OutputChannel
+    private readonly log: vscode.OutputChannel,
+    private readonly gitService?: GitService
   ) {
     this.storageUri = context.storageUri;
     this.indexUri = this.storageUri
@@ -51,15 +70,352 @@ export class CheckoutService implements vscode.Disposable {
 
   async initialize(): Promise<void> {
     if (!this.storageUri) {
-      this.index = { version: 1, entries: [] };
+      this.index = this.emptyIndex();
       return;
     }
     await vscode.workspace.fs.createDirectory(this.storageUri);
     await this.loadIndex();
+    const system = getSystemName();
+    if (system && Object.keys(this.index.unassignedWorkItems).length > 0) {
+      this.ensureSystemState(system);
+      await this.saveIndex();
+    }
   }
 
   dispose(): void {
     this._onDidChange.dispose();
+  }
+
+  /**
+   * Returns true when git integration is enabled in settings AND git is available.
+   * Shows a one-time warning notification if the setting is on but git is not found.
+   */
+  async isGitEnabled(): Promise<boolean> {
+    const enabled = vscode.workspace
+      .getConfiguration("ibmi-member-workspace")
+      .get<boolean>("gitIntegration", false);
+    if (!enabled) {
+      return false;
+    }
+    const available = await this.gitService?.checkGitAvailable();
+    if (!available) {
+      if (!this.gitWarningShown) {
+        this.gitWarningShown = true;
+        vscode.window.showWarningMessage(
+          "Local Change History is enabled, but Git was not found on PATH. Install Git, then run Set Up Local Change History again."
+        );
+      }
+      return false;
+    }
+    return true;
+  }
+
+  private get entries(): CheckedOutMember[] {
+    const system = getSystemName();
+    if (!system) {
+      return [];
+    }
+    const state = this.ensureSystemState(system);
+    return state.workItems[state.activeWorkItem] ??= [];
+  }
+
+  getActiveWorkItem(): string {
+    const system = getSystemName();
+    return system ? this.ensureSystemState(system).activeWorkItem : "workspace";
+  }
+
+  getKnownWorkItems(): string[] {
+    const system = getSystemName();
+    return system ? Object.keys(this.ensureSystemState(system).workItems) : [];
+  }
+
+  getKnownSystems(): SystemCheckoutState[] {
+    const connected = getSystemName();
+    if (connected) {
+      this.ensureSystemState(connected);
+    }
+    return Object.values(this.index.systems);
+  }
+
+  async inspectRepository(folder: string): Promise<RepositoryInspection | undefined> {
+    return this.gitService?.inspectRepository(folder);
+  }
+
+  async detectMisplacedParentRepository(): Promise<RepositoryInspection | undefined> {
+    const root = this.getCheckoutRoot();
+    return root && this.gitService
+      ? this.gitService.detectMisplacedParentRepository(root.fsPath)
+      : undefined;
+  }
+
+  async migrateLegacyRepository(): Promise<LegacyMigrationResult> {
+    const checkoutRoot = this.getCheckoutRoot();
+    if (!checkoutRoot || !this.gitService) {
+      return { status: "setupRequired", message: "Choose a checkout folder first." };
+    }
+    const connected = getSystemName();
+    if (connected) {
+      this.ensureSystemState(connected);
+    }
+    const systems = this.getKnownSystems();
+    const result = await this.gitService.migrateLegacyRepository(
+      checkoutRoot.fsPath,
+      systems.map((state) => ({
+        system: state.system,
+        folder: this.getGitRoot(state.system)!.fsPath,
+        workItems: Object.keys(state.workItems),
+      }))
+    );
+    if (result.status !== "success") {
+      return result;
+    }
+
+    for (const [system, workItems] of Object.entries(result.restoredBranches ?? {})) {
+      const restoredState = this.index.systems[systemKey(system)];
+      if (restoredState) {
+        for (const workItem of workItems) {
+          restoredState.workItems[workItem] ??= [];
+        }
+      }
+    }
+
+    if (!connected) {
+      await this.persist();
+      return result;
+    }
+
+    const state = this.ensureSystemState(connected);
+    const gitRoot = this.getGitRoot(connected)!;
+    const changed = await this.gitService.changedPaths(gitRoot.fsPath);
+    const managed = new Set(this.getManagedPaths(connected).map((value) => path.resolve(value)));
+    const unrelated = changed.filter((value) => !managed.has(path.resolve(value)));
+    if (unrelated.length === 0) {
+      const branch = await this.gitService.currentBranch(gitRoot.fsPath);
+      if (branch !== state.activeWorkItem && (await this.gitService.listBranches(gitRoot.fsPath)).includes(state.activeWorkItem)) {
+        const switched = await this.gitService.switchWorkItem(gitRoot.fsPath, state.activeWorkItem, true);
+        if (switched.status !== "success") {
+          return switched;
+        }
+      }
+      if (changed.length > 0) {
+        const checkpoint = await this.gitService.saveCheckpoint(
+          gitRoot.fsPath,
+          changed.filter((value) => managed.has(path.resolve(value))),
+          `checkpoint: recovered ${state.activeWorkItem}`,
+          false
+        );
+        if (checkpoint.status !== "success" && checkpoint.status !== "noChanges") {
+          return checkpoint;
+        }
+      }
+    }
+    await this.persist();
+    return result;
+  }
+
+  async archiveMisplacedRepository(): Promise<{ gitBackup: string; gitignoreBackup?: string }> {
+    const root = this.getCheckoutRoot();
+    if (!root || !this.gitService) {
+      throw new Error("Choose a checkout folder first.");
+    }
+    const inspection = await this.gitService.detectMisplacedParentRepository(root.fsPath);
+    const directories = this.getKnownSystems().map((state) => state.directory);
+    if (!inspection || !this.gitService.isSafeMisplacedRepository(inspection, directories)) {
+      throw new Error("The parent repository changed after repair and was not archived.");
+    }
+    return this.gitService.archiveMisplacedRepository(root.fsPath);
+  }
+
+  getGitRoot(system: string): vscode.Uri | undefined {
+    const checkoutRoot = this.getCheckoutRoot();
+    return checkoutRoot
+      ? vscode.Uri.joinPath(checkoutRoot, sanitizeSystemName(system))
+      : undefined;
+  }
+
+  getGitRootForEntry(entry: CheckedOutMember): vscode.Uri {
+    const root = this.getGitRoot(entry.system);
+    if (!root || !this.pathIsInside(root.fsPath, entry.localPath)) {
+      throw new Error(`The checkout path for ${formatMemberPath(entry)} is outside its system repository.`);
+    }
+    return root;
+  }
+
+  async ensureGitReady(system = getSystemName()): Promise<GitOperationResult> {
+    if (!system) {
+      return { status: "setupRequired", message: "Connect to an IBM i system first." };
+    }
+    const key = systemKey(system);
+    if (!this.index.systems[key]) {
+      this.ensureSystemState(system);
+      await this.persist();
+    } else {
+      this.ensureSystemState(system);
+    }
+    const existing = this.gitPreparations.get(key);
+    if (existing) {
+      return existing;
+    }
+    const preparation = this.prepareGitRepository(system);
+    this.gitPreparations.set(key, preparation);
+    try {
+      return await preparation;
+    } finally {
+      if (this.gitPreparations.get(key) === preparation) {
+        this.gitPreparations.delete(key);
+      }
+    }
+  }
+
+  private async prepareGitRepository(system: string): Promise<GitOperationResult> {
+    const enabled = vscode.workspace
+      .getConfiguration("ibmi-member-workspace")
+      .get<boolean>("gitIntegration", false);
+    if (!enabled || !this.gitService) {
+      return {
+        status: "setupRequired",
+        message: "Enable Local Change History before saving checkpoints.",
+      };
+    }
+    if (!(await this.gitService.checkGitAvailable())) {
+      if (!this.gitWarningShown) {
+        this.gitWarningShown = true;
+        vscode.window.showWarningMessage(
+          "Local Change History is enabled, but Git was not found on PATH. Install Git, then run Set Up Local Change History again."
+        );
+      }
+      return {
+        status: "setupRequired",
+        message: "Install Git, then run Set Up Local Change History again.",
+      };
+    }
+    const root = this.getGitRoot(system);
+    if (!root) {
+      return { status: "setupRequired", message: "Choose a checkout folder first." };
+    }
+
+    let result = await this.gitService.prepareRepository(root.fsPath);
+    if (result.status !== "setupRequired" || this.gitSetupDeclinedSystems.has(systemKey(system))) {
+      if (result.status === "success") {
+        await this.synchronizeWorkItem(system);
+      }
+      return result;
+    }
+
+    // Git is available at this point, so setupRequired means author identity is missing.
+    const name = await vscode.window.showInputBox({
+      title: "Set Up Local Change History",
+      prompt: "Your name for local checkpoints (saved only in this checkout folder)",
+      placeHolder: "Jane Developer",
+      validateInput: (value) => value.trim() ? undefined : "Enter a name",
+      ignoreFocusOut: true,
+    });
+    if (!name) {
+      this.gitSetupDeclinedSystems.add(systemKey(system));
+      return { status: "setupRequired", message: "Git author setup was cancelled." };
+    }
+    const email = await vscode.window.showInputBox({
+      title: "Set Up Local Change History",
+      prompt: "Your email for local checkpoints (saved only in this checkout folder)",
+      placeHolder: "jane@example.com",
+      validateInput: (value) => /^\S+@\S+\.\S+$/.test(value.trim())
+        ? undefined
+        : "Enter a valid email address",
+      ignoreFocusOut: true,
+    });
+    if (!email) {
+      this.gitSetupDeclinedSystems.add(systemKey(system));
+      return { status: "setupRequired", message: "Git author setup was cancelled." };
+    }
+    result = await this.gitService.configureLocalIdentity(root.fsPath, name.trim(), email.trim());
+    if (result.status === "success") {
+      result = await this.gitService.prepareRepository(root.fsPath);
+      if (result.status === "success") {
+        await this.synchronizeWorkItem(system);
+      }
+    }
+    return result;
+  }
+
+  resetGitSetupState(): void {
+    this.gitWarningShown = false;
+    this.gitSetupDeclinedSystems.clear();
+    this.gitOperationWarningShown = false;
+    this.gitService?.invalidateAvailability();
+  }
+
+  async synchronizeWorkItem(system = getSystemName()): Promise<void> {
+    if (!system) {
+      return;
+    }
+    const root = this.getGitRoot(system);
+    if (!root || !this.gitService) {
+      return;
+    }
+    const state = this.ensureSystemState(system);
+    const branch = await this.gitService.currentBranch(root.fsPath);
+    if (!branch || branch === state.activeWorkItem) {
+      return;
+    }
+    if (
+      state.activeWorkItem === "workspace" &&
+      !state.workItems[branch] &&
+      Object.keys(state.workItems).length === 1
+    ) {
+      state.workItems[branch] = state.workItems.workspace;
+      delete state.workItems.workspace;
+    } else if (!state.workItems[branch]) {
+      state.workItems[branch] = [];
+    }
+    state.activeWorkItem = branch;
+    state.workItems[branch] = state.workItems[branch].filter((entry) =>
+      fs.existsSync(entry.localPath)
+    );
+    await this.persist();
+  }
+
+  async activateWorkItem(system: string, name: string, cloneCurrent: boolean): Promise<void> {
+    const state = this.ensureSystemState(system);
+    const currentEntries = state.workItems[state.activeWorkItem] ?? [];
+    if (!state.workItems[name]) {
+      state.workItems[name] = cloneCurrent
+        ? currentEntries.map((entry) => ({ ...entry }))
+        : [];
+    }
+    state.activeWorkItem = name;
+    state.workItems[name] = state.workItems[name].filter((entry) =>
+      fs.existsSync(entry.localPath)
+    );
+    await this.persist();
+  }
+
+  async saveCheckpoint(system: string, paths: string[], message: string): Promise<GitOperationResult> {
+    const ready = await this.ensureGitReady(system);
+    if (ready.status !== "success" || !this.gitService) {
+      return ready;
+    }
+    const root = this.getGitRoot(system);
+    if (!root) {
+      return { status: "setupRequired", message: "Choose a checkout folder first." };
+    }
+    if (paths.some((candidate) => !this.pathIsInside(root.fsPath, candidate))) {
+      return { status: "failure", message: "A checkpoint path belongs to another system repository." };
+    }
+    return this.gitService.saveCheckpoint(root.fsPath, paths, message, false);
+  }
+
+  async recordMergeBack(entry: CheckedOutMember, content: string): Promise<GitOperationResult> {
+    await this.assertEntryInActiveWorkItem(entry);
+    const localUri = vscode.Uri.file(entry.localPath);
+    await vscode.workspace.fs.writeFile(localUri, Buffer.from(content, "utf-8"));
+    entry.remoteHashAtCheckout = this.hash(content, localUri);
+    entry.lastCheckedAt = new Date().toISOString();
+    entry.status = "merged";
+    await this.persist();
+    return this.saveCheckpoint(entry.system,
+      [entry.localPath],
+      `merge-back: ${formatMemberPath(entry)} to ${entry.system}`
+    );
   }
 
   /**
@@ -79,13 +435,18 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   getEntriesForSystem(system: string): CheckedOutMember[] {
-    return this.index.entries.filter(
-      (e) => e.system.toUpperCase() === system.toUpperCase()
-    );
+    const state = this.index.systems[systemKey(system)];
+    return state?.workItems[state.activeWorkItem] ?? [];
+  }
+
+  getManagedPaths(system: string): string[] {
+    return this.getEntriesForSystem(system).map((entry) => entry.localPath);
   }
 
   hasEntries(): boolean {
-    return this.index.entries.length > 0;
+    return Object.values(this.index.systems).some((state) =>
+      Object.values(state.workItems).some((entries) => entries.length > 0)
+    );
   }
 
   getCheckoutRoot(): vscode.Uri | undefined {
@@ -96,6 +457,7 @@ export class CheckoutService implements vscode.Disposable {
   async setCheckoutRoot(folder: vscode.Uri): Promise<void> {
     await this.assertWritableFolder(folder);
     await this.context.workspaceState.update("checkoutRoot", folder.fsPath);
+    this.resetGitSetupState();
   }
 
   async validateCheckoutRoot(): Promise<vscode.Uri> {
@@ -124,7 +486,7 @@ export class CheckoutService implements vscode.Disposable {
     memberName: string
   ): CheckedOutMember | undefined {
     const id = buildCheckoutId(system, library, sourceFile, memberName);
-    return this.index.entries.find((e) => e.id === id);
+    return this.entries.find((e) => e.id === id);
   }
 
   async checkoutMember(
@@ -144,6 +506,10 @@ export class CheckoutService implements vscode.Disposable {
     if (!system) {
       throw new Error("Not connected to IBM i");
     }
+
+    this.ensureSystemState(system);
+    const gitReady = await this.ensureGitReady(system);
+    this.logGitFailure(gitReady);
 
     const existing = this.findEntry(system, library, sourceFile, memberName);
     if (existing) {
@@ -213,11 +579,22 @@ export class CheckoutService implements vscode.Disposable {
       Buffer.from(content, "utf-8")
     );
 
+    if (gitReady.status === "success" && this.gitService) {
+      const gitRoot = this.getGitRoot(system)!;
+      const result = await this.gitService.saveCheckpoint(
+        gitRoot.fsPath,
+        [localPath],
+        `checkout: ${formatMemberPath(entry)} from ${entry.system}`,
+        false
+      );
+      this.logGitFailure(result);
+    }
+
     if (existing) {
-      const idx = this.index.entries.findIndex((e) => e.id === entry.id);
-      this.index.entries[idx] = entry;
+      const idx = this.entries.findIndex((e) => e.id === entry.id);
+      this.entries[idx] = entry;
     } else {
-      this.index.entries.push(entry);
+      this.entries.push(entry);
     }
 
     await this.persist();
@@ -240,6 +617,7 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   async refreshRemoteStatus(entry: CheckedOutMember): Promise<RemoteStatus> {
+    await this.assertEntryInActiveWorkItem(entry);
     const localUri = vscode.Uri.file(entry.localPath);
 
     const remoteContent = await downloadMemberContent(
@@ -268,6 +646,7 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   async recheckout(entry: CheckedOutMember): Promise<void> {
+    await this.assertEntryInActiveWorkItem(entry);
     const content = await downloadMemberContent(
       entry.library,
       entry.sourceFile,
@@ -285,6 +664,11 @@ export class CheckoutService implements vscode.Disposable {
     entry.lastCheckedAt = entry.checkedOutAt;
     entry.status = "in-sync";
     await this.persist();
+    const result = await this.saveCheckpoint(entry.system,
+      [entry.localPath],
+      `recheckout: ${formatMemberPath(entry)} from ${entry.system}`
+    );
+    this.logGitFailure(result);
   }
 
   /**
@@ -296,6 +680,7 @@ export class CheckoutService implements vscode.Disposable {
     entry: CheckedOutMember,
     options?: { overwriteRemoteChanges?: boolean }
   ): Promise<UploadResult> {
+    await this.assertEntryInActiveWorkItem(entry);
     const localUri = vscode.Uri.file(entry.localPath);
     const localContent = await this.readLocal(localUri);
     const localHash = this.hash(localContent, localUri);
@@ -333,6 +718,13 @@ export class CheckoutService implements vscode.Disposable {
     entry.lastCheckedAt = new Date().toISOString();
     entry.status = "merged";
     await this.persist();
+
+    const result = await this.saveCheckpoint(entry.system,
+      [entry.localPath],
+      `upload: ${formatMemberPath(entry)} to ${entry.system}`
+    );
+    this.logGitFailure(result);
+
     return "uploaded";
   }
 
@@ -420,6 +812,9 @@ export class CheckoutService implements vscode.Disposable {
 
   async discardEntries(entries: CheckedOutMember[]): Promise<void> {
     for (const entry of entries) {
+      await this.assertEntryInActiveWorkItem(entry);
+    }
+    for (const entry of entries) {
       try {
         await vscode.workspace.fs.delete(vscode.Uri.file(entry.localPath));
       } catch {
@@ -427,8 +822,21 @@ export class CheckoutService implements vscode.Disposable {
       }
     }
 
+    const system = entries[0]?.system;
+    const result = system ? await this.saveCheckpoint(system,
+      entries.map((entry) => entry.localPath),
+      entries.length === 1
+        ? `discard: ${formatMemberPath(entries[0])}`
+        : `discard: ${entries.length} checked-out members`
+    ) : { status: "noChanges" as const };
+    this.logGitFailure(result);
+
     const ids = new Set(entries.map((e) => e.id));
-    this.index.entries = this.index.entries.filter((e) => !ids.has(e.id));
+    if (system) {
+      const state = this.ensureSystemState(system);
+      state.workItems[state.activeWorkItem] = (state.workItems[state.activeWorkItem] ?? [])
+        .filter((entry) => !ids.has(entry.id));
+    }
     await this.persist();
   }
 
@@ -441,6 +849,36 @@ export class CheckoutService implements vscode.Disposable {
 
   private async readLocal(localUri: vscode.Uri): Promise<string> {
     return Buffer.from(await vscode.workspace.fs.readFile(localUri)).toString("utf-8");
+  }
+
+  private logGitFailure(result: GitOperationResult): void {
+    if (result.status === "failure" || result.status === "conflict") {
+      this.log.appendLine(
+        `[git] ${result.message ?? "Local history operation failed"}${result.details ? `: ${result.details}` : ""}`
+      );
+      if (!this.gitOperationWarningShown) {
+        this.gitOperationWarningShown = true;
+        vscode.window.showWarningMessage(
+          `${result.message ?? "Local Change History could not save this operation."} Your IBM i operation can continue; see the output panel for details.`
+        );
+      }
+    }
+  }
+
+  private async assertEntryInActiveWorkItem(entry: CheckedOutMember): Promise<void> {
+    const enabled = vscode.workspace
+      .getConfiguration("ibmi-member-workspace")
+      .get<boolean>("gitIntegration", false);
+    if (!enabled) {
+      return;
+    }
+    const ready = await this.ensureGitReady(entry.system);
+    this.logGitFailure(ready);
+    if (ready.status === "success" && !this.entries.includes(entry)) {
+      throw new Error(
+        "The active work item changed. The checkout list was refreshed; select the member again before continuing."
+      );
+    }
   }
 
   private async getLocalPath(
@@ -461,9 +899,47 @@ export class CheckoutService implements vscode.Disposable {
     return vscode.Uri.joinPath(baseDir, fileName).fsPath;
   }
 
+  private emptyIndex(): CheckoutIndex {
+    return { version: 3, systems: {}, unassignedWorkItems: {} };
+  }
+
+  private ensureSystemState(system: string): SystemCheckoutState {
+    const key = systemKey(system);
+    let state = this.index.systems[key];
+    if (!state) {
+      const inherited = this.index.unassignedWorkItems;
+      const names = Object.keys(inherited);
+      const activeWorkItem = names.includes("workspace")
+        ? "workspace"
+        : names[0] ?? "workspace";
+      state = {
+        system,
+        directory: sanitizeSystemName(system),
+        activeWorkItem,
+        workItems: names.length > 0
+          ? Object.fromEntries(names.map((name) => [name, []]))
+          : { workspace: [] },
+      };
+      this.index.systems[key] = state;
+    }
+    for (const workItem of Object.keys(this.index.unassignedWorkItems)) {
+      state.workItems[workItem] ??= [];
+    }
+    this.index.unassignedWorkItems = {};
+    return state;
+  }
+
+  private pathIsInside(root: string, candidate: string): boolean {
+    const relative = path.relative(path.resolve(root), path.resolve(candidate));
+    return relative !== "" &&
+      relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative);
+  }
+
   private async loadIndex(): Promise<void> {
     if (!this.storageUri || !this.indexUri) {
-      this.index = { version: 1, entries: [] };
+      this.index = this.emptyIndex();
       return;
     }
 
@@ -472,14 +948,26 @@ export class CheckoutService implements vscode.Disposable {
       data = await vscode.workspace.fs.readFile(this.indexUri);
     } catch {
       // no index yet
-      this.index = { version: 1, entries: [] };
+      this.index = this.emptyIndex();
       return;
     }
 
     try {
-      this.index = parseCheckoutIndex(Buffer.from(data).toString("utf-8"));
+      const json = Buffer.from(data).toString("utf-8");
+      const storedVersion = (JSON.parse(json) as { version?: number }).version ?? 1;
+      this.index = parseCheckoutIndex(json);
+      if (storedVersion !== 3) {
+        const backupUri = vscode.Uri.joinPath(this.storageUri, `checkout-index.v${storedVersion}-backup.json`);
+        try {
+          await vscode.workspace.fs.writeFile(backupUri, data);
+          await this.saveIndex();
+          this.log.appendLine(`[index] Migrated checkout index to work-item storage; backup: ${backupUri.fsPath}`);
+        } catch (migrationError) {
+          this.log.appendLine(`[index] Could not save checkout-index migration backup: ${errorMessage(migrationError)}`);
+        }
+      }
     } catch (err) {
-      this.index = { version: 1, entries: [] };
+      this.index = this.emptyIndex();
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const backupUri = vscode.Uri.joinPath(this.storageUri, `checkout-index.corrupt-${stamp}.json`);
       try {

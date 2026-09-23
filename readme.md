@@ -82,12 +82,69 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.warnOnRedownload` | `true` | Show warning when checking out a member that is already checked out. |
 | `ibmi-member-workspace.autoOpenOnCheckout` | `true` | Automatically open the file in the editor after a single-member checkout. |
 | `ibmi-member-workspace.allowCheckoutFromProtectedFilter` | `false` | Allow checking out members from protected (read-only) filters. |
+| `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. |
+
+## Local Change History
+
+Local Change History keeps checkpoints of IBM i source members on your computer. It uses Git internally, but you do not need to know Git commands. A **work item** is a separate line of work for a ticket or project, and a **checkpoint** is a saved point you can return to later.
+
+Local Change History does not upload members to IBM i and does not send files to a Git server. Use **Upload to IBM i** or **Merge Back to IBM i** separately when you are ready.
+
+### Prerequisites
+
+- Git must be installed and on your system PATH.
+- A checkout container must be configured for the workspace.
+
+### Set Up
+
+Run **IBM i Member Workspace: Set Up Local Change History**, or enable `ibmi-member-workspace.gitIntegration` in VS Code Settings. The selected folder (for example, `checkout`) is the **checkout container**. Each system working directory (for example, `checkout/alex.acklie.com`) is its own Git repository. Existing repositories at that exact system directory are adopted without changing their commits, branches, configuration, or remotes. If Git does not already know your name and email, the extension asks for them and saves them only in that system repository.
+
+### Work Items
+
+Use **IBM i Member Workspace: Switch Work Item** from the Command Palette, panel toolbar, or status bar.
+
+- **Start New Work Item** — enter a ticket or project name such as `TICKET-123` or `payroll-fix`.
+- **Switch Work Item** — select a previously created work item.
+- The active work item appears in the status bar.
+
+Before switching, the extension asks you to save open editors and checkpoint local changes. It never discards changes automatically. Each work item has its own checked-out-member list and synchronization baselines.
+
+### Automatic Checkpoints
+
+The following events save a checkpoint on the active work item:
+
+| Event | Checkpoint description |
+|-------|---------------|
+| Member checked out | `checkout: LIBRARY/SOURCEFILE(MEMBER) from SYSTEM` |
+| Member uploaded to IBM i | `upload: LIBRARY/SOURCEFILE(MEMBER) to SYSTEM` |
+| Member re-checked out | `recheckout: LIBRARY/SOURCEFILE(MEMBER) from SYSTEM` |
+| Merge-back saved | `merge-back: LIBRARY/SOURCEFILE(MEMBER) to SYSTEM` |
+| Checkout discarded | `discard: LIBRARY/SOURCEFILE(MEMBER)` |
+
+If a file has not changed since its last checkpoint, no duplicate checkpoint is created.
+
+### Manual Checkpoints
+
+Right-click a checkout and choose **Save Checkpoint**. Add an optional description or leave it blank to use `snapshot: LIBRARY/SOURCEFILE(MEMBER)`. This only saves local history; it does not upload to IBM i.
+
+### Workflow Example
+
+1. Run **Set Up Local Change History** and provide a name and email if requested.
+2. Run **Switch Work Item**, choose **Start New Work Item**, and enter your ticket, such as `TICKET-4821`.
+3. Check out and edit the members you need.
+4. Use **Save Checkpoint** whenever you want an intermediate recovery point.
+5. Upload or merge back when ready; successful lifecycle actions create automatic checkpoints.
+6. Use **View Local History** to open VS Code's Source Control view.
+7. Start or switch to another work item for the next ticket.
+
+If setup or a checkpoint fails, the notification explains the required action. Detailed Git diagnostics are available in the **IBM i Member Workspace** output panel.
 
 ## Local File Structure
 
 ```text
-<selected checkout folder>/
+<checkout container>/
   myhost.company.com/
+    .git/                 # repository for this IBM i system only
     MYLIB/
       QRPGLESRC/
         PAYROLL.RPGLE
@@ -96,6 +153,14 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 ```
 
 Organizing by system, library, and source file preserves the original filename for compilation and prevents collisions across different IBM i systems.
+
+### Repository-layout recovery
+
+Version 1.1.0 originally created `.git` at the checkout container in some installations. When that known layout is detected, the extension inspects it before offering repair. Safe repair adopts or initializes each system repository, restores missing valid work-item branches from that system repository's current history, and never rewrites child history or changes remotes.
+
+After repair, choose **Archive Misplaced Repository** to rename the container's `.git` to a timestamped backup. The generated container `.gitignore` is archived only when it is unchanged. Nothing is deleted, and the notification lists the backup paths; rename them back to `.git` and `.gitignore` to restore the old layout. If unrelated files or commits are present, automated repair stops and the parent repository is left untouched for manual recovery.
+
+Unrelated changes in a system repository are never included in automatic checkpoints. Commit or stash them in VS Code Source Control before switching work items.
 
 ## Requirements
 

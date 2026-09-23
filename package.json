@@ -2,7 +2,7 @@
   "name": "ibmi-member-workspace",
   "displayName": "IBM i Member Workspace",
   "description": "Work with IBM i source members locally, compare changes, and synchronize them safely. Works with Code for IBM i.",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "publisher": "vinhry",
   "author": "Vinhry",
   "license": "GPL-3.0",
@@ -200,6 +200,30 @@
         "title": "Clear Search Filter",
         "category": "IBM i Member Workspace",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "ibmi-member-workspace.selectGitBranch",
+        "title": "Switch Work Item",
+        "category": "IBM i Member Workspace",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "ibmi-member-workspace.commitNow",
+        "title": "Save Checkpoint",
+        "category": "IBM i Member Workspace",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "ibmi-member-workspace.setupGitIntegration",
+        "title": "Set Up Local Change History",
+        "category": "IBM i Member Workspace",
+        "icon": "$(history)"
+      },
+      {
+        "command": "ibmi-member-workspace.viewGitHistory",
+        "title": "View Local History",
+        "category": "IBM i Member Workspace",
+        "icon": "$(history)"
       }
     ],
     "menus": {
@@ -295,6 +319,14 @@
         {
           "command": "ibmi-member-workspace.clearSearch",
           "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.commitNow",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.viewGitHistory",
+          "when": "false"
         }
       ],
       "view/item/context": [
@@ -369,6 +401,11 @@
           "group": "5_util@1"
         },
         {
+          "command": "ibmi-member-workspace.commitNow",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection && config.ibmi-member-workspace.gitIntegration",
+          "group": "2_merge@4"
+        },
+        {
           "command": "ibmi-member-workspace.discardCheckout",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
           "group": "6_danger@1"
@@ -437,6 +474,21 @@
           "command": "ibmi-member-workspace.clearSearch",
           "when": "view == ibmi-member-workspace.checkoutView && ibmi-member-workspace:searchActive",
           "group": "navigation@4"
+        },
+        {
+          "command": "ibmi-member-workspace.selectGitBranch",
+          "when": "view == ibmi-member-workspace.checkoutView && ibmi-member-workspace:checkoutFolderConfigured && config.ibmi-member-workspace.gitIntegration",
+          "group": "navigation@5"
+        },
+        {
+          "command": "ibmi-member-workspace.setupGitIntegration",
+          "when": "view == ibmi-member-workspace.checkoutView && ibmi-member-workspace:checkoutFolderConfigured && !config.ibmi-member-workspace.gitIntegration",
+          "group": "navigation@5"
+        },
+        {
+          "command": "ibmi-member-workspace.viewGitHistory",
+          "when": "view == ibmi-member-workspace.checkoutView && config.ibmi-member-workspace.gitIntegration",
+          "group": "navigation@6"
         }
       ]
     },
@@ -457,6 +509,11 @@
           "type": "boolean",
           "default": false,
           "description": "Allow checking out source members from protected (read-only) filters. Off by default to prevent accidental edits to protected sources."
+        },
+        "ibmi-member-workspace.gitIntegration": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keep local checkpoints organized by work item in one Git repository per IBM i system directory. Does not upload or push changes."
         }
       }
     }

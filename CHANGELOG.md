@@ -1,5 +1,14 @@
 # Change Log
 
+## 1.1.0 - 2026-09-22
+
+- **Local Change History** — opt-in Git history stored at each system working directory (`checkout/<system>`), with guided author setup and actionable errors. This corrects the initial 1.1.0 layout, which could place `.git` at the checkout container.
+- **Work items** — create or switch ticket-specific work items safely; checkout state and remote baselines are stored separately for each work item.
+- **Automatic checkpoints** after checkout, upload, re-checkout, merge-back, and discard operations.
+- **Save Checkpoint** and **View Local History** commands for manual recovery points and history access.
+- Work-item switching protects unsaved and uncheckpointed changes instead of discarding them.
+- Existing system repositories are adopted without changing their history or remotes. A recoverable migration restores legacy work-item branches and can archive, never delete, misplaced parent metadata after confirmation.
+
 ## 1.0.1 - 2026-09-21
 
 - Require a visible, user-selected checkout folder before downloading any member.
