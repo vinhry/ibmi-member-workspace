@@ -2,6 +2,11 @@ import * as vscode from "vscode";
 import { CheckedOutMember, formatMemberPath } from "./types";
 import { memberUri } from "./codeForIBMi";
 
+/** Identifies a member document regardless of query options such as `readonly=false`. */
+export function mergeDocumentKey(uri: vscode.Uri): string {
+  return uri.with({ query: "", fragment: "" }).toString();
+}
+
 export class MergeHandler {
 
   async openMergeDiff(entry: CheckedOutMember): Promise<void> {

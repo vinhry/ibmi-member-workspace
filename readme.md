@@ -48,6 +48,8 @@ For a quick full replace, use **Upload to IBM i**. This overwrites the remote me
 
 Before uploading, the extension checks whether the member has changed on the IBM i since you checked it out. If it has, you're asked to **Overwrite Anyway** or **Show Diff** instead of silently losing the remote changes. In a multi-member upload, members changed on the IBM i are skipped and listed in the IBM i Member Workspace output panel.
 
+After uploading, the member is read back from the IBM i. If what was stored differs from your local file (for example, a line longer than the record length was truncated), you're warned and the checkout stays **Modified** so you can review it with Merge Back.
+
 ### Refresh Remote Status
 
 Compares your local file, the live remote content, and the remote content as it was at checkout time (not just a stale comparison) to classify each checkout:
@@ -56,6 +58,8 @@ Compares your local file, the live remote content, and the remote content as it 
 - **Modified** — you've edited locally; remote is unchanged (safe — nothing to lose)
 - **Remote changed** — the member changed on the IBM i but your local copy is untouched (safe to re-checkout)
 - **Conflict** — changed both locally *and* on the IBM i (re-checkout would discard your edits — review with Merge Back first)
+
+Local edits update the status to **Modified** automatically, whether you save in VS Code or another tool (an AI assistant, a script, git) writes the file. Saving the remote member from VS Code (from **Show Diff** or **Open Remote File**) also re-checks it. Changes made on the IBM i itself are only detected by a refresh.
 
 Refresh per member (inline icon or context menu, with a prompt to Re-checkout or review the diff when the remote has changed), per source file group, or for every checkout at once from the panel toolbar. Bulk refreshes show per-member progress and can be cancelled.
 

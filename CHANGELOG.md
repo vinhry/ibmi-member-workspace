@@ -11,6 +11,11 @@
 - Refreshing a member whose local file was deleted offers **Re-checkout** or **Remove from Checkouts**.
 - The Checked Out Members view explains how to check out a member when it is empty.
 - A failed index save at the end of a batch is reported instead of hiding the batch summary.
+- Edits made outside VS Code (AI tools, scripts, git) update a checkout's status to **local changes** automatically.
+- Saving a checked-out member on the IBM i from VS Code outside **Merge Back** (e.g. from **Show Diff** or **Open Remote File**) refreshes its status right away, without a manual Refresh.
+- **Re-download** and **Discard Checkout** now also warn about unsaved edits in an open editor, not just changes saved to disk.
+- Fix: after **Upload**, the member is re-read from the IBM i and used as the new baseline. If the IBM i stored something different (e.g. lines longer than the record length were truncated), you're warned and the member shows **local changes**, instead of a later Refresh falsely reporting **remote changed**.
+- Development: split command handlers out of `extension.ts` into `src/commands/`.
 
 ## 1.1.0 - 2026-09-22
 

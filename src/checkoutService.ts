@@ -27,6 +27,7 @@ import {
   hashContent,
   nextBaseline,
   statusAfterLocalSave,
+  statusAfterUpload,
 } from "./sync";
 import {
   GitOperationResult,
@@ -35,7 +36,8 @@ import {
   RepositoryInspection,
 } from "./gitService";
 
-export type UploadResult = "uploaded" | "failed" | "remote-changed";
+/** "uploaded-altered": uploaded, but the IBM i stored content that differs from the local copy. */
+export type UploadResult = "uploaded" | "uploaded-altered" | "failed" | "remote-changed";
 
 type RefreshProgress = vscode.Progress<{ message?: string; increment?: number }>;
 
@@ -754,9 +756,29 @@ export class CheckoutService implements vscode.Disposable {
       return "failed";
     }
 
-    entry.remoteHashAtCheckout = localHash;
+    let after = statusAfterUpload(localHash, localHash);
+    try {
+      const storedContent = await downloadMemberContent(
+        entry.library,
+        entry.sourceFile,
+        entry.memberName
+      );
+      after = statusAfterUpload(localHash, this.hash(storedContent, localUri));
+    } catch (err) {
+      this.log.appendLine(
+        `[upload] Could not re-read ${formatMemberPath(entry)} after upload; assuming it matches the local copy: ${errorMessage(err)}`
+      );
+    }
+    if (after.altered) {
+      this.log.appendLine(
+        `[upload] ${formatMemberPath(entry)} on the IBM i differs from the uploaded local copy ` +
+        `(e.g. lines longer than the record length were truncated)`
+      );
+    }
+
+    entry.remoteHashAtCheckout = after.baseline;
     entry.lastCheckedAt = new Date().toISOString();
-    entry.status = "merged";
+    entry.status = after.status;
     await this.persist();
 
     const result = await this.saveCheckpoint(entry.system,
@@ -765,7 +787,7 @@ export class CheckoutService implements vscode.Disposable {
     );
     this.logGitFailure(result);
 
-    return "uploaded";
+    return after.altered ? "uploaded-altered" : "uploaded";
   }
 
   async refreshSourceFileRemoteStatus(
@@ -877,8 +899,23 @@ export class CheckoutService implements vscode.Disposable {
     await this.forgetEntries(entries);
   }
 
-  /** Whether the local copy differs from the baseline. A missing local file has nothing to lose. */
+  /**
+   * Whether the checkout has edits that would be lost by overwriting or deleting
+   * its local file: unsaved edits in an open editor, or a file that differs from the baseline.
+   */
   async hasLocalChanges(entry: CheckedOutMember): Promise<boolean> {
+    return this.hasUnsavedEdits(entry) || (await this.localFileDiffersFromBaseline(entry));
+  }
+
+  private hasUnsavedEdits(entry: CheckedOutMember): boolean {
+    const target = vscode.Uri.file(entry.localPath).fsPath;
+    return vscode.workspace.textDocuments.some(
+      (doc) => doc.isDirty && doc.uri.scheme === "file" && doc.uri.fsPath === target
+    );
+  }
+
+  /** Whether the file on disk differs from the baseline. A missing local file has nothing to lose. */
+  private async localFileDiffersFromBaseline(entry: CheckedOutMember): Promise<boolean> {
     const localUri = vscode.Uri.file(entry.localPath);
     try {
       return this.hash(await this.readLocal(localUri), localUri) !== entry.remoteHashAtCheckout;
@@ -899,9 +936,9 @@ export class CheckoutService implements vscode.Disposable {
     return this.entries.find((e) => vscode.Uri.file(e.localPath).fsPath === target);
   }
 
-  /** Updates a checkout's status after its local file is saved, without contacting the IBM i. */
-  async updateStatusAfterLocalSave(entry: CheckedOutMember): Promise<void> {
-    const status = statusAfterLocalSave(entry.status, await this.hasLocalChanges(entry));
+  /** Updates a checkout's status after its local file is written, without contacting the IBM i. */
+  async updateStatusFromLocalFile(entry: CheckedOutMember): Promise<void> {
+    const status = statusAfterLocalSave(entry.status, await this.localFileDiffersFromBaseline(entry));
     if (status !== entry.status) {
       entry.status = status;
       await this.persist();

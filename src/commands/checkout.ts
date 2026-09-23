@@ -1,0 +1,266 @@
+import * as vscode from "vscode";
+import { CheckoutService } from "../checkoutService";
+import { ensureCheckoutFolder } from "../checkoutFolder";
+import { getSystemName, listSourceFileMembers } from "../codeForIBMi";
+import { CheckoutCancelledError, errorMessage } from "../errors";
+import {
+  BrowserNode,
+  MemberInfo,
+  SourceFileInfo,
+  UriParts,
+  extractMemberInfo,
+  extractSourceFileInfo,
+} from "../memberInfo";
+import { countLocalChanges, saveDirtyLocalFiles } from "../prompts";
+import { CheckedOutMember } from "../types";
+import { CommandContext } from "./context";
+
+export function registerCheckoutCommands(ctx: CommandContext): void {
+  const { context, service, log } = ctx;
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "ibmi-member-workspace.checkoutMember",
+      async (node: BrowserNode, allSelections?: BrowserNode[]) => {
+        if (!(await ensureCheckoutFolder(ctx))) {
+          return;
+        }
+
+        const selections = allSelections && allSelections.length > 1 ? allSelections : [node];
+        const isBatch = selections.length > 1;
+
+        if (!isBatch) {
+          // Single item — existing behaviour
+          try {
+            const memberInfo = memberInfoOf(node);
+            if (!memberInfo) {
+              log.appendLine(
+                `[checkout] ERROR: Could not extract member info — raw node keys: ${node ? Object.keys(node).join(", ") : "null/undefined"}`
+              );
+              log.show();
+              vscode.window.showErrorMessage(
+                "Could not determine member details from selection. Check 'IBM i Member Workspace' output panel for details."
+              );
+              return;
+            }
+            await service.checkoutMember(
+              memberInfo.library,
+              memberInfo.sourceFile,
+              memberInfo.memberName,
+              memberInfo.extension
+            );
+          } catch (err) {
+            if (!(err instanceof CheckoutCancelledError)) {
+              log.appendLine(`Checkout error: ${errorMessage(err)}`);
+              log.appendLine((err instanceof Error && err.stack) || "");
+              log.show();
+              vscode.window.showErrorMessage(`Checkout failed: ${errorMessage(err)}`);
+            }
+          }
+          return;
+        }
+
+        // Batch — multi-select
+        const system = getSystemName();
+        if (!system) {
+          vscode.window.showErrorMessage("Not connected to IBM i.");
+          return;
+        }
+
+        const memberInfoList = selections
+          .map((s) => memberInfoOf(s))
+          .filter((m): m is MemberInfo => m !== undefined);
+
+        if (memberInfoList.length === 0) {
+          vscode.window.showErrorMessage("Could not determine member details from the selection.");
+          return;
+        }
+
+        await checkoutMembersBatch(service, system, memberInfoList, log);
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "ibmi-member-workspace.checkoutAllMembers",
+      async (node: BrowserNode) => {
+        if (!(await ensureCheckoutFolder(ctx))) {
+          return;
+        }
+
+        const sourceFileInfo = sourceFileInfoOf(node);
+        if (!sourceFileInfo) {
+          log.appendLine(
+            `[checkout] ERROR: Could not extract source file info — raw node keys: ${node ? Object.keys(node).join(", ") : "null/undefined"}`
+          );
+          log.show();
+          vscode.window.showErrorMessage(
+            "Could not determine source file details from selection. Check 'IBM i Member Workspace' output panel for details."
+          );
+          return;
+        }
+
+        const system = getSystemName();
+        if (!system) {
+          vscode.window.showErrorMessage("Not connected to IBM i.");
+          return;
+        }
+
+        let members: Awaited<ReturnType<typeof listSourceFileMembers>>;
+        try {
+          members = await listSourceFileMembers(sourceFileInfo.library, sourceFileInfo.sourceFile);
+        } catch (err) {
+          log.appendLine(`[checkout] Could not list members: ${errorMessage(err)}`);
+          vscode.window.showErrorMessage(
+            `Could not list members of ${sourceFileInfo.library}/${sourceFileInfo.sourceFile}: ${errorMessage(err)}`
+          );
+          return;
+        }
+
+        if (members.length === 0) {
+          vscode.window.showInformationMessage(
+            `${sourceFileInfo.library}/${sourceFileInfo.sourceFile} has no members.`
+          );
+          return;
+        }
+
+        const confirm = await vscode.window.showWarningMessage(
+          `Check out all ${members.length} member(s) from ${sourceFileInfo.library}/${sourceFileInfo.sourceFile}?`,
+          {
+            modal: true,
+            detail:
+              "Downloading a large source file can take a considerable amount of time depending on the number and size of its members and your connection speed.",
+          },
+          "Check Out All"
+        );
+        if (confirm !== "Check Out All") {
+          return;
+        }
+
+        const memberInfoList = members.map((m) => ({
+          library: sourceFileInfo.library,
+          sourceFile: sourceFileInfo.sourceFile,
+          memberName: m.name,
+          extension: (m.extension || "mbr").toLowerCase(),
+        }));
+
+        await checkoutMembersBatch(service, system, memberInfoList, log);
+      }
+    )
+  );
+}
+
+async function checkoutMembersBatch(
+  service: CheckoutService,
+  system: string,
+  memberInfoList: MemberInfo[],
+  log: vscode.OutputChannel
+): Promise<void> {
+  const alreadyCheckedOut = memberInfoList.filter(
+    (m) => service.findEntry(system, m.library, m.sourceFile, m.memberName)
+  );
+
+  let redownloadBehavior: "skip" | "force" = "force";
+  let discardLocalChanges = false;
+  if (alreadyCheckedOut.length > 0) {
+    const choice = await vscode.window.showWarningMessage(
+      `${alreadyCheckedOut.length} of ${memberInfoList.length} selected member(s) are already checked out. What would you like to do?`,
+      "Re-download All",
+      "Skip Existing",
+      "Cancel"
+    );
+    if (!choice || choice === "Cancel") {
+      return;
+    }
+    redownloadBehavior = choice === "Re-download All" ? "force" : "skip";
+
+    if (redownloadBehavior === "force") {
+      const existingEntries = alreadyCheckedOut
+        .map((m) => service.findEntry(system, m.library, m.sourceFile, m.memberName))
+        .filter((e): e is CheckedOutMember => e !== undefined);
+      if (!(await saveDirtyLocalFiles(existingEntries))) {
+        return;
+      }
+      const withLocalChanges = await countLocalChanges(service, existingEntries, log);
+      if (withLocalChanges > 0) {
+        const discard = await vscode.window.showWarningMessage(
+          `${withLocalChanges} of the already checked-out member(s) have local changes that have not been sent to the IBM i.`,
+          { modal: true, detail: "Discarding re-downloads them and loses those changes. Keeping skips them." },
+          "Discard Local Changes",
+          "Keep Local Changes"
+        );
+        if (!discard) {
+          return;
+        }
+        discardLocalChanges = discard === "Discard Local Changes";
+      }
+    }
+  }
+
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: "Checking out members...", cancellable: true },
+    async (progress, token) => {
+      let succeeded = 0;
+      let errors = 0;
+      let cancelled = false;
+
+      await service.runBatch(async () => {
+        for (let i = 0; i < memberInfoList.length; i++) {
+          if (token.isCancellationRequested) {
+            cancelled = true;
+            break;
+          }
+          const m = memberInfoList[i];
+          progress.report({ message: `${m.memberName} (${i + 1}/${memberInfoList.length})` });
+          try {
+            await service.checkoutMember(
+              m.library, m.sourceFile, m.memberName, m.extension,
+              { redownloadBehavior, suppressAutoOpen: true, discardLocalChanges }
+            );
+            succeeded++;
+          } catch (err) {
+            if (!(err instanceof CheckoutCancelledError)) {
+              errors++;
+              log.appendLine(`[checkout] Error for ${m.memberName}: ${errorMessage(err)}`);
+            }
+          }
+        }
+      });
+
+      if (cancelled) {
+        vscode.window.showInformationMessage(
+          `Checkout cancelled. ${succeeded}/${memberInfoList.length} member(s) checked out from ${system} before cancelling.`
+        );
+      } else if (errors > 0) {
+        vscode.window.showWarningMessage(
+          `Checked out ${succeeded}/${memberInfoList.length} members from ${system}. ${errors} error(s) — see IBM i Member Workspace output panel.`
+        );
+        log.show();
+      } else {
+        vscode.window.showInformationMessage(
+          `Checked out ${succeeded} member(s) from ${system}.`
+        );
+      }
+    }
+  );
+}
+
+/** Normalizes a node's resourceUri (a vscode.Uri, or something that stringifies to one). */
+function resourceUriOf(node: BrowserNode | undefined): UriParts | undefined {
+  const resourceUri = node?.resourceUri;
+  if (!resourceUri) {
+    return undefined;
+  }
+  return resourceUri instanceof vscode.Uri
+    ? resourceUri
+    : vscode.Uri.parse(String(resourceUri));
+}
+
+function sourceFileInfoOf(node: BrowserNode | undefined): SourceFileInfo | undefined {
+  return extractSourceFileInfo(node, resourceUriOf(node));
+}
+
+function memberInfoOf(node: BrowserNode | undefined): MemberInfo | undefined {
+  return extractMemberInfo(node, resourceUriOf(node));
+}

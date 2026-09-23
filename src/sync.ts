@@ -78,3 +78,20 @@ export function statusAfterLocalSave(
       return status;
   }
 }
+
+/**
+ * Baseline and status after an upload, from the member as re-read from the
+ * IBM i. The IBM i can alter what it stores (e.g. truncating lines longer than
+ * the record length), so the remote copy, not the local one, is the new baseline.
+ */
+export function statusAfterUpload(
+  localHash: string,
+  remoteHashAfterUpload: string
+): { baseline: string; status: CheckoutStatus; altered: boolean } {
+  const altered = localHash !== remoteHashAfterUpload;
+  return {
+    baseline: remoteHashAfterUpload,
+    status: altered ? "modified" : "merged",
+    altered,
+  };
+}

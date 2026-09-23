@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, sep } from "node:path";
 import { describe, it } from "node:test";
 
 interface ExtensionManifest {
@@ -16,10 +16,17 @@ interface ExtensionManifest {
 
 const root = join(__dirname, "..", "..");
 const manifestPath = join(root, "package.json");
-const extensionPath = join(root, "src", "extension.ts");
+const srcPath = join(root, "src");
 
 function readManifest(): ExtensionManifest {
   return JSON.parse(readFileSync(manifestPath, "utf8")) as ExtensionManifest;
+}
+
+/** Every non-test TypeScript source file under src/. */
+function runtimeSourceFiles(): string[] {
+  return readdirSync(srcPath, { recursive: true, encoding: "utf8" })
+    .filter((file) => file.endsWith(".ts") && !file.startsWith(`test${sep}`))
+    .map((file) => join(srcPath, file));
 }
 
 describe("extension manifest", () => {
@@ -33,7 +40,7 @@ describe("extension manifest", () => {
 
   it("contributes exactly the commands registered by the extension", () => {
     const manifest = readManifest();
-    const source = readFileSync(extensionPath, "utf8");
+    const source = runtimeSourceFiles().map((file) => readFileSync(file, "utf8")).join("\n");
     const registered = [...source.matchAll(/registerCommand\(\s*["']([^"']+)["']/g)]
       .map((match) => match[1])
       .sort();
@@ -59,12 +66,7 @@ describe("extension manifest", () => {
       )
     );
 
-    const runtimeFiles = [manifestPath, ...[
-      "checkoutService.ts",
-      "checkoutTreeProvider.ts",
-      "extension.ts",
-      "mergeHandler.ts",
-    ].map((file) => join(root, "src", file))];
+    const runtimeFiles = [manifestPath, ...runtimeSourceFiles()];
 
     for (const file of runtimeFiles) {
       assert.doesNotMatch(readFileSync(file, "utf8"), /ibmi-checkout/);

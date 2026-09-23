@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { classifyStatus, hashContent, nextBaseline, statusAfterLocalSave } from "../sync";
+import {
+  classifyStatus,
+  hashContent,
+  nextBaseline,
+  statusAfterLocalSave,
+  statusAfterUpload,
+} from "../sync";
 
 describe("classifyStatus", () => {
   it("is in-sync when local matches remote", () => {
@@ -70,5 +76,22 @@ describe("statusAfterLocalSave", () => {
     assert.equal(statusAfterLocalSave("modified", false), "in-sync");
     assert.equal(statusAfterLocalSave("conflict", false), "remote-changed");
     assert.equal(statusAfterLocalSave("checked-out", false), "checked-out");
+  });
+});
+
+describe("statusAfterUpload", () => {
+  it("is merged when the IBM i stored exactly the local content", () => {
+    assert.deepEqual(statusAfterUpload("same", "same"), {
+      baseline: "same",
+      status: "merged",
+      altered: false,
+    });
+  });
+
+  it("uses the stored remote content as the baseline when the IBM i altered it", () => {
+    const after = statusAfterUpload("local", "truncated");
+    assert.deepEqual(after, { baseline: "truncated", status: "modified", altered: true });
+    // The next refresh must not report a false remote change.
+    assert.equal(classifyStatus("local", "truncated", after.baseline), "modified");
   });
 });
