@@ -1,6 +1,6 @@
 # Change Log
 
-## Unreleased
+## 1.1.1 - 2026-09-22
 
 - Fix: whenever local and remote match (for example after a Merge Back or an identical edit on the IBM i), that content becomes the new baseline, so later local edits show as **local changes** instead of a false **conflict**, and **Upload** is no longer blocked.
 - Fix: **Upload** and **Refresh** offer to save unsaved edits to checked-out files first, instead of using the stale copy on disk.
