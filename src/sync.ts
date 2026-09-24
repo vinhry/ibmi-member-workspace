@@ -95,3 +95,19 @@ export function statusAfterUpload(
     altered,
   };
 }
+
+/**
+ * Shapes a local file for upload. Code for IBM i's source-date save splits the
+ * body on "\n" and diffs it line by line against the member as read with SQL
+ * (LF-joined, no trailing newline): a BOM or CRLF endings would mark every line
+ * changed. Every trailing blank line is dropped, since each would otherwise
+ * become a blank last record that breaks compiles (like `hashContent`,
+ * trailing blank lines are not significant). Leading and embedded blank lines
+ * are kept.
+ */
+export function normalizeForMemberUpload(content: string): string {
+  return content
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\s+$/, "");
+}

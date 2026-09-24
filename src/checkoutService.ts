@@ -23,6 +23,8 @@ import {
 import {
   downloadMemberContent,
   uploadMemberContent,
+  uploadMemberContentWithDates,
+  sourceDatesEnabled,
   getSystemName,
 } from "./codeForIBMi";
 import { CheckoutCancelledError, LocalFileMissingError, errorMessage } from "./errors";
@@ -31,6 +33,7 @@ import {
   classifyStatus,
   hashContent,
   nextBaseline,
+  normalizeForMemberUpload,
   statusAfterLocalSave,
   statusAfterUpload,
 } from "./sync";
@@ -995,15 +998,23 @@ export class CheckoutService implements vscode.Disposable {
       }
     }
 
-    const success = await uploadMemberContent(
-      entry.library,
-      entry.sourceFile,
-      entry.memberName,
-      localContent
-    );
-
-    if (!success) {
-      return "failed";
+    const uploadContent = normalizeForMemberUpload(localContent);
+    if (sourceDatesEnabled()) {
+      await uploadMemberContentWithDates(entry, uploadContent);
+      this.log.appendLine(`[upload] ${formatMemberPath(entry)} uploaded with source dates`);
+    } else {
+      const success = await uploadMemberContent(
+        entry.library,
+        entry.sourceFile,
+        entry.memberName,
+        uploadContent
+      );
+      if (!success) {
+        return "failed";
+      }
+      this.log.appendLine(
+        `[upload] ${formatMemberPath(entry)} uploaded without source dates (disabled in Code for IBM i)`
+      );
     }
 
     let after = statusAfterUpload(localHash, localHash);

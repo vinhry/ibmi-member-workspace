@@ -4,6 +4,7 @@ import {
   classifyStatus,
   hashContent,
   nextBaseline,
+  normalizeForMemberUpload,
   statusAfterLocalSave,
   statusAfterUpload,
 } from "../sync";
@@ -93,5 +94,38 @@ describe("statusAfterUpload", () => {
     assert.deepEqual(after, { baseline: "truncated", status: "modified", altered: true });
     // The next refresh must not report a false remote change.
     assert.equal(classifyStatus("local", "truncated", after.baseline), "modified");
+  });
+});
+
+describe("normalizeForMemberUpload", () => {
+  it("converts CRLF endings to LF", () => {
+    assert.equal(normalizeForMemberUpload("A\r\nB\r\nC"), "A\nB\nC");
+  });
+
+  it("removes one trailing newline", () => {
+    assert.equal(normalizeForMemberUpload("A\nB\n"), "A\nB");
+    assert.equal(normalizeForMemberUpload("A\r\nB\r\n"), "A\nB");
+  });
+
+  it("removes every trailing blank line", () => {
+    assert.equal(normalizeForMemberUpload("A\nB\n\n\n"), "A\nB");
+    assert.equal(normalizeForMemberUpload("A\r\nB\r\n\r\n"), "A\nB");
+  });
+
+  it("removes trailing whitespace-only lines", () => {
+    assert.equal(normalizeForMemberUpload("A\nB\n   \n\t\n"), "A\nB");
+  });
+
+  it("keeps leading and embedded blank lines", () => {
+    assert.equal(normalizeForMemberUpload("\nA\n\nB\n"), "\nA\n\nB");
+  });
+
+  it("strips a leading BOM", () => {
+    assert.equal(normalizeForMemberUpload("\uFEFFA\nB\n"), "A\nB");
+  });
+
+  it("leaves content without a trailing newline unchanged", () => {
+    assert.equal(normalizeForMemberUpload("A\n\nB"), "A\n\nB");
+    assert.equal(normalizeForMemberUpload(""), "");
   });
 });

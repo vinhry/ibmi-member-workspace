@@ -95,6 +95,33 @@ export async function uploadMemberContent(
   return getContent().uploadMemberContent(library, sourceFile, member, fileContent);
 }
 
+/** Whether Code for IBM i's "Enable source dates" is on for the current connection. */
+export function sourceDatesEnabled(): boolean {
+  return getConnection()?.getConfig().enableSourceDates === true;
+}
+
+/**
+ * Replaces the member through Code for IBM i's `member` file system, which
+ * keeps SRCDAT for unchanged lines and dates changed lines today — the same
+ * save as editing the member in Code for IBM i. Only call this while
+ * {@link sourceDatesEnabled}; otherwise that save resets every date to 0 and
+ * shows a modal warning.
+ *
+ * Code for IBM i (checked against 3.0.13) diffs against the member as it last
+ * read it, cached by `uri.toString()`. Reading through the same URI first
+ * refreshes that base, which could otherwise be stale from an earlier open.
+ * Pass content shaped by `normalizeForMemberUpload` (LF endings, no BOM, no
+ * trailing blank lines) so only lines that really changed are dated today.
+ */
+export async function uploadMemberContentWithDates(
+  entry: CheckedOutMember,
+  fileContent: string
+): Promise<void> {
+  const uri = memberUri(entry, { editable: true });
+  await vscode.workspace.fs.readFile(uri);
+  await vscode.workspace.fs.writeFile(uri, Buffer.from(fileContent, "utf-8"));
+}
+
 export async function listSourceFileMembers(
   library: string,
   sourceFile: string

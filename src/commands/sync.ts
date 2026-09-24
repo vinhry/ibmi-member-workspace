@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { CheckoutService } from "../checkoutService";
-import { getSystemName, memberUri } from "../codeForIBMi";
+import { getSystemName, memberUri, sourceDatesEnabled } from "../codeForIBMi";
 import { LocalFileMissingError, errorMessage } from "../errors";
 import { mergeDocumentKey } from "../mergeHandler";
 import { countLocalChanges, resolveMemberSelections, saveDirtyLocalFiles } from "../prompts";
@@ -45,8 +45,8 @@ export function registerSyncCommands(ctx: CommandContext): void {
           const memberPath = formatMemberPath(entry);
 
           const confirm = await vscode.window.showWarningMessage(
-            `Upload local copy of ${memberPath} to the IBM i? This will overwrite the remote member and source dates will not be preserved.`,
-            { modal: true },
+            `Upload local copy of ${memberPath} to the IBM i? This will overwrite the remote member.`,
+            { modal: true, detail: sourceDatesDetail() },
             "Upload"
           );
 
@@ -105,8 +105,8 @@ export function registerSyncCommands(ctx: CommandContext): void {
         }
 
         const confirm = await vscode.window.showWarningMessage(
-          `Upload ${selections.length} local files to the IBM i? This will overwrite the remote members and source dates will not be preserved.`,
-          { modal: true },
+          `Upload ${selections.length} local files to the IBM i? This will overwrite the remote members.`,
+          { modal: true, detail: sourceDatesDetail() },
           "Upload All"
         );
         if (confirm !== "Upload All") {
@@ -465,4 +465,11 @@ function showRefreshSummary(
       `${prefix}All ${inSync} member(s) are in sync with the remote.`
     );
   }
+}
+
+function sourceDatesDetail(): string {
+  return sourceDatesEnabled()
+    ? "Source dates are kept for unchanged lines; changed lines are dated today."
+    : "Source dates will not be preserved: every line's date is reset to 0. " +
+      "Turn on \"Enable source dates\" in Code for IBM i's connection settings (Source Code) to keep them.";
 }
