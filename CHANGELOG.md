@@ -1,5 +1,19 @@
 # Change Log
 
+## 1.2.0 - 2026-09-23
+
+- **Every checkout belongs to a work item.** While no work item is selected, checking out asks you to start or choose one; the first checkout of each session confirms the active work item. Members from different tickets no longer end up in the same work item by accident.
+- **New work items start empty** instead of inheriting the current work item's files and members. You can still copy the current members, or move members that were checked out without a work item into the new one.
+- **Move to Work Item…** moves checked-out members (including unsent local edits and sync status) to another work item. Members are saved in the target before they are removed from the source.
+- The status bar and the Checked Out Members header show the active work item, and highlight **No Work Item**.
+- Multi-member checkouts and uploads save one checkpoint for the batch, and prepare the repository once instead of once per member.
+- Work items cannot be changed while a checkout, upload, or Merge Back is running, so a batch never lands in two work items.
+- New work-item names are checked before anything changes, including names that differ only by case.
+- Fix: a history repository that Git fails to open is no longer re-initialized. Re-initializing moved the current work item's files onto the default work item.
+- Fix: checkpoints are no longer saved on a detached commit, where they would be lost.
+- Fix: the status bar no longer shows the branch of an enclosing project repository before Local Change History is set up.
+- Upgrading: members checked out on the default work item (`workspace`) stay there. The next checkout asks for a work item; choose **Start New Work Item**, then **Move current members** to turn them into a ticket. See **Local Change History → Work Items** in the README for diagrams of the new flow.
+
 ## 1.1.2 - 2026-09-23
 
 - Fix: on Windows, **Switch Work Item** and Local Change History setup no longer fail with "Could not create an isolated history repository in the checkout folder".

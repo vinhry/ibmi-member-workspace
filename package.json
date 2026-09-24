@@ -2,7 +2,7 @@
   "name": "ibmi-member-workspace",
   "displayName": "IBM i Member Workspace",
   "description": "Work with IBM i source members locally, compare changes, and synchronize them safely. Works with Code for IBM i.",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "publisher": "vinhry",
   "author": "Vinhry",
   "license": "GPL-3.0",
@@ -220,6 +220,12 @@
         "icon": "$(git-commit)"
       },
       {
+        "command": "ibmi-member-workspace.moveToWorkItem",
+        "title": "Move to Work Item\u2026",
+        "category": "IBM i Member Workspace",
+        "icon": "$(git-branch)"
+      },
+      {
         "command": "ibmi-member-workspace.setupGitIntegration",
         "title": "Set Up Local Change History",
         "category": "IBM i Member Workspace",
@@ -333,6 +339,10 @@
         {
           "command": "ibmi-member-workspace.viewGitHistory",
           "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.moveToWorkItem",
+          "when": "false"
         }
       ],
       "view/item/context": [
@@ -410,6 +420,11 @@
           "command": "ibmi-member-workspace.commitNow",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection && config.ibmi-member-workspace.gitIntegration",
           "group": "2_merge@4"
+        },
+        {
+          "command": "ibmi-member-workspace.moveToWorkItem",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && config.ibmi-member-workspace.gitIntegration",
+          "group": "2_merge@5"
         },
         {
           "command": "ibmi-member-workspace.discardCheckout",
