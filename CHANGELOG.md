@@ -1,5 +1,10 @@
 # Change Log
 
+## 1.2.1 - 2026-09-24
+
+- Fix: **Upload to IBM i** no longer resets every source date (SRCDAT) to `000000`. When source dates are enabled in Code for IBM i, uploads save through Code for IBM i like an edit in its editor: unchanged lines keep their dates and changed lines are dated today. CRLF line endings in the local file no longer affect the dates.
+- Fix: blank lines at the end of the local file are no longer uploaded as empty records, which broke compiles. Re-uploading a member removes an empty last record left by an earlier upload.
+
 ## 1.2.0 - 2026-09-23
 
 - **Every checkout belongs to a work item.** While no work item is selected, checking out asks you to start or choose one; the first checkout of each session confirms the active work item. Members from different tickets no longer end up in the same work item by accident.
