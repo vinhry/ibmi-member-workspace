@@ -13,6 +13,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { GitService } from "../gitService";
 
+// Isolate Git from the host's system and global config: CI runner images trust every folder
+// (safe.directory=*), and Git for Windows turns on core.autocrlf system-wide.
+process.env.GIT_CONFIG_NOSYSTEM = "1";
+process.env.GIT_CONFIG_GLOBAL = join(mkdtempSync(join(tmpdir(), "ibmi-member-workspace-gitconfig-")), "config");
+
 function git(folder: string, ...args: string[]): string {
   return execFileSync("git", ["-C", folder, ...args], { encoding: "utf-8" }).trim();
 }
