@@ -34,6 +34,51 @@ export interface SystemCheckoutState {
   workItems: Record<string, CheckedOutMember[]>;
 }
 
+/** The branch a new Local Change History repository starts on: "no work item selected". */
+export const DEFAULT_WORK_ITEM = "workspace";
+
+export function isDefaultWorkItem(name: string): boolean {
+  return name === DEFAULT_WORK_ITEM;
+}
+
+/** How a new work item gets its checked-out members. */
+export type WorkItemCarry = "empty" | "copy" | "move";
+
+/**
+ * Makes `name` the active work item. Its list is always replaced: the branch was just created,
+ * so any list already stored under that name belongs to an older, deleted branch.
+ * "copy" clones the current members; "move" re-keys the current list (the branch was renamed).
+ */
+export function startWorkItemState(
+  state: SystemCheckoutState,
+  name: string,
+  carry: WorkItemCarry
+): void {
+  const previous = state.activeWorkItem;
+  const current = state.workItems[previous] ?? [];
+  if (carry === "move" && previous !== name) {
+    delete state.workItems[previous];
+  }
+  state.workItems[name] = carry === "empty" ? [] : current.map((entry) => ({ ...entry }));
+  state.activeWorkItem = name;
+}
+
+/** Moves entries between work items, keeping their sync baselines and statuses. */
+export function moveEntriesState(
+  state: SystemCheckoutState,
+  ids: ReadonlySet<string>,
+  from: string,
+  to: string
+): void {
+  const source = state.workItems[from] ?? [];
+  const moving = source.filter((entry) => ids.has(entry.id));
+  state.workItems[from] = source.filter((entry) => !ids.has(entry.id));
+  state.workItems[to] = [
+    ...(state.workItems[to] ?? []).filter((entry) => !ids.has(entry.id)),
+    ...moving,
+  ];
+}
+
 export interface RefreshTally {
   inSync: number;
   modified: number;
@@ -84,7 +129,7 @@ function parseIndexStructure(json: string): CheckoutIndex {
   if (!Array.isArray(value.entries)) {
     throw new Error("Checkout index is missing its entries list");
   }
-  return migrateWorkItems("workspace", { workspace: value.entries });
+  return migrateWorkItems(DEFAULT_WORK_ITEM, { [DEFAULT_WORK_ITEM]: value.entries });
 }
 
 /** Recomputes ids so entries written with the older "_"-joined format keep matching. */

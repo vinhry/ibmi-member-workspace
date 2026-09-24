@@ -7,7 +7,7 @@ import { getSystemName, onConnectionChange } from "./codeForIBMi";
 import { errorMessage } from "./errors";
 import { LocalFileWatcher } from "./localFileWatcher";
 import { extractMemberInfo } from "./memberInfo";
-import { CheckedOutMember, formatMemberPath } from "./types";
+import { CheckedOutMember, formatMemberPath, isDefaultWorkItem } from "./types";
 import {
   offerCheckoutFolderSetup,
   registerCheckoutFolderCommands,
@@ -61,18 +61,31 @@ export async function activate(
   const refreshGitStatusBar = async () => {
     const system = getSystemName();
     const root = system ? service.getGitRoot(system) : undefined;
-    if (!system || !root || !(await service.isGitEnabled())) {
+    // Until the system directory is its own repository, Git would report an enclosing repository's branch.
+    if (
+      !system ||
+      !root ||
+      !(await service.isGitEnabled()) ||
+      !(await gitService.isExactRepository(root.fsPath))
+    ) {
       gitBranchStatusBar.hide();
+      treeView.description = undefined;
       return;
     }
     const branch = await gitService.currentBranch(root.fsPath);
-    if (branch) {
+    const repository = `Local Change History for ${system}\nRepository: ${root.fsPath}`;
+    if (branch && !isDefaultWorkItem(branch)) {
       gitBranchStatusBar.text = `$(git-branch) Work Item: ${branch}`;
-      gitBranchStatusBar.tooltip = `Local Change History for ${system}\nRepository: ${root.fsPath}`;
-      gitBranchStatusBar.show();
+      gitBranchStatusBar.tooltip = repository;
+      gitBranchStatusBar.backgroundColor = undefined;
+      treeView.description = branch;
     } else {
-      gitBranchStatusBar.hide();
+      gitBranchStatusBar.text = "$(warning) No Work Item";
+      gitBranchStatusBar.tooltip = `${branch ? "No work item is selected" : "The repository is on a detached commit"}. The next checkout asks which work item it belongs to.\n${repository}`;
+      gitBranchStatusBar.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
+      treeView.description = "no work item";
     }
+    gitBranchStatusBar.show();
   };
 
   onConnectionChange(context, () => {

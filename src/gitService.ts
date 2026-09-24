@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type * as vscode from "vscode";
+import { DEFAULT_WORK_ITEM } from "./types";
 
 const pExecFile = promisify(execFile);
 
@@ -311,28 +312,22 @@ export class GitService {
 
     try {
       fs.mkdirSync(folder, { recursive: true });
-      const exactRepository = await this.isExactRepository(folder);
+      const existing = await this.checkExactRepository(folder);
+      const exactRepository = existing.ok;
       const managedRepository = exactRepository && await this.isManagedRepository(folder);
       const markerPath = path.join(folder, ".git", "ibmi-member-workspace");
       if (!exactRepository) {
+        // Never re-initialize a repository Git failed to open: re-pointing HEAD at the default
+        // branch would leave the current work item's files to be committed onto it.
+        if (fs.existsSync(path.join(folder, ".git"))) {
+          return this.repositoryOpenFailure(folder, existing, "Git could not open the history repository in the checkout folder.");
+        }
         const init = await this.run(folder, ["init"]);
         const created = init.ok ? await this.checkExactRepository(folder) : init;
         if (!created.ok) {
-          if (created.stderr.includes("dubious ownership")) {
-            this.log.appendLine(`[git] Repository setup failed: ${created.stderr}`);
-            return {
-              status: "failure",
-              message: `Git does not trust the checkout folder because another account owns it (common on network drives). Run "git config --global --add safe.directory ${folder.replace(/\\/g, "/")}", then try again.`,
-              details: created.stderr,
-            };
-          }
-          return {
-            status: "failure",
-            message: "Could not create an isolated history repository in the checkout folder.",
-            details: created.stderr,
-          };
+          return this.repositoryOpenFailure(folder, created, "Could not create an isolated history repository in the checkout folder.");
         }
-        await this.run(folder, ["symbolic-ref", "HEAD", "refs/heads/workspace"]);
+        await this.run(folder, ["symbolic-ref", "HEAD", `refs/heads/${DEFAULT_WORK_ITEM}`]);
         fs.writeFileSync(markerPath, "Local Change History repository\n", "utf-8");
       }
 
@@ -367,9 +362,81 @@ export class GitService {
     }
   }
 
+  private repositoryOpenFailure(folder: string, result: CommandResult, message: string): GitOperationResult {
+    this.log.appendLine(`[git] Repository setup failed: ${result.stderr}`);
+    if (result.stderr.includes("dubious ownership")) {
+      return {
+        status: "failure",
+        message: `Git does not trust the checkout folder because another account owns it (common on network drives). Run "git config --global --add safe.directory ${folder.replace(/\\/g, "/")}", then try again.`,
+        details: result.stderr,
+      };
+    }
+    return { status: "failure", message, details: result.stderr };
+  }
+
   async currentBranch(folder: string): Promise<string> {
-    const branch = await this.run(folder, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+    // Fails quietly on a detached HEAD, which callers treat as "no work item".
+    const branch = await this.run(folder, ["symbolic-ref", "--quiet", "--short", "HEAD"], false);
     return branch.ok ? branch.stdout : "";
+  }
+
+  /**
+   * The commit new work items start from so they do not inherit another work item's members: the
+   * repository's first commit, when it holds nothing but the generated `.gitignore`. Repositories
+   * adopted with their own history have no such commit.
+   */
+  async findCleanBase(folder: string): Promise<string | undefined> {
+    const roots = await this.run(folder, ["rev-list", "--max-parents=0", "--first-parent", "HEAD"], false);
+    const base = roots.ok ? roots.stdout.split("\n").filter(Boolean).at(-1) : undefined;
+    if (!base) {
+      return undefined;
+    }
+    const tree = await this.run(folder, ["ls-tree", "--name-only", "-z", base], false, false);
+    if (!tree.ok) {
+      return undefined;
+    }
+    const names = tree.stdout.split("\0").filter(Boolean);
+    return names.every((name) => name === ".gitignore") ? base : undefined;
+  }
+
+  async renameWorkItem(folder: string, from: string, to: string): Promise<GitOperationResult> {
+    if (!(await this.validateBranchName(folder, to))) {
+      return { status: "invalidName", message: "Use a short name without spaces or special Git characters, such as TICKET-123." };
+    }
+    const result = await this.run(folder, ["branch", "-m", from, to]);
+    return result.ok
+      ? { status: "success" }
+      : { status: "failure", message: `Could not rename work item “${from}” to “${to}”.`, details: result.stderr };
+  }
+
+  /** Creates a work item without switching to it. */
+  async createBranch(folder: string, name: string, startPoint: string): Promise<GitOperationResult> {
+    if (!(await this.validateBranchName(folder, name))) {
+      return { status: "invalidName", message: "Use a short name without spaces or special Git characters, such as TICKET-123." };
+    }
+    const result = await this.run(folder, ["branch", name, startPoint]);
+    return result.ok
+      ? { status: "success" }
+      : { status: "failure", message: `Could not create work item “${name}”.`, details: result.stderr };
+  }
+
+  /** Which of `filePaths` are committed on `branch`. */
+  async trackedInBranch(folder: string, branch: string, filePaths: string[]): Promise<string[]> {
+    const root = path.resolve(folder);
+    const relative = new Map(filePaths.map((filePath) => [
+      path.relative(root, path.resolve(filePath)).split(path.sep).join("/"),
+      filePath,
+    ]));
+    const result = await this.run(
+      folder,
+      ["ls-tree", "-r", "--name-only", "-z", branch, "--", ...relative.keys()],
+      true,
+      false
+    );
+    if (!result.ok) {
+      throw new Error(`Could not read work item “${branch}”: ${result.stderr}`);
+    }
+    return result.stdout.split("\0").filter(Boolean).map((name) => relative.get(name) ?? path.join(folder, name));
   }
 
   async listBranches(folder: string): Promise<string[]> {
@@ -383,14 +450,14 @@ export class GitService {
     return (await this.run(folder, ["check-ref-format", "--branch", name], false)).ok;
   }
 
-  async createWorkItem(folder: string, name: string): Promise<GitOperationResult> {
+  async createWorkItem(folder: string, name: string, startPoint?: string): Promise<GitOperationResult> {
     if (!(await this.validateBranchName(folder, name))) {
       return {
         status: "invalidName",
         message: "Use a short name without spaces or special Git characters, such as TICKET-123.",
       };
     }
-    const result = await this.run(folder, ["checkout", "-b", name]);
+    const result = await this.run(folder, ["checkout", "-b", name, ...(startPoint ? [startPoint] : [])]);
     if (!result.ok) {
       return {
         status: result.stderr.includes("already exists") ? "conflict" : "failure",
@@ -474,6 +541,13 @@ export class GitService {
       )
     ) {
       return { status: "failure", message: "A checkpoint path is outside the checkout folder." };
+    }
+
+    if (!(await this.currentBranch(folder))) {
+      return {
+        status: "conflict",
+        message: "Local Change History is not on a work item (detached HEAD), so the checkpoint was not saved. Use Switch Work Item to choose one.",
+      };
     }
 
     const stage = await this.run(folder, ["add", "-A", "--", ...relativePaths]);

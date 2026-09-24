@@ -14,6 +14,7 @@ import {
 import { countLocalChanges, saveDirtyLocalFiles } from "../prompts";
 import { CheckedOutMember } from "../types";
 import { CommandContext } from "./context";
+import { ensureWorkItemForCheckout } from "./git";
 
 export function registerCheckoutCommands(ctx: CommandContext): void {
   const { context, service, log } = ctx;
@@ -41,6 +42,10 @@ export function registerCheckoutCommands(ctx: CommandContext): void {
               vscode.window.showErrorMessage(
                 "Could not determine member details from selection. Check 'IBM i Member Workspace' output panel for details."
               );
+              return;
+            }
+            const system = getSystemName();
+            if (system && !(await ensureWorkItemForCheckout(ctx, system))) {
               return;
             }
             await service.checkoutMember(
@@ -73,6 +78,9 @@ export function registerCheckoutCommands(ctx: CommandContext): void {
 
         if (memberInfoList.length === 0) {
           vscode.window.showErrorMessage("Could not determine member details from the selection.");
+          return;
+        }
+        if (!(await ensureWorkItemForCheckout(ctx, system))) {
           return;
         }
 
@@ -135,6 +143,9 @@ export function registerCheckoutCommands(ctx: CommandContext): void {
           "Check Out All"
         );
         if (confirm !== "Check Out All") {
+          return;
+        }
+        if (!(await ensureWorkItemForCheckout(ctx, system))) {
           return;
         }
 
@@ -204,6 +215,7 @@ async function checkoutMembersBatch(
       let succeeded = 0;
       let errors = 0;
       let cancelled = false;
+      const downloaded: string[] = [];
 
       await service.runBatch(async () => {
         for (let i = 0; i < memberInfoList.length; i++) {
@@ -216,7 +228,7 @@ async function checkoutMembersBatch(
           try {
             await service.checkoutMember(
               m.library, m.sourceFile, m.memberName, m.extension,
-              { redownloadBehavior, suppressAutoOpen: true, discardLocalChanges }
+              { redownloadBehavior, suppressAutoOpen: true, discardLocalChanges, deferCheckpointTo: downloaded }
             );
             succeeded++;
           } catch (err) {
@@ -226,6 +238,12 @@ async function checkoutMembersBatch(
             }
           }
         }
+        // One checkpoint for the whole batch, including members downloaded before a cancel.
+        await service.saveBatchCheckpoint(
+          system,
+          downloaded,
+          `checkout: ${describeBatch(memberInfoList, downloaded.length)} from ${system}`
+        );
       });
 
       if (cancelled) {
@@ -244,6 +262,17 @@ async function checkoutMembersBatch(
       }
     }
   );
+}
+
+/** "LIB/SRC(MEMBER)", "3 members of LIB/SRC", or "3 members" for a checkpoint message. */
+function describeBatch(members: MemberInfo[], count: number): string {
+  if (count === 1 && members.length === 1) {
+    const [m] = members;
+    return `${m.library.toUpperCase()}/${m.sourceFile.toUpperCase()}(${m.memberName.toUpperCase()})`;
+  }
+  const sourceFiles = new Set(members.map((m) => `${m.library}/${m.sourceFile}`.toUpperCase()));
+  const noun = `${count} member${count === 1 ? "" : "s"}`;
+  return sourceFiles.size === 1 ? `${noun} of ${[...sourceFiles][0]}` : noun;
 }
 
 /** Normalizes a node's resourceUri (a vscode.Uri, or something that stringifies to one). */

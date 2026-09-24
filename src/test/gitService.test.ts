@@ -214,6 +214,100 @@ describe("GitService", () => {
     }
   });
 
+  it("starts a work item from the clean base without another work item's members", async () => {
+    const { folder, service } = await readyRepository();
+    try {
+      assert.equal((await service.createWorkItem(folder, "TICKET-1")).status, "success");
+      const member = join(folder, "LIB", "QRPGLESRC", "ONE.RPGLE");
+      mkdirSync(join(folder, "LIB", "QRPGLESRC"), { recursive: true });
+      writeFileSync(member, "ticket one\n");
+      assert.equal((await service.saveCheckpoint(folder, [member], "checkout ONE")).status, "success");
+
+      const base = await service.findCleanBase(folder);
+      assert.ok(base);
+      assert.equal((await service.createWorkItem(folder, "TICKET-2", base)).status, "success");
+      assert.equal(await service.currentBranch(folder), "TICKET-2");
+      assert.equal(existsSync(member), false);
+      assert.equal(git(folder, "log", "--format=%s", "TICKET-2"), "Initialize local change history");
+      assert.deepEqual(await service.trackedInBranch(folder, "TICKET-1", [member]), [member]);
+      assert.deepEqual(await service.trackedInBranch(folder, "TICKET-2", [member]), []);
+
+      assert.equal((await service.switchWorkItem(folder, "TICKET-1")).status, "success");
+      assert.equal(readFileSync(member, "utf-8"), "ticket one\n");
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("has no clean base in an adopted repository with its own history", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-adopted-"));
+    try {
+      git(folder, "init");
+      git(folder, "config", "user.name", "Existing User");
+      git(folder, "config", "user.email", "existing@example.com");
+      writeFileSync(join(folder, "existing.txt"), "history\n");
+      git(folder, "add", "existing.txt");
+      git(folder, "commit", "-m", "existing history");
+      const service = new GitService({ appendLine: () => undefined });
+      assert.equal((await service.prepareRepository(folder)).status, "success");
+      assert.equal(await service.findCleanBase(folder), undefined);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps HEAD on the current work item when setup runs again", async () => {
+    const { folder, service } = await readyRepository();
+    try {
+      assert.equal((await service.createWorkItem(folder, "TICKET-1")).status, "success");
+      assert.equal((await service.prepareRepository(folder)).status, "success");
+      assert.equal(await service.currentBranch(folder), "TICKET-1");
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("does not re-initialize a .git directory that Git cannot open", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-broken-"));
+    try {
+      mkdirSync(join(folder, ".git"));
+      const service = new GitService({ appendLine: () => undefined });
+      assert.equal((await service.prepareRepository(folder)).status, "failure");
+      assert.equal(existsSync(join(folder, ".git", "HEAD")), false);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("renames a work item and creates one without switching", async () => {
+    const { folder, service } = await readyRepository();
+    try {
+      assert.equal((await service.renameWorkItem(folder, "workspace", "TICKET-7")).status, "success");
+      assert.equal(await service.currentBranch(folder), "TICKET-7");
+      assert.equal((await service.renameWorkItem(folder, "TICKET-7", "bad name")).status, "invalidName");
+      assert.equal((await service.createBranch(folder, "TICKET-8", "HEAD")).status, "success");
+      assert.equal(await service.currentBranch(folder), "TICKET-7");
+      assert.deepEqual(new Set(await service.listBranches(folder)), new Set(["TICKET-7", "TICKET-8"]));
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("does not save checkpoints on a detached HEAD", async () => {
+    const { folder, service } = await readyRepository();
+    try {
+      git(folder, "checkout", "--detach");
+      const head = git(folder, "rev-parse", "HEAD");
+      const member = join(folder, "MEMBER.RPGLE");
+      writeFileSync(member, "orphan\n");
+      assert.equal(await service.currentBranch(folder), "");
+      assert.equal((await service.saveCheckpoint(folder, [member], "would be orphaned")).status, "conflict");
+      assert.equal(git(folder, "rev-parse", "HEAD"), head);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it("validates work-item names and switches clean work items", async () => {
     const { folder, service } = await readyRepository();
     try {

@@ -109,9 +109,108 @@ Use **IBM i Member Workspace: Switch Work Item** from the Command Palette, panel
 
 - **Start New Work Item** — enter a ticket or project name such as `TICKET-123` or `payroll-fix`.
 - **Switch Work Item** — select a previously created work item.
-- The active work item appears in the status bar.
+- The active work item appears in the status bar and in the Checked Out Members panel header:
 
-Before switching, the extension asks you to save open editors and checkpoint local changes. It never discards changes automatically. Each work item has its own checked-out-member list and synchronization baselines.
+```text
+Status bar shows                    What happens on the next checkout
+─────────────────────────────────   ────────────────────────────────────────────
+No Work Item  (highlighted)         You are asked to start or choose a work item
+Work Item: TICKET-1                 The member is saved in TICKET-1
+```
+
+Every checkout belongs to a work item, so members from different tickets are never mixed:
+
+- While no work item is selected, checking out a member first asks you to start one or choose an existing one. Cancelling cancels the checkout.
+- The first checkout in each VS Code session asks you to confirm the active work item, so a checkout never goes into the previous ticket by accident. Choosing a work item with **Switch Work Item** counts as confirming it.
+- A new work item starts empty: it does not include another work item's members.
+
+Before switching, the extension asks you to save open editors and checkpoint local changes. It never discards changes automatically. Work items cannot be changed while a checkout, upload, or Merge Back is in progress. Each work item has its own checked-out-member list and synchronization baselines.
+
+#### How a checkout chooses its work item
+
+```text
+ Check Out Member  /  Check Out All Members
+                 │
+                 ▼
+ Local Change History enabled? ───── no ────▶ Check out without history
+                 │ yes
+                 ▼
+ A work item is selected? ────────── no ──────────┐
+                 │ yes                            │
+                 ▼                                │
+ Already confirmed in this                        │
+ VS Code session? ────────────────── no ──────────┤
+                 │ yes                            ▼
+                 │                ┌──────────────────────────────────────┐
+                 │                │  Which work item is this checkout    │
+                 │                │  for?                                │
+                 │                │   > Continue in TICKET-1  (*)        │
+                 │                │   + Start New Work Item...           │
+                 │                │   > TICKET-2              (switch)   │
+                 │                └──────────────────────────────────────┘
+                 │                     │ chosen                │ Esc
+                 ▼                     ▼                       ▼
+ Download the member(s)  ◀─────────────┘               Checkout cancelled
+                 │
+                 ▼
+ Save a checkpoint on the work item
+ (one checkpoint for a multi-member checkout)
+
+ (*) Offered only when a work item is already selected.
+```
+
+#### Starting a new work item
+
+A new work item starts from the repository's clean first commit, so it holds only the members you check out for that ticket:
+
+```text
+ Before 1.2.0 — TICKET-2 was created from TICKET-1 and inherited its members
+
+   init ──● PAYROLL ──● TAXCALC                    TICKET-1 = PAYROLL, TAXCALC
+                      └──● INVOICE                 TICKET-2 = PAYROLL, TAXCALC, INVOICE   ✗ mixed
+
+ Since 1.2.0 — every new work item starts empty
+
+   init ─┬─● PAYROLL ──● TAXCALC                   TICKET-1 = PAYROLL, TAXCALC
+         └─● INVOICE                               TICKET-2 = INVOICE                     ✓ separate
+```
+
+If the current work item already has members, you choose how the new one begins:
+
+```text
+ Start New Work Item "TICKET-2"
+            │
+            ├──▶ Start empty            (default)  TICKET-2 has no members.
+            │                                      TICKET-1 keeps its own.
+            │
+            ├──▶ Copy current members              TICKET-2 starts with a copy of
+            │                                      the current members.
+            │
+            └──▶ Move current members              Only when no work item was selected:
+                                                   the members checked out without a
+                                                   work item become TICKET-2.
+```
+
+Upgrading from 1.1.x: members you checked out without choosing a work item stay under **No Work Item**. On your next checkout, choose **Start New Work Item**, enter the ticket, and pick **Move current members** to put them into that ticket.
+
+### Moving Members to Another Work Item
+
+If members were checked out into the wrong work item, select them, right-click, and choose **Move to Work Item…**. Pick an existing work item or start a new one. Each member's local file, including edits not yet sent to the IBM i, and its synchronization status move together. You stay in the current work item unless you choose **Switch to** afterwards.
+
+```text
+ Move PAYROLL from TICKET-1 to TICKET-2
+
+   1. TICKET-1   Save a checkpoint of pending changes (you are asked first)
+   2. TICKET-2   Add PAYROLL with its local edits and    ── "move: … from TICKET-1"
+                 synchronization status
+   3. TICKET-1   Remove PAYROLL                          ── "move: … to TICKET-2"
+   4.            Stay on TICKET-1, or choose "Switch to TICKET-2"
+
+ PAYROLL is added to TICKET-2 before it is removed from TICKET-1.
+ If a step fails, it is in both work items — never in neither.
+```
+
+A member cannot be moved to a work item that already has it; discard it there first.
 
 ### Automatic Checkpoints
 
@@ -120,12 +219,15 @@ The following events save a checkpoint on the active work item:
 | Event | Checkpoint description |
 |-------|---------------|
 | Member checked out | `checkout: LIBRARY/SOURCEFILE(MEMBER) from SYSTEM` |
+| Several members checked out together | `checkout: N members of LIBRARY/SOURCEFILE from SYSTEM` (one checkpoint for the batch) |
 | Member uploaded to IBM i | `upload: LIBRARY/SOURCEFILE(MEMBER) to SYSTEM` |
+| Several members uploaded together | `upload: N members to SYSTEM` (one checkpoint for the batch) |
 | Member re-checked out | `recheckout: LIBRARY/SOURCEFILE(MEMBER) from SYSTEM` |
 | Merge-back saved | `merge-back: LIBRARY/SOURCEFILE(MEMBER) to SYSTEM` |
 | Checkout discarded | `discard: LIBRARY/SOURCEFILE(MEMBER)` |
+| Members moved to another work item | `move: … from WORKITEM` in the target, `move: … to WORKITEM` in the source |
 
-If a file has not changed since its last checkpoint, no duplicate checkpoint is created.
+If a file has not changed since its last checkpoint, no duplicate checkpoint is created. Checkpoints are never saved while the repository is on a detached commit (for example, after checking out an old commit in Source Control); use **Switch Work Item** to return to a work item.
 
 ### Manual Checkpoints
 
@@ -134,12 +236,12 @@ Right-click a checkout and choose **Save Checkpoint**. Add an optional descripti
 ### Workflow Example
 
 1. Run **Set Up Local Change History** and provide a name and email if requested.
-2. Run **Switch Work Item**, choose **Start New Work Item**, and enter your ticket, such as `TICKET-4821`.
-3. Check out and edit the members you need.
+2. Check out a member. When asked which work item it belongs to, choose **Start New Work Item** and enter your ticket, such as `TICKET-4821`. You can also run **Switch Work Item** first.
+3. Check out and edit the other members you need.
 4. Use **Save Checkpoint** whenever you want an intermediate recovery point.
 5. Upload or merge back when ready; successful lifecycle actions create automatic checkpoints.
 6. Use **View Local History** to open VS Code's Source Control view.
-7. Start or switch to another work item for the next ticket.
+7. For the next ticket, start a new work item. It begins empty, and the members of `TICKET-4821` stay in that work item.
 
 If setup or a checkpoint fails, the notification explains the required action. Detailed Git diagnostics are available in the **IBM i Member Workspace** output panel.
 

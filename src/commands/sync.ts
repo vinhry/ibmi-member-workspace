@@ -124,6 +124,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
             let skipped = 0;
             let errors = 0;
             let cancelled = false;
+            const uploaded: string[] = [];
 
             await service.runBatch(async () => {
               for (let i = 0; i < selections.length; i++) {
@@ -134,7 +135,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
                 const entry = selections[i].entry;
                 progress.report({ message: `${entry.memberName} (${i + 1}/${selections.length})` });
                 try {
-                  const result = await service.uploadToRemote(entry);
+                  const result = await service.uploadToRemote(entry, { deferCheckpointTo: uploaded });
                   if (result === "uploaded") {
                     succeeded++;
                   } else if (result === "uploaded-altered") {
@@ -154,6 +155,13 @@ export function registerSyncCommands(ctx: CommandContext): void {
                   log.appendLine(`[upload] Error for ${formatMemberPath(entry)}: ${errorMessage(err)}`);
                 }
               }
+              // One checkpoint for the whole batch, including members uploaded before a cancel.
+              const system = selections[0].entry.system;
+              await service.saveBatchCheckpoint(
+                system,
+                uploaded,
+                `upload: ${uploaded.length} member${uploaded.length === 1 ? "" : "s"} to ${system}`
+              );
             });
 
             if (cancelled) {

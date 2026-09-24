@@ -1,6 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { CheckedOutMember, buildCheckoutId, parseCheckoutIndex, sanitizeSystemName } from "../types";
+import {
+  CheckedOutMember,
+  SystemCheckoutState,
+  buildCheckoutId,
+  moveEntriesState,
+  parseCheckoutIndex,
+  sanitizeSystemName,
+  startWorkItemState,
+} from "../types";
 
 describe("parseCheckoutIndex", () => {
   it("parses a valid index", () => {
@@ -128,5 +136,65 @@ describe("parseCheckoutIndex id migration", () => {
     }));
     assert.equal(index.systems.SYS.workItems.A[0].id, currentId);
     assert.equal(index.systems.SYS.workItems.B[0].id, currentId);
+  });
+});
+
+describe("work item state", () => {
+  const member = (memberName: string, baseline: string): CheckedOutMember => ({
+    id: buildCheckoutId("SYS", "LIB", "QRPGLESRC", memberName),
+    system: "SYS",
+    library: "LIB",
+    sourceFile: "QRPGLESRC",
+    memberName,
+    extension: "rpgle",
+    localPath: `/checkout/SYS/LIB/QRPGLESRC/${memberName}.RPGLE`,
+    checkedOutAt: "2026-09-23T00:00:00.000Z",
+    remoteHashAtCheckout: baseline,
+    status: "modified",
+  });
+  const state = (): SystemCheckoutState => ({
+    system: "SYS",
+    directory: "SYS",
+    activeWorkItem: "workspace",
+    workItems: {
+      workspace: [member("ONE", "h1"), member("TWO", "h2")],
+      "TICKET-2": [member("STALE", "old")],
+    },
+  });
+
+  it("starts empty and replaces a stale list stored under the same name", () => {
+    const value = state();
+    startWorkItemState(value, "TICKET-2", "empty");
+    assert.equal(value.activeWorkItem, "TICKET-2");
+    assert.deepEqual(value.workItems["TICKET-2"], []);
+    assert.equal(value.workItems.workspace.length, 2);
+  });
+
+  it("copies members as independent entries", () => {
+    const value = state();
+    startWorkItemState(value, "TICKET-3", "copy");
+    assert.deepEqual(value.workItems["TICKET-3"], value.workItems.workspace);
+    value.workItems["TICKET-3"][0].status = "in-sync";
+    assert.equal(value.workItems.workspace[0].status, "modified");
+  });
+
+  it("moves members into the renamed work item", () => {
+    const value = state();
+    startWorkItemState(value, "TICKET-4", "move");
+    assert.equal(value.activeWorkItem, "TICKET-4");
+    assert.equal(value.workItems.workspace, undefined);
+    assert.deepEqual(value.workItems["TICKET-4"].map((entry) => entry.memberName), ["ONE", "TWO"]);
+  });
+
+  it("moves selected entries between work items keeping their baselines", () => {
+    const value = state();
+    moveEntriesState(value, new Set([buildCheckoutId("SYS", "LIB", "QRPGLESRC", "TWO")]), "workspace", "TICKET-2");
+    assert.deepEqual(value.workItems.workspace.map((entry) => entry.memberName), ["ONE"]);
+    assert.deepEqual(
+      value.workItems["TICKET-2"].map((entry) => [entry.memberName, entry.remoteHashAtCheckout, entry.status]),
+      [["STALE", "old", "modified"], ["TWO", "h2", "modified"]]
+    );
+    moveEntriesState(value, new Set([buildCheckoutId("SYS", "LIB", "QRPGLESRC", "ONE")]), "workspace", "NEW");
+    assert.deepEqual(value.workItems.NEW.map((entry) => entry.memberName), ["ONE"]);
   });
 });

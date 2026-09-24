@@ -5,14 +5,19 @@ import * as path from "node:path";
 import {
   CheckedOutMember,
   CheckoutIndex,
+  DEFAULT_WORK_ITEM,
   SystemCheckoutState,
   RefreshTally,
+  WorkItemCarry,
   buildCheckoutId,
   buildLocalFileName,
   emptyTally,
   formatMemberPath,
+  isDefaultWorkItem,
+  moveEntriesState,
   parseCheckoutIndex,
   sanitizeSystemName,
+  startWorkItemState,
   systemKey,
 } from "./types";
 import {
@@ -41,6 +46,18 @@ export type UploadResult = "uploaded" | "uploaded-altered" | "failed" | "remote-
 
 type RefreshProgress = vscode.Progress<{ message?: string; increment?: number }>;
 
+export interface CheckoutOptions {
+  redownloadBehavior?: "ask" | "skip" | "force";
+  suppressAutoOpen?: boolean;
+  /** With "force": overwrite local edits not yet sent to the IBM i instead of skipping the member. */
+  discardLocalChanges?: boolean;
+  /**
+   * Collects the path of each member actually downloaded, for one checkpoint after a batch,
+   * instead of saving a checkpoint per member.
+   */
+  deferCheckpointTo?: string[];
+}
+
 export class CheckoutService implements vscode.Disposable {
   private index: CheckoutIndex = {
     version: 3,
@@ -58,6 +75,12 @@ export class CheckoutService implements vscode.Disposable {
   private readonly gitSetupDeclinedSystems = new Set<string>();
   private gitOperationWarningShown = false;
   private readonly gitPreparations = new Map<string, Promise<GitOperationResult>>();
+  /** Successful repository preparation, reused until the running batch ends. */
+  private readonly batchGitReady = new Map<string, GitOperationResult>();
+  /** Lifecycle operations in progress; work items must not change underneath them. */
+  private inFlight = 0;
+  /** Work item the user confirmed for checkouts this session, per system. */
+  private readonly confirmedWorkItems = new Map<string, string>();
 
   private readonly _onDidChange = new vscode.EventEmitter<void>();
   readonly onDidChange = this._onDidChange.event;
@@ -127,9 +150,47 @@ export class CheckoutService implements vscode.Disposable {
     return state.workItems[state.activeWorkItem] ??= [];
   }
 
-  getActiveWorkItem(): string {
-    const system = getSystemName();
-    return system ? this.ensureSystemState(system).activeWorkItem : "workspace";
+  getActiveWorkItem(system = getSystemName()): string {
+    return system ? this.ensureSystemState(system).activeWorkItem : DEFAULT_WORK_ITEM;
+  }
+
+  /** Whether a checkout, upload, or other operation that records history is running. */
+  isBusy(): boolean {
+    return this.inFlight > 0;
+  }
+
+  private async track<T>(fn: () => Promise<T>): Promise<T> {
+    this.inFlight++;
+    try {
+      return await fn();
+    } finally {
+      this.inFlight--;
+    }
+  }
+
+  /** Records that the user chose the active work item for checkouts in this session. */
+  confirmWorkItem(system: string): void {
+    this.confirmedWorkItems.set(systemKey(system), this.ensureSystemState(system).activeWorkItem);
+  }
+
+  /**
+   * Whether a checkout must first ask which work item it belongs to: always on the default
+   * work item or a detached HEAD, otherwise once per session.
+   */
+  async needsWorkItemChoice(system: string): Promise<boolean> {
+    const root = this.getGitRoot(system);
+    if (!root || !this.gitService) {
+      return false;
+    }
+    const active = this.ensureSystemState(system).activeWorkItem;
+    const branch = await this.gitService.currentBranch(root.fsPath);
+    return !branch ||
+      isDefaultWorkItem(active) ||
+      this.confirmedWorkItems.get(systemKey(system)) !== active;
+  }
+
+  countWorkItemMembers(system: string, name: string): number {
+    return this.ensureSystemState(system).workItems[name]?.length ?? 0;
   }
 
   getKnownWorkItems(): string[] {
@@ -260,6 +321,10 @@ export class CheckoutService implements vscode.Disposable {
     } else {
       this.ensureSystemState(system);
     }
+    const prepared = this.batchGitReady.get(key);
+    if (prepared) {
+      return prepared;
+    }
     const existing = this.gitPreparations.get(key);
     if (existing) {
       return existing;
@@ -267,7 +332,11 @@ export class CheckoutService implements vscode.Disposable {
     const preparation = this.prepareGitRepository(system);
     this.gitPreparations.set(key, preparation);
     try {
-      return await preparation;
+      const result = await preparation;
+      if (this.batchDepth > 0 && result.status === "success") {
+        this.batchGitReady.set(key, result);
+      }
+      return result;
     } finally {
       if (this.gitPreparations.get(key) === preparation) {
         this.gitPreparations.delete(key);
@@ -366,12 +435,12 @@ export class CheckoutService implements vscode.Disposable {
       return;
     }
     if (
-      state.activeWorkItem === "workspace" &&
+      isDefaultWorkItem(state.activeWorkItem) &&
       !state.workItems[branch] &&
       Object.keys(state.workItems).length === 1
     ) {
-      state.workItems[branch] = state.workItems.workspace;
-      delete state.workItems.workspace;
+      state.workItems[branch] = state.workItems[DEFAULT_WORK_ITEM];
+      delete state.workItems[DEFAULT_WORK_ITEM];
     } else if (!state.workItems[branch]) {
       state.workItems[branch] = [];
     }
@@ -382,19 +451,166 @@ export class CheckoutService implements vscode.Disposable {
     await this.persist();
   }
 
-  async activateWorkItem(system: string, name: string, cloneCurrent: boolean): Promise<void> {
+  /** Makes an existing work item active after its branch was checked out. */
+  async activateWorkItem(system: string, name: string): Promise<void> {
     const state = this.ensureSystemState(system);
-    const currentEntries = state.workItems[state.activeWorkItem] ?? [];
-    if (!state.workItems[name]) {
-      state.workItems[name] = cloneCurrent
-        ? currentEntries.map((entry) => ({ ...entry }))
-        : [];
-    }
     state.activeWorkItem = name;
+    state.workItems[name] = (state.workItems[name] ?? []).filter((entry) =>
+      fs.existsSync(entry.localPath)
+    );
+    await this.persist();
+  }
+
+  /** Makes a work item whose branch was just created (or renamed, for "move") active. */
+  async startWorkItem(system: string, name: string, carry: WorkItemCarry): Promise<void> {
+    const state = this.ensureSystemState(system);
+    startWorkItemState(state, name, carry);
     state.workItems[name] = state.workItems[name].filter((entry) =>
       fs.existsSync(entry.localPath)
     );
     await this.persist();
+  }
+
+  /**
+   * Moves checkouts from the active work item to `target`, creating it from the clean base when
+   * `create` is set. The members are committed on the target before they are removed from the
+   * active work item, so a failure part-way leaves them in both work items, never in neither.
+   * The active work item stays active. The caller must leave the repository clean first.
+   */
+  moveEntriesToWorkItem(
+    system: string,
+    entries: CheckedOutMember[],
+    target: string,
+    options: { create: boolean }
+  ): Promise<GitOperationResult> {
+    return this.track(() => this.moveEntriesNow(system, entries, target, options.create));
+  }
+
+  private async moveEntriesNow(
+    system: string,
+    entries: CheckedOutMember[],
+    target: string,
+    create: boolean
+  ): Promise<GitOperationResult> {
+    const ready = await this.ensureGitReady(system);
+    const root = this.getGitRoot(system);
+    if (ready.status !== "success" || !this.gitService || !root) {
+      return ready.status === "success" ? { status: "setupRequired", message: "Choose a checkout folder first." } : ready;
+    }
+    const git = this.gitService;
+    const folder = root.fsPath;
+    const state = this.ensureSystemState(system);
+    const source = state.activeWorkItem;
+    if (target === source || entries.length === 0) {
+      return { status: "noChanges", message: "Nothing to move." };
+    }
+    for (const entry of entries) {
+      await this.assertEntryInActiveWorkItem(entry);
+    }
+    const paths = entries.map((entry) => entry.localPath);
+    if (paths.some((candidate) => !this.pathIsInside(folder, candidate))) {
+      return { status: "failure", message: "A checkout path belongs to another system repository." };
+    }
+    const clean = await git.getWorkingTreeState(folder);
+    if (clean.status !== "success") {
+      return clean;
+    }
+
+    const contents = new Map<string, Uint8Array>();
+    for (const entry of entries) {
+      try {
+        contents.set(entry.id, await vscode.workspace.fs.readFile(vscode.Uri.file(entry.localPath)));
+      } catch (err) {
+        return { status: "failure", message: `Could not read ${formatMemberPath(entry)}.`, details: errorMessage(err) };
+      }
+    }
+
+    const ids = new Set(entries.map((entry) => entry.id));
+    const exists = (await git.listBranches(folder)).includes(target);
+    if (create && exists) {
+      return { status: "conflict", message: `A work item named “${target}” already exists.` };
+    }
+    if (!create && !exists) {
+      return { status: "failure", message: `Work item “${target}” no longer exists.` };
+    }
+    if (create) {
+      const created = await git.createBranch(folder, target, (await git.findCleanBase(folder)) ?? "HEAD");
+      if (created.status !== "success") {
+        return created;
+      }
+      state.workItems[target] = [];
+    } else if (
+      (state.workItems[target] ?? []).some((entry) => ids.has(entry.id)) ||
+      (await git.trackedInBranch(folder, target, paths)).length > 0
+    ) {
+      return {
+        status: "conflict",
+        message: `“${target}” already has ${entries.length === 1 ? "this member" : "some of these members"}. Discard ${entries.length === 1 ? "it" : "them"} there first.`,
+      };
+    }
+    // Only a work item created from HEAD (no clean base) already has these files.
+    const presentOnTarget = new Set(create ? await git.trackedInBranch(folder, target, paths) : []);
+
+    const label = entries.length === 1 ? formatMemberPath(entries[0]) : `${entries.length} members`;
+    const toTarget = await git.switchWorkItem(folder, target);
+    if (toTarget.status !== "success") {
+      return toTarget;
+    }
+    const written: string[] = [];
+    try {
+      for (const entry of entries) {
+        const uri = vscode.Uri.file(entry.localPath);
+        await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, ".."));
+        await vscode.workspace.fs.writeFile(uri, contents.get(entry.id)!);
+        written.push(entry.localPath);
+      }
+      const committed = await git.saveCheckpoint(folder, paths, `move: ${label} from ${source}`, false);
+      if (committed.status !== "success" && committed.status !== "noChanges") {
+        throw new Error(`${committed.message ?? "Could not save the checkpoint."}${committed.details ? ` ${committed.details}` : ""}`);
+      }
+    } catch (err) {
+      for (const localPath of written.filter((candidate) => !presentOnTarget.has(candidate))) {
+        fs.rmSync(localPath, { force: true });
+      }
+      const back = await git.switchWorkItem(folder, source, true);
+      this.log.appendLine(`[git] Move to ${target} failed: ${errorMessage(err)}`);
+      return {
+        status: "failure",
+        message: back.status === "success"
+          ? `Could not move ${label} to “${target}”. Nothing was changed in “${source}”.`
+          : `Could not move ${label} to “${target}”, and Git could not return to “${source}”. Use Switch Work Item to return to it.`,
+        details: errorMessage(err),
+      };
+    }
+    moveEntriesState(state, ids, source, target);
+    const back = await git.switchWorkItem(folder, source);
+    await this.persist();
+    if (back.status !== "success") {
+      return {
+        status: "failure",
+        message: `${label} ${entries.length === 1 ? "was" : "were"} copied to “${target}”, but Git could not return to “${source}” to remove ${entries.length === 1 ? "it" : "them"}. Use Switch Work Item to return to it.`,
+        details: back.details,
+      };
+    }
+    for (const localPath of paths) {
+      fs.rmSync(localPath, { force: true });
+    }
+    const removed = await git.saveCheckpoint(folder, paths, `move: ${label} to ${target}`, false);
+    if (removed.status !== "success" && removed.status !== "noChanges") {
+      return {
+        status: "failure",
+        message: `${label} ${entries.length === 1 ? "was" : "were"} copied to “${target}”, but the removal from “${source}” was not saved. Save a checkpoint in Source Control to finish.`,
+        details: removed.details,
+      };
+    }
+    return { status: "success" };
+  }
+
+  /** Saves the paths collected with `deferCheckpointTo` as one checkpoint, if there are any. */
+  async saveBatchCheckpoint(system: string, paths: string[], message: string): Promise<void> {
+    if (paths.length > 0) {
+      this.logGitFailure(await this.saveCheckpoint(system, paths, message));
+    }
   }
 
   async saveCheckpoint(system: string, paths: string[], message: string): Promise<GitOperationResult> {
@@ -412,7 +628,11 @@ export class CheckoutService implements vscode.Disposable {
     return this.gitService.saveCheckpoint(root.fsPath, paths, message, false);
   }
 
-  async recordMergeBack(entry: CheckedOutMember, content: string): Promise<GitOperationResult> {
+  recordMergeBack(entry: CheckedOutMember, content: string): Promise<GitOperationResult> {
+    return this.track(() => this.recordMergeBackNow(entry, content));
+  }
+
+  private async recordMergeBackNow(entry: CheckedOutMember, content: string): Promise<GitOperationResult> {
     await this.assertEntryInActiveWorkItem(entry);
     const localUri = vscode.Uri.file(entry.localPath);
     await vscode.workspace.fs.writeFile(localUri, Buffer.from(content, "utf-8"));
@@ -432,10 +652,15 @@ export class CheckoutService implements vscode.Disposable {
    */
   async runBatch<T>(fn: () => Promise<T>): Promise<T> {
     this.batchDepth++;
+    this.inFlight++;
     try {
       return await fn();
     } finally {
+      this.inFlight--;
       this.batchDepth--;
+      if (this.batchDepth === 0) {
+        this.batchGitReady.clear();
+      }
       if (this.batchDepth === 0 && this.dirty) {
         try {
           await this.saveIndex();
@@ -502,22 +727,30 @@ export class CheckoutService implements vscode.Disposable {
     return this.entries.find((e) => e.id === id);
   }
 
-  async checkoutMember(
+  checkoutMember(
     library: string,
     sourceFile: string,
     memberName: string,
     memberExtension: string,
-    options?: {
-      redownloadBehavior?: "ask" | "skip" | "force";
-      suppressAutoOpen?: boolean;
-      /** With "force": overwrite local edits not yet sent to the IBM i instead of skipping the member. */
-      discardLocalChanges?: boolean;
-    }
+    options?: CheckoutOptions
+  ): Promise<CheckedOutMember> {
+    return this.track(() =>
+      this.checkoutMemberNow(library, sourceFile, memberName, memberExtension, options)
+    );
+  }
+
+  private async checkoutMemberNow(
+    library: string,
+    sourceFile: string,
+    memberName: string,
+    memberExtension: string,
+    options?: CheckoutOptions
   ): Promise<CheckedOutMember> {
     const {
       redownloadBehavior = "ask",
       suppressAutoOpen = false,
       discardLocalChanges = false,
+      deferCheckpointTo,
     } = options ?? {};
     const checkoutRoot = this.getCheckoutRoot();
     if (!checkoutRoot) {
@@ -617,7 +850,9 @@ export class CheckoutService implements vscode.Disposable {
       Buffer.from(content, "utf-8")
     );
 
-    if (gitReady.status === "success" && this.gitService) {
+    if (deferCheckpointTo) {
+      deferCheckpointTo.push(localPath);
+    } else if (gitReady.status === "success" && this.gitService) {
       const gitRoot = this.getGitRoot(system)!;
       const result = await this.gitService.saveCheckpoint(
         gitRoot.fsPath,
@@ -684,7 +919,11 @@ export class CheckoutService implements vscode.Disposable {
     return status;
   }
 
-  async recheckout(entry: CheckedOutMember): Promise<void> {
+  recheckout(entry: CheckedOutMember): Promise<void> {
+    return this.track(() => this.recheckoutNow(entry));
+  }
+
+  private async recheckoutNow(entry: CheckedOutMember): Promise<void> {
     await this.assertEntryInActiveWorkItem(entry);
     const content = await downloadMemberContent(
       entry.library,
@@ -717,9 +956,20 @@ export class CheckoutService implements vscode.Disposable {
    * `overwriteRemoteChanges` is set, refuses (returning "remote-changed")
    * when the member was changed on the IBM i since it was checked out.
    */
-  async uploadToRemote(
+  uploadToRemote(
     entry: CheckedOutMember,
-    options?: { overwriteRemoteChanges?: boolean }
+    options?: {
+      overwriteRemoteChanges?: boolean;
+      /** Collects the path for one checkpoint after a batch instead of saving one per member. */
+      deferCheckpointTo?: string[];
+    }
+  ): Promise<UploadResult> {
+    return this.track(() => this.uploadToRemoteNow(entry, options));
+  }
+
+  private async uploadToRemoteNow(
+    entry: CheckedOutMember,
+    options?: { overwriteRemoteChanges?: boolean; deferCheckpointTo?: string[] }
   ): Promise<UploadResult> {
     await this.assertEntryInActiveWorkItem(entry);
     const localUri = vscode.Uri.file(entry.localPath);
@@ -781,11 +1031,15 @@ export class CheckoutService implements vscode.Disposable {
     entry.status = after.status;
     await this.persist();
 
-    const result = await this.saveCheckpoint(entry.system,
-      [entry.localPath],
-      `upload: ${formatMemberPath(entry)} to ${entry.system}`
-    );
-    this.logGitFailure(result);
+    if (options?.deferCheckpointTo) {
+      options.deferCheckpointTo.push(entry.localPath);
+    } else {
+      const result = await this.saveCheckpoint(entry.system,
+        [entry.localPath],
+        `upload: ${formatMemberPath(entry)} to ${entry.system}`
+      );
+      this.logGitFailure(result);
+    }
 
     return after.altered ? "uploaded-altered" : "uploaded";
   }
@@ -875,7 +1129,11 @@ export class CheckoutService implements vscode.Disposable {
     await this.discardEntries([entry]);
   }
 
-  async discardEntries(entries: CheckedOutMember[]): Promise<void> {
+  discardEntries(entries: CheckedOutMember[]): Promise<void> {
+    return this.track(() => this.discardEntriesNow(entries));
+  }
+
+  private async discardEntriesNow(entries: CheckedOutMember[]): Promise<void> {
     for (const entry of entries) {
       await this.assertEntryInActiveWorkItem(entry);
     }
@@ -1032,16 +1290,16 @@ export class CheckoutService implements vscode.Disposable {
     if (!state) {
       const inherited = this.index.unassignedWorkItems;
       const names = Object.keys(inherited);
-      const activeWorkItem = names.includes("workspace")
-        ? "workspace"
-        : names[0] ?? "workspace";
+      const activeWorkItem = names.includes(DEFAULT_WORK_ITEM)
+        ? DEFAULT_WORK_ITEM
+        : names[0] ?? DEFAULT_WORK_ITEM;
       state = {
         system,
         directory: sanitizeSystemName(system),
         activeWorkItem,
         workItems: names.length > 0
           ? Object.fromEntries(names.map((name) => [name, []]))
-          : { workspace: [] },
+          : { [DEFAULT_WORK_ITEM]: [] },
       };
       this.index.systems[key] = state;
     }
