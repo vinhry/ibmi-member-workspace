@@ -95,6 +95,11 @@ export async function uploadMemberContent(
   return getContent().uploadMemberContent(library, sourceFile, member, fileContent);
 }
 
+/** Whether the current Code for IBM i connection refuses writes to the IBM i. */
+export function isConnectionReadOnly(): boolean {
+  return getConnection()?.getConfig().readOnlyMode === true;
+}
+
 /** Whether Code for IBM i's "Enable source dates" is on for the current connection. */
 export function sourceDatesEnabled(): boolean {
   return getConnection()?.getConfig().enableSourceDates === true;

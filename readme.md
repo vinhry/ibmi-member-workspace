@@ -52,6 +52,24 @@ Before uploading, the extension checks whether the member has changed on the IBM
 
 After uploading, the member is read back from the IBM i. If what was stored differs from your local file (for example, a line longer than the record length was truncated), you're warned and the checkout stays **Modified** so you can review it with Merge Back.
 
+### Upload on Save
+
+Set `ibmi-member-workspace.autoUploadOnSave` to upload a checked-out member whenever you save it in the editor:
+
+- **`off`** (default): upload only with **Upload to IBM i**.
+- **`ask`**: after each save, a notification asks **Upload**, **Always Upload** (switches to `silent`), or **Not Now**.
+- **`silent`**: upload without asking. Success shows briefly in the status bar.
+
+Upload on save uses the same checks and messages as **Upload to IBM i**. If the member changed on the IBM i since checkout, you're always asked to **Overwrite Anyway** or **Show Diff**, even in `silent` mode. A save is skipped when:
+
+- it has no local changes (for example, saving an unchanged file);
+- Code for IBM i is not connected to the checkout's system, or the connection is read-only;
+- a Merge Back is open for that member.
+
+Rapid saves are combined into one upload. A save made while an upload is running is uploaded right after it. Only saves in the editor upload: files changed by other tools, such as AI agents or scripts, are never uploaded automatically.
+
+While upload on save is on, the status bar shows **Auto-upload: Ask** or **Auto-upload: On**. Click it, or run **IBM i Member Workspace: Change Upload on Save**, to change the mode.
+
 ### Refresh Remote Status
 
 Compares your local file, the live remote content, and the remote content as it was at checkout time (not just a stale comparison) to classify each checkout:
@@ -88,6 +106,7 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.warnOnRedownload` | `true` | Show warning when checking out a member that is already checked out. |
 | `ibmi-member-workspace.autoOpenOnCheckout` | `true` | Automatically open the file in the editor after a single-member checkout. |
 | `ibmi-member-workspace.allowCheckoutFromProtectedFilter` | `false` | Allow checking out members from protected (read-only) filters. |
+| `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. See **Upload on Save**. |
 | `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. |
 
 ## Local Change History

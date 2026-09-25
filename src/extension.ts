@@ -17,6 +17,7 @@ import { CommandContext } from "./commands/context";
 import { registerCheckoutCommands } from "./commands/checkout";
 import { registerCompareCommands } from "./commands/compare";
 import { offerLegacyRepositoryRepair, registerGitCommands } from "./commands/git";
+import { registerAutoUpload } from "./commands/autoUpload";
 import { registerSyncCommands } from "./commands/sync";
 import { registerViewCommands } from "./commands/view";
 
@@ -121,6 +122,8 @@ export async function activate(
 
   // Only documents opened by the explicit Merge Back command are tracked here.
   const pendingMergeBacks = new Map<string, CheckedOutMember>();
+  // Only editor saves upload; files written by other tools (see LocalFileWatcher) never do.
+  const autoUpload = registerAutoUpload({ context, service, mergeHandler, pendingMergeBacks, log });
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (doc) => {
       if (doc.uri.scheme === "file") {
@@ -133,6 +136,7 @@ export async function activate(
         } catch (err) {
           log.appendLine(`[status] Could not update ${formatMemberPath(entry)}: ${errorMessage(err)}`);
         }
+        autoUpload.schedule(doc.uri.fsPath);
         return;
       }
       if (doc.uri.scheme !== "member") {

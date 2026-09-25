@@ -6,6 +6,7 @@ import { mergeDocumentKey } from "../mergeHandler";
 import { countLocalChanges, resolveMemberSelections, saveDirtyLocalFiles } from "../prompts";
 import { CheckedOutMember, RefreshTally, TreeItemType, formatMemberPath } from "../types";
 import { CommandContext } from "./context";
+import { uploadWithConflictHandling } from "./uploadMember";
 
 export function registerSyncCommands(ctx: CommandContext): void {
   const { context, service, mergeHandler, pendingMergeBacks, log } = ctx;
@@ -57,50 +58,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
             return;
           }
 
-          try {
-            let result = await service.uploadToRemote(entry);
-            if (result === "remote-changed") {
-              const choice = await vscode.window.showWarningMessage(
-                `${memberPath} has changed on the IBM i since it was checked out. Uploading will overwrite those remote changes.`,
-                {
-                  modal: true,
-                  detail: "Use Show Diff to review and combine the remote changes instead.",
-                },
-                "Overwrite Anyway",
-                "Show Diff"
-              );
-              if (choice === "Show Diff") {
-                await mergeHandler.openMergeDiff(entry);
-                return;
-              }
-              if (choice !== "Overwrite Anyway") {
-                return;
-              }
-              result = await service.uploadToRemote(entry, { overwriteRemoteChanges: true });
-            }
-
-            if (result === "uploaded") {
-              vscode.window.showInformationMessage(
-                `Successfully uploaded ${memberPath} to IBM i.`
-              );
-            } else if (result === "uploaded-altered") {
-              const choice = await vscode.window.showWarningMessage(
-                `Uploaded ${memberPath}, but the IBM i copy differs from your local file (for example, lines longer than the record length were truncated).`,
-                "Merge Back"
-              );
-              if (choice === "Merge Back") {
-                await mergeHandler.openMergeDiff(entry);
-              }
-            } else {
-              vscode.window.showErrorMessage(
-                `Failed to upload ${memberPath} to IBM i.`
-              );
-            }
-          } catch (err) {
-            vscode.window.showErrorMessage(
-              `Upload failed: ${errorMessage(err)}`
-            );
-          }
+          await uploadWithConflictHandling(service, mergeHandler, entry, log);
           return;
         }
 
