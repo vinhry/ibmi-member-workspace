@@ -2,7 +2,7 @@
   "name": "ibmi-member-workspace",
   "displayName": "IBM i Member Workspace",
   "description": "Work with IBM i source members locally, compare changes, and synchronize them safely. Works with Code for IBM i.",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "publisher": "vinhry",
   "author": "Vinhry",
   "license": "GPL-3.0",
@@ -82,6 +82,11 @@
       {
         "command": "ibmi-member-workspace.checkoutAllMembers",
         "title": "Check Out All Members",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.findDependencies",
+        "title": "Find Dependencies…",
         "category": "IBM i Member Workspace"
       },
       {
@@ -250,6 +255,10 @@
           "when": "false"
         },
         {
+          "command": "ibmi-member-workspace.findDependencies",
+          "when": "false"
+        },
+        {
           "command": "ibmi-member-workspace.checkoutAllMembers",
           "when": "false"
         },
@@ -363,7 +372,7 @@
         },
         {
           "command": "ibmi-member-workspace.refreshRemote",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
           "group": "inline@1"
         },
         {
@@ -373,17 +382,17 @@
         },
         {
           "command": "ibmi-member-workspace.openLocalFile",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
           "group": "1_open@1"
         },
         {
           "command": "ibmi-member-workspace.openRemoteFile",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
           "group": "1_open@2"
         },
         {
           "command": "ibmi-member-workspace.revealInExplorer",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
           "group": "1_open@3"
         },
         {
@@ -403,22 +412,27 @@
         },
         {
           "command": "ibmi-member-workspace.selectForCompare",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
           "group": "3_compare@1"
         },
         {
           "submenu": "ibmi-member-workspace.compareWith",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
           "group": "3_compare@2"
         },
         {
           "command": "ibmi-member-workspace.refreshRemote",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
           "group": "4_status@1"
         },
         {
+          "command": "ibmi-member-workspace.findDependencies",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
+          "group": "4_status@2"
+        },
+        {
           "command": "ibmi-member-workspace.copyMemberPath",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
           "group": "5_util@1"
         },
         {
@@ -428,12 +442,12 @@
         },
         {
           "command": "ibmi-member-workspace.moveToWorkItem",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && config.ibmi-member-workspace.gitIntegration",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && config.ibmi-member-workspace.gitIntegration",
           "group": "2_merge@5"
         },
         {
           "command": "ibmi-member-workspace.discardCheckout",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
           "group": "6_danger@1"
         },
         {
@@ -555,6 +569,19 @@
           "type": "boolean",
           "default": false,
           "description": "Keep local checkpoints organized by work item in one Git repository per IBM i system directory. Does not upload or push changes."
+        },
+        "ibmi-member-workspace.dependencies.suggestAfterCheckout": {
+          "type": "boolean",
+          "default": true,
+          "description": "After checking out a single member, offer to review the copybooks, called programs, and referenced files it uses. Nothing is downloaded until you choose."
+        },
+        "ibmi-member-workspace.dependencies.searchLibraries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Libraries to search, in order, for the source of dependencies found by **Find Dependencies**, for example your production libraries. When empty, the connection's current library and library list are searched."
         }
       }
     }

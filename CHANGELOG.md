@@ -1,5 +1,11 @@
 # Change Log
 
+## 1.4.0 - 2026-09-25
+
+- **Find Dependencies.** Right-click a checkout, or follow the prompt after a single checkout, to see the copybooks (`/COPY`, `/INCLUDE`, `EXEC SQL INCLUDE`), called programs (CL `CALL`, `TFRCTL`), and referenced files (DDS `REF`, `REFFLD`, `PFILE`, `JFILE`) a member uses. Their source is looked up in the libraries set in `dependencies.searchLibraries`, or the library list.
+- **Read-only reference copies.** Chosen dependencies are downloaded as reference copies: read-only on disk, shown with a lock icon, and never uploaded or merged back. Refresh offers **Update Reference Copy**. To change one, the extension points you to your change-management system (for example, Rocket LMI) and can copy the member paths.
+- Dependencies whose source can't be found are listed with the line that refers to them.
+
 ## 1.3.0 - 2026-09-25
 
 - **Upload on Save.** The new `ibmi-member-workspace.autoUploadOnSave` setting (`off`, `ask`, or `silent`) uploads a checked-out member when you save it in the editor. Saves without local changes are skipped. A member changed on the IBM i since checkout always asks before it is overwritten, and files changed by other tools are never uploaded automatically.
