@@ -21,7 +21,7 @@ export interface Resolution {
 }
 
 /** Source types of members that compile to programs a CALL can name. */
-const PROGRAM_SOURCE_TYPES = new Set([
+export const PROGRAM_SOURCE_TYPES = new Set([
   "RPGLE", "SQLRPGLE", "RPG", "SQLRPG", "RPG38", "RPT",
   "CLLE", "CLP", "CL", "CL38",
   "CBLLE", "SQLCBLLE", "CBL", "SQLCBL",

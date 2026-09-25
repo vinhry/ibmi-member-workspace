@@ -5,6 +5,7 @@ import { MergeHandler, mergeDocumentKey } from "./mergeHandler";
 import { GitService } from "./gitService";
 import { getSystemName, onConnectionChange } from "./codeForIBMi";
 import { errorMessage } from "./errors";
+import { ProviderAvailabilityCache } from "./dependencySources";
 import { LocalFileWatcher } from "./localFileWatcher";
 import { extractMemberInfo } from "./memberInfo";
 import { CheckedOutMember, formatMemberPath, isDefaultWorkItem } from "./types";
@@ -90,7 +91,10 @@ export async function activate(
     gitBranchStatusBar.show();
   };
 
+  const dependencyAvailability = new ProviderAvailabilityCache();
   onConnectionChange(context, () => {
+    // A reconnect may reach a different system, or one whose tools changed.
+    dependencyAvailability.reset();
     treeProvider.refresh();
     const system = getSystemName();
     if (system && vscode.workspace.getConfiguration("ibmi-member-workspace").get("gitIntegration", false)) {
@@ -179,6 +183,7 @@ export async function activate(
     refreshGitStatusBar,
     pendingMergeBacks,
     log,
+    dependencyAvailability,
   };
   registerCheckoutFolderCommands(ctx);
   registerCheckoutCommands(ctx);

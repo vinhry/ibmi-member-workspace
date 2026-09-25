@@ -1,30 +1,36 @@
 /**
  * Finds the source members a member refers to, from its text alone: copybooks
  * (/COPY, /INCLUDE, EXEC SQL INCLUDE), called programs (CL CALL, TFRCTL) and
- * referenced files (DDS REF, REFFLD, PFILE, JFILE). Pure text in, references
- * out; resolving them to members on the IBM i is `dependencyResolve`.
+ * referenced files (RPG F-specs, dcl-f, EXTNAME; DDS REF, REFFLD, PFILE, JFILE).
+ * Pure text in, references out; resolving them to members on the IBM i is
+ * `dependencyResolve`, and other providers are in `dependencySources`.
  */
 
 export type ReferenceKind = "copybook" | "program" | "file";
 
 export interface RawReference {
   kind: ReferenceKind;
-  /** Named explicitly in the source; otherwise the library list decides. */
+  /** Named explicitly; otherwise the search libraries decide. */
   library?: string;
-  /** Named explicitly in the source (copybooks only). */
+  /** Named explicitly (copybooks, or an exact member from a provider). */
   sourceFile?: string;
   member: string;
-  /** 1-based line of the first occurrence. */
-  line: number;
-  /** That line, trimmed, for display. */
+  /** 1-based line of the first occurrence, for references found in the source text. */
+  line?: number;
+  /** That line trimmed, or how a provider found the reference, for display. */
   text: string;
   /** Why this can never resolve to a source member, e.g. an IFS path. */
   unresolvable?: string;
+  /** Labels of the providers that found it, e.g. ["source scan", "DSPPGMREF"]. */
+  foundBy?: string[];
 }
 
 const RPG_TYPES = new Set(["rpgle", "sqlrpgle", "rpgleinc", "rpg", "sqlrpg", "rpginc"]);
 const CL_TYPES = new Set(["clle", "clp", "cl"]);
 const DDS_TYPES = new Set(["pf", "lf", "dspf", "prtf"]);
+
+/** Source types (lowercase extensions) the scan understands. */
+export const SCANNED_SOURCE_TYPES: ReadonlySet<string> = new Set([...RPG_TYPES, ...CL_TYPES, ...DDS_TYPES]);
 
 /** IBM i object name characters. */
 const NAME = "[A-Z0-9_$#@][A-Z0-9_$#@.]*";
@@ -62,6 +68,8 @@ function splitQualified(token: string): { library?: string; name: string } {
 function scanRpg(lines: string[]): RawReference[] {
   const refs: RawReference[] = [];
   const fullyFree = /^\*\*FREE\b/i.test(lines[0] ?? "");
+  /** The F-spec that keyword continuation lines (blank file name) belong to. */
+  let lastFixedFile: RawReference | undefined;
   lines.forEach((raw, index) => {
     // Fixed-form columns 1-5 are sequence numbers or comments; column 7 "*" is a comment line.
     if (!fullyFree && raw.charAt(6) === "*") {
@@ -91,8 +99,69 @@ function scanRpg(lines: string[]): RawReference[] {
         refs.push({ kind: "copybook", member: operand.toUpperCase(), ...at });
       }
     }
+
+    // Fixed-form F-spec: the file name is in columns 7-16; a blank name continues the previous one.
+    if (!fullyFree && /^F$/i.test(raw.charAt(5))) {
+      const name = raw.slice(6, 16).trim();
+      if (name) {
+        // Column 22 "F" is a program-described file, which has no DDS source.
+        lastFixedFile = raw.charAt(21).toUpperCase() === "F"
+          ? undefined
+          : { kind: "file", member: name.toUpperCase(), ...at };
+        if (lastFixedFile) {
+          refs.push(lastFixedFile);
+        }
+      }
+      const extdesc = extDesc(raw);
+      if (extdesc && lastFixedFile) {
+        Object.assign(lastFixedFile, extdesc);
+      }
+    } else if (!fullyFree && raw.charAt(5).trim()) {
+      lastFixedFile = undefined;
+    }
+
+    const dclF = /^\s*DCL-F\s+([A-Z0-9_$#@]+)/i.exec(line);
+    if (dclF) {
+      const statement = rpgStatement(lines, index, fullyFree);
+      // A record length (DISK(100)) makes it program-described; LIKEFILE copies another declaration.
+      if (!/\b(?:DISK|PRINTER|SEQ|SPECIAL)\s*\(\s*\d/i.test(statement) && !/\bLIKEFILE\s*\(/i.test(statement)) {
+        const name = dclF[1].toUpperCase();
+        refs.push({ kind: "file", member: name, ...extDesc(statement), ...at });
+      }
+    }
+
+    // An externally described data structure takes its subfields from the file's record format.
+    for (const extname of line.matchAll(/\bEXTNAME\(\s*'?([A-Z0-9_$#@/.*]+)'?/gi)) {
+      const { library, name } = splitQualified(extname[1]);
+      if (!name.startsWith("*")) {
+        refs.push({ kind: "file", library, member: name, ...at });
+      }
+    }
   });
   return refs;
+}
+
+/** EXTDESC('LIB/FILE'): the file used at compile time instead of the declared name. */
+function extDesc(text: string): { library?: string; member: string } | undefined {
+  const match = /\bEXTDESC\(\s*'([^']+)'\s*\)/i.exec(text);
+  if (!match) {
+    return undefined;
+  }
+  const { library, name } = splitQualified(match[1]);
+  return { library, member: name };
+}
+
+/** A free-form statement from `start` up to its ";" (keywords can continue on later lines). */
+function rpgStatement(lines: string[], start: number, fullyFree: boolean): string {
+  const parts: string[] = [];
+  for (let i = start; i < lines.length && i < start + 20; i++) {
+    const part = (fullyFree ? lines[i] : lines[i].slice(5)).replace(/\/\/.*$/, "");
+    parts.push(part);
+    if (part.includes(";")) {
+      break;
+    }
+  }
+  return parts.join(" ");
 }
 
 /** `[[LIB/]FILE,]MEMBER`, or an IFS path (quoted, or unquoted starting with "/" or "."). */

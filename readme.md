@@ -87,15 +87,43 @@ Refresh per member (inline icon or context menu, with a prompt to Re-checkout or
 
 To understand a member you often need the members it uses. Right-click a checkout and choose **Find Dependencies…**. After you check out a single member, a notification also offers **Review Dependencies** when the member uses others (turn this off with `ibmi-member-workspace.dependencies.suggestAfterCheckout`).
 
-The member's local copy is scanned for:
+#### Where dependencies come from
+
+Find Dependencies asks up to three kinds of sources. Every IBM i is different, so each source is checked on the connected system, once per connection, and simply left out when it isn't available there. The list shows which sources found what, and which were not available (for example, "Found by source scan (4), DSPPGMREF (6) · Abstract: not available"). Details are in the IBM i Member Workspace output panel. Turn a kind of source off with `ibmi-member-workspace.dependencies.sources`.
+
+**Source scan** (always available) reads the member's local copy:
 
 | Source type | What is found |
 |---|---|
-| RPGLE, SQLRPGLE, RPGLEINC, RPG | `/COPY` and `/INCLUDE` (`LIB/FILE,MEMBER`, `FILE,MEMBER`, or `MEMBER`) and `EXEC SQL INCLUDE` |
+| RPGLE, SQLRPGLE, RPGLEINC, RPG | `/COPY` and `/INCLUDE` (`LIB/FILE,MEMBER`, `FILE,MEMBER`, or `MEMBER`), `EXEC SQL INCLUDE`, externally described files (F-specs and `dcl-f`, honoring `EXTDESC`), and `EXTNAME` data structures |
 | CLLE, CLP, CL | `CALL` and `TFRCTL` programs, including calls inside `SBMJOB CMD(...)` |
 | PF, LF, DSPF, PRTF | Files named in `REF`, `REFFLD`, `PFILE`, and `JFILE` |
 
-Each dependency is looked up on the IBM i in the libraries listed in `ibmi-member-workspace.dependencies.searchLibraries`, in order, or in the connection's library list when that setting is empty. A library or source file named in the source is matched exactly. A copybook named without a source file is looked for in `QRPGLESRC` first. Only source members that can build a program are offered for a `CALL`, and only file source for a `REF`.
+**DSPPGMREF** (program source only) finds the compiled program with the member's name in the search libraries and runs `DSPPGMREF` on it. This finds the files, programs, and service programs the object really uses, including files used only by embedded SQL. Each one points at the source member it was created from when the object records it; otherwise it's matched by name. It can't see copybooks, and it's skipped when the IBM i SQL services it needs aren't available or you aren't authorized.
+
+**Cross-reference tools** such as Abstract, Pathfinder, or MDXREF already know an application's dependencies. Add one to `ibmi-member-workspace.dependencies.crossReferences` (user settings only) with a SQL query against its files:
+
+```jsonc
+"ibmi-member-workspace.dependencies.crossReferences": [
+  {
+    "name": "Abstract",
+    // Skip this query on systems without the tool's library.
+    "requiresLibrary": "XREFLIB",
+    // Table and column names below are placeholders; use your tool's cross-reference files.
+    "query": "SELECT REF_TYPE AS KIND, REF_OBJECT AS OBJECT FROM XREFLIB.OBJREFS WHERE OBJECT_NAME = {object}"
+  }
+]
+```
+
+- **Placeholders:** `{library}`, `{sourceFile}`, `{member}`, and `{object}` (the member name) are passed as parameters. Only a single `SELECT` (or `WITH … SELECT`) is accepted.
+- **Columns:** return `KIND` and `MEMBER` or `OBJECT`.
+  - `KIND` is `copybook`, `program`, or `file`, or an object type such as `*FILE`, `*PGM`, or `*SRVPGM`. Rows without a known kind are skipped.
+  - Optionally return `LIBRARY` and `SOURCE_FILE` (where the **source** member is) for an exact match, and `LINE` and `TEXT` to show where it's used.
+- **Across systems:** `requiresLibrary` skips the query where that library doesn't exist, and `systems` limits it to named hosts. One settings file therefore works across systems with and without the tool. A query that fails because its files are missing or not authorized isn't tried again until you reconnect.
+
+#### Finding the source
+
+Each dependency is looked up on the IBM i in the libraries listed in `ibmi-member-workspace.dependencies.searchLibraries`, in order, or in the connection's library list when that setting is empty. List both your object and source libraries, since DSPPGMREF looks for compiled programs there too. A library or source file named in the source is matched exactly. A copybook named without a source file is looked for in `QRPGLESRC` first. Only source members that can build a program are offered for a `CALL`, and only file source for a `REF`.
 
 A list shows what was found, grouped into copybooks, called programs, and referenced files. Copybooks are preselected, and members you already have checked out are marked. Choose the members you want, then:
 
@@ -130,7 +158,9 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.autoOpenOnCheckout` | `true` | Automatically open the file in the editor after a single-member checkout. |
 | `ibmi-member-workspace.allowCheckoutFromProtectedFilter` | `false` | Allow checking out members from protected (read-only) filters. |
 | `ibmi-member-workspace.dependencies.suggestAfterCheckout` | `true` | After checking out a single member, offer to review the members it uses. |
-| `ibmi-member-workspace.dependencies.searchLibraries` | `[]` | Libraries to search, in order, for the source of dependencies (for example, production libraries). Empty uses the connection's library list. |
+| `ibmi-member-workspace.dependencies.searchLibraries` | `[]` | Libraries to search, in order, for the source members and compiled programs of dependencies (for example, `PRODOBJ`, `PRODSRC`). Empty uses the connection's library list. |
+| `ibmi-member-workspace.dependencies.sources` | all | Which kinds of dependency sources to use: `source`, `programReferences` (DSPPGMREF), `crossReferences`. Unavailable ones are skipped automatically. |
+| `ibmi-member-workspace.dependencies.crossReferences` | `[]` | Cross-reference tool queries (Abstract, Pathfinder, MDXREF…). User settings only. See **Dependencies**. |
 | `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. See **Upload on Save**. |
 | `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. |
 

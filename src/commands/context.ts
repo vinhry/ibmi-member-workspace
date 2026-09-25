@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { CheckoutService } from "../checkoutService";
 import { CheckoutTreeProvider } from "../checkoutTreeProvider";
+import { ProviderAvailabilityCache } from "../dependencySources";
 import { GitService } from "../gitService";
 import { LocalFileWatcher } from "../localFileWatcher";
 import { MergeHandler } from "../mergeHandler";
@@ -19,4 +20,6 @@ export interface CommandContext {
   /** Member documents opened by Merge Back, keyed by `mergeDocumentKey`, awaiting their save. */
   pendingMergeBacks: Map<string, CheckedOutMember>;
   log: vscode.OutputChannel;
+  /** Which dependency providers work on each system, checked once per connection. */
+  dependencyAvailability: ProviderAvailabilityCache;
 }

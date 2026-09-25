@@ -1,8 +1,31 @@
 import * as fs from "node:fs";
 import * as vscode from "vscode";
-import { connectionLibraryList, findSourceMembers, getSystemName } from "../codeForIBMi";
+import {
+  connectionLibraryList,
+  findCompiledObject,
+  findSourceMembers,
+  getSystemName,
+  libraryExists,
+  objectSources,
+  programReferences,
+  runCrossReferenceQuery,
+  sqlServicesAvailable,
+} from "../codeForIBMi";
 import { Resolution, librariesToSearch, resolveReferences } from "../dependencyResolve";
 import { RawReference, ReferenceKind, scanReferences } from "../dependencyScan";
+import {
+  DependencyProvider,
+  PROVIDER_GROUPS,
+  ProviderGroup,
+  ProviderOutcome,
+  createCrossReferenceProvider,
+  createProgramReferencesProvider,
+  createSourceScanProvider,
+  parseCrossReferenceConfigs,
+  runProviders,
+  selectProviders,
+  summarizeRun,
+} from "../dependencySources";
 import { errorMessage } from "../errors";
 import { MemberInfo } from "../memberInfo";
 import { CheckedOutMember, TreeItemType, formatMemberPath, systemKey } from "../types";
@@ -35,38 +58,45 @@ export function registerDependencyCommands(ctx: CommandContext): void {
 }
 
 /**
- * After a single checkout, offers to review what the member refers to. Nothing is
- * downloaded unless the user picks it.
+ * After a single checkout, offers to review what the member uses. It makes no IBM i
+ * calls: it is offered when the local scan finds something, or when a provider that asks
+ * the IBM i applies to the member and isn't known to be missing on this system.
  */
 export async function suggestDependencies(ctx: CommandContext, entry: CheckedOutMember): Promise<void> {
-  const enabled = vscode.workspace
-    .getConfiguration("ibmi-member-workspace")
-    .get<boolean>("dependencies.suggestAfterCheckout", true);
-  if (!enabled) {
+  const config = vscode.workspace.getConfiguration("ibmi-member-workspace");
+  if (!config.get<boolean>("dependencies.suggestAfterCheckout", true)) {
     return;
   }
-  const refs = scanLocal(ctx, entry);
-  if (!refs || refs.length === 0) {
+  let refs: RawReference[];
+  try {
+    refs = scanReferences(fs.readFileSync(entry.localPath, "utf-8"), entry.extension);
+  } catch {
     return;
   }
+  const remoteMayHelp = activeProviders(ctx, entry.system).some((provider) =>
+    provider.group !== "source" &&
+    provider.applies(entry) &&
+    ctx.dependencyAvailability.known(entry.system, provider.id)?.ok !== false
+  );
+  if (refs.length === 0 && !remoteMayHelp) {
+    return;
+  }
+  const memberPath = formatMemberPath(entry);
   const choice = await vscode.window.showInformationMessage(
-    `${formatMemberPath(entry)} uses ${describeCounts(refs)}.`,
+    refs.length > 0 ? `${memberPath} uses ${describeCounts(refs)}.` : `Look up what ${memberPath} uses?`,
     "Review Dependencies"
   );
   if (choice === "Review Dependencies") {
-    await reviewDependencies(ctx, entry, refs);
+    await reviewDependencies(ctx, entry);
   }
 }
 
 /**
- * Finds the members `entry` refers to, lets the user pick which to bring in, and checks
- * them out as read-only reference copies. Changing one goes through change management.
+ * Asks every dependency provider available on this system what `entry` uses, lets the
+ * user pick which members to bring in, and checks them out as read-only reference copies.
+ * Changing one goes through change management instead.
  */
-export async function reviewDependencies(
-  ctx: CommandContext,
-  entry: CheckedOutMember,
-  scanned?: RawReference[]
-): Promise<void> {
+export async function reviewDependencies(ctx: CommandContext, entry: CheckedOutMember): Promise<void> {
   const { service, log } = ctx;
   const memberPath = formatMemberPath(entry);
   const system = getSystemName();
@@ -79,32 +109,44 @@ export async function reviewDependencies(
     return;
   }
 
-  const refs = scanned ?? scanLocal(ctx, entry);
-  if (!refs) {
-    return;
-  }
-  if (refs.length === 0) {
-    vscode.window.showInformationMessage(`No copybooks, called programs, or referenced files found in ${memberPath}.`);
-    return;
-  }
-
   const libraryOrder = searchLibraries();
+  let references: RawReference[];
+  let outcomes: ProviderOutcome[];
   let resolution: Resolution;
   try {
-    resolution = await vscode.window.withProgress(
+    ({ references, outcomes, resolution } = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: `Looking up the dependencies of ${memberPath}...` },
       async () => {
-        const lookup = refs.filter((ref) => !ref.unresolvable && MEMBER_NAME.test(ref.member));
+        const run = await runProviders(
+          activeProviders(ctx, system),
+          entry,
+          { system, libraries: libraryOrder },
+          ctx.dependencyAvailability
+        );
+        const lookup = run.references.filter((ref) => !ref.unresolvable && MEMBER_NAME.test(ref.member));
         const rows = await findSourceMembers(
           [...new Set(lookup.map((ref) => ref.member))],
           librariesToSearch(lookup, libraryOrder)
         );
-        return resolveReferences(refs, rows, libraryOrder);
+        return { ...run, resolution: resolveReferences(run.references, rows, libraryOrder) };
       }
-    );
+    ));
   } catch (err) {
     log.appendLine(`[dependencies] Lookup failed for ${memberPath}: ${errorMessage(err)}`);
     vscode.window.showErrorMessage(`Could not look up the dependencies of ${memberPath}: ${errorMessage(err)}`);
+    return;
+  }
+
+  const summary = summarizeRun(outcomes);
+  logOutcomes(ctx, memberPath, outcomes);
+  const failed = outcomes.filter((o) => o.status === "failed").map((o) => o.label);
+  if (failed.length > 0) {
+    void vscode.window.showWarningMessage(
+      `${failed.join(", ")} failed while looking up ${memberPath}. See the IBM i Member Workspace output panel.`
+    );
+  }
+  if (references.length === 0) {
+    vscode.window.showInformationMessage(`No dependencies found for ${memberPath}. ${summary}.`);
     return;
   }
 
@@ -116,7 +158,7 @@ export async function reviewDependencies(
   const picked = await vscode.window.showQuickPick(items, {
     canPickMany: true,
     title: `Dependencies of ${memberPath}`,
-    placeHolder: "Choose the members to bring into your checkout folder",
+    placeHolder: `Choose the members to bring into your checkout folder — ${summary}`,
     matchOnDescription: true,
     matchOnDetail: true,
   });
@@ -148,13 +190,37 @@ export async function reviewDependencies(
   reportUnresolved(ctx, memberPath, resolution.unresolved);
 }
 
-function scanLocal(ctx: CommandContext, entry: CheckedOutMember): RawReference[] | undefined {
-  try {
-    return scanReferences(fs.readFileSync(entry.localPath, "utf-8"), entry.extension);
-  } catch (err) {
-    ctx.log.appendLine(`[dependencies] Could not read ${entry.localPath}: ${errorMessage(err)}`);
-    vscode.window.showErrorMessage(`Could not read the local copy of ${formatMemberPath(entry)}.`);
-    return undefined;
+/** Every provider the settings turn on for `system`; availability is checked when they run. */
+function activeProviders(ctx: CommandContext, system: string): DependencyProvider[] {
+  const config = vscode.workspace.getConfiguration("ibmi-member-workspace");
+  const { configs, problems } = parseCrossReferenceConfigs(config.get<unknown>("dependencies.crossReferences", []));
+  for (const problem of problems) {
+    ctx.log.appendLine(`[dependencies] dependencies.crossReferences: ${problem}`);
+  }
+  const enabled = new Set(
+    config.get<string[]>("dependencies.sources", [...PROVIDER_GROUPS])
+      .filter((group): group is ProviderGroup => (PROVIDER_GROUPS as readonly string[]).includes(group))
+  );
+  const providers: DependencyProvider[] = [
+    createSourceScanProvider((entry) => fs.readFileSync(entry.localPath, "utf-8")),
+    createProgramReferencesProvider({ sqlServicesAvailable, findCompiledObject, programReferences, objectSources }),
+    ...configs.map((xref) => createCrossReferenceProvider(xref, {
+      libraryExists,
+      runQuery: runCrossReferenceQuery,
+      log: (message) => ctx.log.appendLine(message),
+    })),
+  ];
+  return selectProviders(providers, { enabled, system });
+}
+
+function logOutcomes(ctx: CommandContext, memberPath: string, outcomes: ProviderOutcome[]): void {
+  ctx.log.appendLine(`[dependencies] ${memberPath}:`);
+  for (const outcome of outcomes) {
+    ctx.log.appendLine(`  ${outcome.label}: ${
+      outcome.status === "ran" ? `${outcome.count} found${outcome.note ? ` (${outcome.note})` : ""}`
+        : outcome.status === "unavailable" ? `not available on this system (${outcome.reason})`
+          : `failed: ${outcome.error}`
+    }`);
   }
 }
 
@@ -182,13 +248,15 @@ function buildItems(ctx: CommandContext, system: string, resolution: Resolution)
       }
       seen.add(key);
       const existing = ctx.service.findEntry(system, best.library, best.sourceFile, best.member);
+      const where = reference.line !== undefined ? `Line ${reference.line}: ${reference.text}` : reference.text;
+      const foundBy = reference.foundBy?.length ? ` · found by ${reference.foundBy.join(", ")}` : "";
       const alsoIn = others.length > 0
         ? ` · also in ${others.length} other source file${others.length === 1 ? "" : "s"}`
         : "";
       groupItems.push({
         label: best.member,
         description: `${best.library}/${best.sourceFile}${existing ? " · already checked out" : ""}`,
-        detail: `Line ${reference.line}: ${reference.text}${alsoIn}`,
+        detail: `${where}${foundBy}${alsoIn}`,
         picked: kind === "copybook" && !existing,
         member: {
           library: best.library,
@@ -229,7 +297,8 @@ function reportUnresolved(ctx: CommandContext, memberPath: string, unresolved: R
   const names = [...new Set(unresolved.map((ref) => ref.unresolvable ? `${ref.member} (${ref.unresolvable})` : ref.member))];
   ctx.log.appendLine(`[dependencies] Source not found for dependencies of ${memberPath}:`);
   for (const ref of unresolved) {
-    ctx.log.appendLine(`  line ${ref.line}: ${ref.text}${ref.unresolvable ? ` (${ref.unresolvable})` : ""}`);
+    const where = ref.line !== undefined ? `line ${ref.line}: ` : "";
+    ctx.log.appendLine(`  ${where}${ref.text}${ref.unresolvable ? ` (${ref.unresolvable})` : ""} → ${ref.member}`);
   }
   void vscode.window
     .showWarningMessage(

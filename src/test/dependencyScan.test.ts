@@ -77,6 +77,59 @@ describe("scanReferences: RPG", () => {
   });
 });
 
+describe("scanReferences: RPG file declarations", () => {
+  /** A fixed-form F-spec with the name in columns 7-16 and external (E) or program (F) description in column 22. */
+  function fspec(name: string, described: "E" | "F", keywords = ""): string {
+    return `     F${name.padEnd(10)}IF   ${described}           K DISK    ${keywords}`;
+  }
+
+  it("reads externally described F-specs and skips program-described ones", () => {
+    const source = [
+      fspec("CUSTMAST", "E"),
+      fspec("PRINTOUT", "F"),
+      "     F*ORDHDR   IF   E           K DISK",
+      fspec("ORDHDR", "E"),
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "rpgle")), ["file|||CUSTMAST|", "file|||ORDHDR|"]);
+  });
+
+  it("uses EXTDESC, also on a continuation line, and ignores EXTFILE", () => {
+    const source = [
+      fspec("CUST", "E", "EXTDESC('PRODLIB/CUSTMAST')"),
+      fspec("ORD", "E"),
+      "     F                                     EXTFILE('RUNLIB/ORDX') EXTDESC('ORDHDRP')",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "rpgle")), ["file|PRODLIB||CUSTMAST|", "file|||ORDHDRP|"]);
+  });
+
+  it("reads dcl-f, skipping program-described files and LIKEFILE", () => {
+    const source = [
+      "**FREE",
+      "dcl-f custmast keyed;",
+      "dcl-f report printer(132);",
+      "dcl-f screen workstn;",
+      "dcl-f ordhdr disk(*ext) usage(*input) extdesc('PRODLIB/ORDHDRP')",
+      "     extfile(*extdesc);",
+      "dcl-f custcopy likefile(custmast);",
+      "dcl-f flat disk(100);",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "sqlrpgle")), [
+      "file|||CUSTMAST|",
+      "file|||SCREEN|",
+      "file|PRODLIB||ORDHDRP|",
+    ]);
+  });
+
+  it("reads EXTNAME data structures in free and fixed form, once per file", () => {
+    const source = [
+      "     D CUST          E DS                  EXTNAME(CUSTMAST)",
+      "       dcl-ds cust2 extname('CUSTMAST' : *all) end-ds;",
+      "       dcl-ds ord extname('PRODLIB/ORDDTL') qualified end-ds;",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "rpgle")), ["file|||CUSTMAST|", "file|PRODLIB||ORDDTL|"]);
+  });
+});
+
 describe("scanReferences: CL", () => {
   it("takes the program name, never the library", () => {
     const source = [

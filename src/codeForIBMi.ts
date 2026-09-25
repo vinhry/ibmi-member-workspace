@@ -1,6 +1,12 @@
 import * as vscode from "vscode";
 import type { CodeForIBMi, IBMiMember } from "@halcyontech/vscode-ibmi-types";
 import type { SourceMemberRow } from "./dependencyResolve";
+import {
+  CompiledObject,
+  ReferencedObject,
+  SourceLocation,
+  objectKey,
+} from "./dependencySources";
 import { CheckedOutMember, buildLocalFileName } from "./types";
 
 type IBMi = ReturnType<CodeForIBMi["instance"]["getConnection"]>;
@@ -177,6 +183,105 @@ export async function findSourceMembers(
     })));
   }
   return rows;
+}
+
+function requireConnection(): IBMi {
+  const connection = getConnection();
+  if (!connection) {
+    throw new Error("Not connected to IBM i");
+  }
+  return connection;
+}
+
+/** A system object name, safe to put in a CL command. */
+const OBJECT_NAME = /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/;
+
+/** Whether QSYS2.OBJECT_STATISTICS (with named arguments) works on this IBM i. */
+export async function sqlServicesAvailable(): Promise<boolean> {
+  try {
+    await requireConnection().runSQL(
+      "SELECT OBJNAME FROM TABLE(QSYS2.OBJECT_STATISTICS('QSYS', '*LIB', OBJECT_NAME => 'QSYS2')) X"
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function libraryExists(library: string): Promise<boolean> {
+  const rows = await requireConnection().runSQL(
+    "SELECT 1 AS FOUND FROM QSYS2.SYSSCHEMAS WHERE SYSTEM_SCHEMA_NAME = ? OR SCHEMA_NAME = ? FETCH FIRST 1 ROW ONLY",
+    { bindings: [library, library] }
+  );
+  return rows.length > 0;
+}
+
+/** The first *PGM or *SRVPGM named `name` in `libraries`, in order. Libraries that can't be read are skipped. */
+export async function findCompiledObject(name: string, libraries: string[]): Promise<CompiledObject | undefined> {
+  const connection = requireConnection();
+  for (const library of libraries) {
+    try {
+      const [row] = await connection.runSQL(
+        "SELECT OBJLIB, OBJNAME, OBJTYPE FROM TABLE(QSYS2.OBJECT_STATISTICS(?, '*PGM *SRVPGM', OBJECT_NAME => ?)) X",
+        { bindings: [library, name] }
+      );
+      if (row) {
+        return {
+          library: String(row.OBJLIB).trim(),
+          name: String(row.OBJNAME).trim(),
+          type: String(row.OBJTYPE).trim() === "*SRVPGM" ? "*SRVPGM" : "*PGM",
+        };
+      }
+    } catch {
+      // A library that doesn't exist or isn't authorized just holds no object.
+    }
+  }
+  return undefined;
+}
+
+/** Runs DSPPGMREF into a QTEMP outfile of the SQL job and returns its rows. */
+export async function programReferences(object: CompiledObject): Promise<Array<Record<string, unknown>>> {
+  if (!OBJECT_NAME.test(object.library) || !OBJECT_NAME.test(object.name)) {
+    throw new Error(`Not a valid object name: ${object.library}/${object.name}`);
+  }
+  const connection = requireConnection();
+  await connection.runSQL(
+    `@QSYS/DSPPGMREF PGM(${object.library}/${object.name}) OUTPUT(*OUTFILE) OBJTYPE(${object.type}) ` +
+    "OUTFILE(QTEMP/IMWPGMREF) OUTMBR(*FIRST *REPLACE)"
+  );
+  return connection.runSQL("SELECT WHFNAM, WHLNAM, WHOTYP FROM QTEMP.IMWPGMREF");
+}
+
+/** The source member each object was created from, when the object records one. */
+export async function objectSources(objects: ReferencedObject[]): Promise<Map<string, SourceLocation>> {
+  const connection = requireConnection();
+  const sources = new Map<string, SourceLocation>();
+  for (const object of objects) {
+    if (!object.library) {
+      continue;
+    }
+    try {
+      const [row] = await connection.runSQL(
+        "SELECT SOURCE_LIBRARY, SOURCE_FILE, SOURCE_MEMBER FROM TABLE(QSYS2.OBJECT_STATISTICS(?, ?, OBJECT_NAME => ?)) X",
+        { bindings: [object.library, object.type, object.name] }
+      );
+      if (row?.SOURCE_LIBRARY && row.SOURCE_FILE && row.SOURCE_MEMBER) {
+        sources.set(objectKey(object), {
+          library: String(row.SOURCE_LIBRARY).trim(),
+          sourceFile: String(row.SOURCE_FILE).trim(),
+          member: String(row.SOURCE_MEMBER).trim(),
+        });
+      }
+    } catch {
+      // No source information: the reference is matched by name instead.
+    }
+  }
+  return sources;
+}
+
+/** Runs a user-defined cross-reference SELECT. */
+export async function runCrossReferenceQuery(sql: string, bindings: string[]): Promise<Array<Record<string, unknown>>> {
+  return requireConnection().runSQL(sql, { bindings });
 }
 
 export async function listSourceFileMembers(
