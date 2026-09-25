@@ -1,5 +1,13 @@
 # Change Log
 
+## 1.5.0 - 2026-09-25
+
+- **Find Dependencies asks more sources, and only those the connected IBM i has.** Each source is checked on the system once per connection and left out when it isn't available. The list says which sources found each dependency and which weren't available.
+  - **Source scan** now also finds the files an RPG program declares (F-specs and `dcl-f`, honoring `EXTDESC`) and `EXTNAME` data structures.
+  - **DSPPGMREF** runs on the member's compiled program in the search libraries and finds the files, programs, and service programs it uses, pointing at the source each was created from.
+  - **Cross-reference tools** such as Abstract, Pathfinder, or MDXREF plug in through `dependencies.crossReferences`: a SQL query per tool, optionally limited to systems where its library exists.
+- `dependencies.sources` turns a kind of source off. `dependencies.searchLibraries` is now also where compiled programs are looked for.
+
 ## 1.4.0 - 2026-09-25
 
 - **Find Dependencies.** Right-click a checkout, or follow the prompt after a single checkout, to see the copybooks (`/COPY`, `/INCLUDE`, `EXEC SQL INCLUDE`), called programs (CL `CALL`, `TFRCTL`), and referenced files (DDS `REF`, `REFFLD`, `PFILE`, `JFILE`) a member uses. Their source is looked up in the libraries set in `dependencies.searchLibraries`, or the library list.

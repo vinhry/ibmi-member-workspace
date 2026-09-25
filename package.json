@@ -2,7 +2,7 @@
   "name": "ibmi-member-workspace",
   "displayName": "IBM i Member Workspace",
   "description": "Work with IBM i source members locally, compare changes, and synchronize them safely. Works with Code for IBM i.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "publisher": "vinhry",
   "author": "Vinhry",
   "license": "GPL-3.0",
@@ -581,7 +581,64 @@
             "type": "string"
           },
           "default": [],
-          "markdownDescription": "Libraries to search, in order, for the source of dependencies found by **Find Dependencies**, for example your production libraries. When empty, the connection's current library and library list are searched."
+          "markdownDescription": "Libraries to search, in order, for the source members and compiled programs of dependencies found by **Find Dependencies**, for example your production object and source libraries (`PRODOBJ`, `PRODSRC`). When empty, the connection's current library and library list are searched."
+        },
+        "ibmi-member-workspace.dependencies.sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "source",
+              "programReferences",
+              "crossReferences"
+            ],
+            "enumDescriptions": [
+              "Scan the member's local source text.",
+              "Run DSPPGMREF on the compiled program in the search libraries.",
+              "Run the queries in dependencies.crossReferences (for example, against Abstract)."
+            ]
+          },
+          "uniqueItems": true,
+          "default": [
+            "source",
+            "programReferences",
+            "crossReferences"
+          ],
+          "markdownDescription": "Where **Find Dependencies** looks. Each source is also checked on the connected IBM i and left out when it isn't available there (for example, no compiled program, or a cross-reference tool that isn't installed)."
+        },
+        "ibmi-member-workspace.dependencies.crossReferences": {
+          "type": "array",
+          "scope": "application",
+          "default": [],
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "query"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Shown in Find Dependencies, for example \"Abstract\"."
+              },
+              "query": {
+                "type": "string",
+                "description": "A SELECT statement. Placeholders {library}, {sourceFile}, {member} and {object} are passed as parameters. Return KIND (copybook, program, file, or an object type such as *FILE or *PGM) and MEMBER or OBJECT; optionally LIBRARY and SOURCE_FILE (the source member's location), LINE and TEXT."
+              },
+              "systems": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Host names this query applies to. Empty means every system."
+              },
+              "requiresLibrary": {
+                "type": "string",
+                "description": "Only use this query on systems where this library exists, for example the library holding the tool's cross-reference files."
+              }
+            }
+          },
+          "markdownDescription": "Cross-reference tools to ask in **Find Dependencies**, such as Abstract, Pathfinder or MDXREF. Each entry is a SQL `SELECT` against the tool's files; see **Dependencies** in the README for the columns and an example. Only user settings are read, so a workspace can't add queries."
         }
       }
     }
