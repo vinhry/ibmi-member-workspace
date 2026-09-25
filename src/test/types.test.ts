@@ -137,6 +137,23 @@ describe("parseCheckoutIndex id migration", () => {
     assert.equal(index.systems.SYS.workItems.A[0].id, currentId);
     assert.equal(index.systems.SYS.workItems.B[0].id, currentId);
   });
+
+  it("keeps each entry's hash version, and leaves it absent on legacy entries", () => {
+    const index = parseCheckoutIndex(JSON.stringify({
+      version: 3,
+      systems: {
+        SYS: {
+          system: "SYS",
+          directory: "SYS",
+          activeWorkItem: "A",
+          workItems: { A: [{ ...legacy, hashVersion: 2 }], B: [legacy] },
+        },
+      },
+      unassignedWorkItems: {},
+    }));
+    assert.equal(index.systems.SYS.workItems.A[0].hashVersion, 2);
+    assert.equal(index.systems.SYS.workItems.B[0].hashVersion, undefined);
+  });
 });
 
 describe("work item state", () => {

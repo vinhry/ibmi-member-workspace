@@ -9,6 +9,8 @@ export interface CheckedOutMember {
   checkedOutAt: string;
   lastCheckedAt?: string;
   remoteHashAtCheckout: string;
+  /** 2 when `remoteHashAtCheckout` uses the current hash; absent for baselines stored before 1.2.2. */
+  hashVersion?: 2;
   status: CheckoutStatus;
 }
 

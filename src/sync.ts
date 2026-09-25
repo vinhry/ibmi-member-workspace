@@ -3,7 +3,32 @@ import { CheckoutStatus } from "./types";
 
 export type RemoteStatus = "in-sync" | "modified" | "remote-changed" | "conflict";
 
-export function hashContent(content: string, trimTrailingWhitespace: boolean): string {
+/** `CheckedOutMember.hashVersion` of baselines computed with {@link hashContent}. */
+export const HASH_VERSION = 2;
+
+/**
+ * The significant text of a source member. Records are blank-padded, so a BOM,
+ * CRLF vs LF, trailing blanks on a line, and blank lines at the end carry no
+ * meaning. Leading and embedded blank lines are kept.
+ */
+export function canonicalMemberText(content: string): string {
+  return content
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\s+$/, "");
+}
+
+export function hashContent(content: string): string {
+  return crypto.createHash("sha256").update(canonicalMemberText(content), "utf-8").digest("hex");
+}
+
+/**
+ * The hash used before {@link HASH_VERSION} 2. It depended on the editor's
+ * `files.trimTrailingWhitespace` setting and kept a BOM; only used to upgrade
+ * baselines stored by older versions.
+ */
+export function legacyHashContent(content: string, trimTrailingWhitespace: boolean): string {
   let normalized = content.replace(/\r\n/g, "\n");
   if (trimTrailingWhitespace) {
     normalized = normalized.replace(/[ \t]+$/gm, "");
@@ -12,6 +37,23 @@ export function hashContent(content: string, trimTrailingWhitespace: boolean): s
   // the string, no /m flag) — leading/embedded blank lines are left untouched.
   normalized = normalized.replace(/\n+$/, "");
   return crypto.createHash("sha256").update(normalized, "utf-8").digest("hex");
+}
+
+/**
+ * Converts a baseline stored by an older version to {@link hashContent}. A
+ * candidate (the live remote or local text) whose legacy hash equals the
+ * baseline is the checkout's base content, so its current hash is the new
+ * baseline. The trim setting may have changed since checkout, so both legacy
+ * variants are tried. Undefined when no candidate is unchanged since checkout.
+ */
+export function migrateLegacyBaseline(
+  baseline: string,
+  candidates: readonly string[]
+): string | undefined {
+  const base = candidates.find((text) =>
+    legacyHashContent(text, false) === baseline || legacyHashContent(text, true) === baseline
+  );
+  return base === undefined ? undefined : hashContent(base);
 }
 
 /**
@@ -97,17 +139,13 @@ export function statusAfterUpload(
 }
 
 /**
- * Shapes a local file for upload. Code for IBM i's source-date save splits the
- * body on "\n" and diffs it line by line against the member as read with SQL
- * (LF-joined, no trailing newline): a BOM or CRLF endings would mark every line
- * changed. Every trailing blank line is dropped, since each would otherwise
- * become a blank last record that breaks compiles (like `hashContent`,
- * trailing blank lines are not significant). Leading and embedded blank lines
- * are kept.
+ * Shapes a local file for upload: the same text that {@link hashContent}
+ * hashes, so the upload and the sync status can't disagree. Code for IBM i's
+ * source-date save splits the body on "\n" and diffs it line by line against
+ * the member as read with SQL (LF-joined, no trailing newline): a BOM or CRLF
+ * endings would mark every line changed, and each trailing blank line would
+ * become a blank last record that breaks compiles.
  */
 export function normalizeForMemberUpload(content: string): string {
-  return content
-    .replace(/^\uFEFF/, "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\s+$/, "");
+  return canonicalMemberText(content);
 }

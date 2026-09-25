@@ -1,8 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  canonicalMemberText,
   classifyStatus,
   hashContent,
+  legacyHashContent,
+  migrateLegacyBaseline,
   nextBaseline,
   normalizeForMemberUpload,
   statusAfterLocalSave,
@@ -29,21 +32,76 @@ describe("classifyStatus", () => {
 
 describe("hashContent", () => {
   it("treats CRLF and LF line endings as equal", () => {
-    assert.equal(hashContent("A\r\nB\r\n", false), hashContent("A\nB\n", false));
+    assert.equal(hashContent("A\r\nB\r\n"), hashContent("A\nB\n"));
+  });
+
+  it("ignores a leading BOM", () => {
+    assert.equal(hashContent("\uFEFFA\nB\n"), hashContent("A\nB\n"));
   });
 
   it("ignores trailing blank lines", () => {
-    assert.equal(hashContent("A\nB\n\n\n", false), hashContent("A\nB", false));
+    assert.equal(hashContent("A\nB\n\n\n"), hashContent("A\nB"));
+    assert.equal(hashContent("A\nB\n  \n\t\n"), hashContent("A\nB"));
+  });
+
+  it("ignores trailing blanks on every line, regardless of editor settings", () => {
+    assert.equal(hashContent("A  \nB\t\n"), hashContent("A\nB\n"));
   });
 
   it("keeps leading and embedded blank lines significant", () => {
-    assert.notEqual(hashContent("\nA\nB", false), hashContent("A\nB", false));
-    assert.notEqual(hashContent("A\n\nB", false), hashContent("A\nB", false));
+    assert.notEqual(hashContent("\nA\nB"), hashContent("A\nB"));
+    assert.notEqual(hashContent("A\n\nB"), hashContent("A\nB"));
   });
 
-  it("ignores trailing whitespace only when trimTrailingWhitespace is on", () => {
-    assert.equal(hashContent("A  \nB\t\n", true), hashContent("A\nB\n", true));
-    assert.notEqual(hashContent("A  \nB\t\n", false), hashContent("A\nB\n", false));
+  it("keeps leading blanks significant", () => {
+    assert.notEqual(hashContent("  A\nB"), hashContent("A\nB"));
+  });
+
+  it("hashes exactly the text that is uploaded", () => {
+    const local = "\uFEFFA  \r\n\r\n  B\r\n\r\n";
+    assert.equal(normalizeForMemberUpload(local), canonicalMemberText(local));
+    assert.equal(hashContent(local), hashContent(normalizeForMemberUpload(local)));
+  });
+});
+
+describe("migrateLegacyBaseline", () => {
+  const base = "A  \nB\n";
+
+  it("converts a baseline stored with trimTrailingWhitespace off", () => {
+    assert.equal(migrateLegacyBaseline(legacyHashContent(base, false), [base]), hashContent(base));
+  });
+
+  it("converts a baseline stored with trimTrailingWhitespace on", () => {
+    assert.equal(migrateLegacyBaseline(legacyHashContent(base, true), [base]), hashContent(base));
+  });
+
+  it("converts a baseline whose content had a BOM", () => {
+    const withBom = "\uFEFFA\nB\n";
+    assert.equal(migrateLegacyBaseline(legacyHashContent(withBom, false), [withBom]), hashContent(withBom));
+  });
+
+  it("uses whichever candidate is unchanged since checkout", () => {
+    const baseline = legacyHashContent(base, false);
+    assert.equal(migrateLegacyBaseline(baseline, ["changed remotely", base]), hashContent(base));
+  });
+
+  it("is undefined when every candidate changed since checkout", () => {
+    assert.equal(migrateLegacyBaseline(legacyHashContent(base, false), ["X", "Y"]), undefined);
+  });
+
+  it("keeps an unchanged member in sync after the upgrade", () => {
+    const local = "\uFEFFA  \r\nB\r\n";
+    const remote = "A\nB\n";
+    const baseline = migrateLegacyBaseline(legacyHashContent(remote, false), [remote, local]);
+    assert.ok(baseline);
+    assert.equal(classifyStatus(hashContent(local), hashContent(remote), baseline), "in-sync");
+  });
+
+  it("lets a local-only edit show as modified after the upgrade", () => {
+    const remote = "A\nB\n";
+    const baseline = migrateLegacyBaseline(legacyHashContent(remote, false), [remote, "A\nC\n"]);
+    assert.ok(baseline);
+    assert.equal(classifyStatus(hashContent("A\nC\n"), hashContent(remote), baseline), "modified");
   });
 });
 
