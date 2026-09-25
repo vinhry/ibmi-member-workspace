@@ -133,14 +133,11 @@ export class CheckoutService implements vscode.Disposable {
     if (!enabled) {
       return false;
     }
-    const available = await this.gitService?.checkGitAvailable();
-    if (!available) {
-      if (!this.gitWarningShown) {
-        this.gitWarningShown = true;
-        vscode.window.showWarningMessage(
-          "Local Change History is enabled, but Git was not found on PATH. Install Git, then run Set Up Local Change History again."
-        );
-      }
+    const problem = this.gitService
+      ? await this.gitService.gitAvailabilityProblem()
+      : "Git was not found on PATH.";
+    if (problem) {
+      this.warnGitUnavailable(problem);
       return false;
     }
     return true;
@@ -359,16 +356,12 @@ export class CheckoutService implements vscode.Disposable {
         message: "Enable Local Change History before saving checkpoints.",
       };
     }
-    if (!(await this.gitService.checkGitAvailable())) {
-      if (!this.gitWarningShown) {
-        this.gitWarningShown = true;
-        vscode.window.showWarningMessage(
-          "Local Change History is enabled, but Git was not found on PATH. Install Git, then run Set Up Local Change History again."
-        );
-      }
+    const problem = await this.gitService.gitAvailabilityProblem();
+    if (problem) {
+      this.warnGitUnavailable(problem);
       return {
         status: "setupRequired",
-        message: "Install Git, then run Set Up Local Change History again.",
+        message: `${problem} Install or update Git, then run Set Up Local Change History again.`,
       };
     }
     const root = this.getGitRoot(system);
@@ -1232,6 +1225,16 @@ export class CheckoutService implements vscode.Disposable {
     await this.persist();
   }
 
+  private warnGitUnavailable(problem: string): void {
+    if (this.gitWarningShown) {
+      return;
+    }
+    this.gitWarningShown = true;
+    vscode.window.showWarningMessage(
+      `Local Change History is enabled, but ${problem} Install or update Git, then run Set Up Local Change History again.`
+    );
+  }
+
   /** Records a baseline computed with the current {@link hashContent}. */
   private setBaseline(entry: CheckedOutMember, hash: string): void {
     entry.remoteHashAtCheckout = hash;
@@ -1406,6 +1409,11 @@ export class CheckoutService implements vscode.Disposable {
         `The IBM i checkout index could not be read and was reset. A backup was saved to ${backupUri.fsPath}.`
       );
     }
+  }
+
+  /** Redraws the checkout views, e.g. after a checked-out file was deleted outside VS Code. */
+  notifyLocalFileChanged(): void {
+    this._onDidChange.fire();
   }
 
   /** Notifies listeners and saves the index, or defers the save while a batch is running. */

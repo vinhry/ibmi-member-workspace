@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -11,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { GitService } from "../gitService";
+import { GitService, gitVersionProblem } from "../gitService";
 
 // Isolate Git from the host's system and global config: CI runner images trust every folder
 // (safe.directory=*), and Git for Windows turns on core.autocrlf system-wide.
@@ -326,5 +327,128 @@ describe("GitService", () => {
     } finally {
       rmSync(folder, { recursive: true, force: true });
     }
+  });
+
+  it("saves one checkpoint for more paths than fit on a Windows command line", async () => {
+    const { folder, service } = await readyRepository();
+    // A commit this size can start background housekeeping that races the cleanup below.
+    git(folder, "config", "gc.auto", "0");
+    git(folder, "config", "maintenance.auto", "false");
+    try {
+      const sourceFile = join(folder, "A_VERY_LONG_LIBRARY_NAME", "A_VERY_LONG_SOURCE_FILE");
+      mkdirSync(sourceFile, { recursive: true });
+      // 3000 paths of ~60 characters each is ~180K characters, far above Windows' 32K limit.
+      const members = Array.from({ length: 3000 }, (_, i) => {
+        const member = join(sourceFile, `MEMBER_NUMBER_${String(i).padStart(5, "0")}.RPGLE`);
+        writeFileSync(member, `member ${i}\n`);
+        return member;
+      });
+      assert.equal((await service.saveCheckpoint(folder, members, "checkout 3000 members")).status, "success");
+      assert.equal(git(folder, "show", "--format=", "--name-only", "HEAD").split("\n").length, 3000);
+      assert.deepEqual(
+        new Set(await service.trackedInBranch(folder, "workspace", members)),
+        new Set(members)
+      );
+      assert.equal((await service.saveCheckpoint(folder, members, "again")).status, "noChanges");
+    } finally {
+      rmSync(folder, { recursive: true, force: true, maxRetries: 5 });
+    }
+  });
+
+  it("treats member names with special characters as literal paths", async () => {
+    const { folder, service } = await readyRepository();
+    try {
+      const names = ["PAY$CALC.RPGLE", "ORD#01.RPGLE", "CUST@.RPGLE"];
+      // Windows file names can't contain "*"; elsewhere it must not act as a glob.
+      if (process.platform !== "win32") {
+        names.push("A*B.RPGLE", "AXB.RPGLE");
+      }
+      const members = names.map((name) => join(folder, name));
+      for (const member of members) {
+        writeFileSync(member, "v1\n");
+      }
+      assert.equal((await service.saveCheckpoint(folder, members, "special names")).status, "success");
+      assert.equal(git(folder, "show", "--format=", "--name-only", "HEAD").split("\n").length, names.length);
+
+      if (process.platform !== "win32") {
+        writeFileSync(join(folder, "AXB.RPGLE"), "v2\n");
+        const glob = join(folder, "A*B.RPGLE");
+        assert.equal((await service.saveCheckpoint(folder, [glob], "only the literal name")).status, "noChanges");
+        assert.equal(git(folder, "status", "--porcelain"), "M AXB.RPGLE");
+      }
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("saves automatic checkpoints despite global commit signing and hooks", async () => {
+    const { folder, service } = await readyRepository();
+    const hooks = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-hooks-"));
+    try {
+      const hook = join(hooks, "pre-commit");
+      writeFileSync(hook, "#!/bin/sh\nexit 1\n");
+      chmodSync(hook, 0o755);
+      execFileSync("git", ["config", "--global", "commit.gpgsign", "true"]);
+      execFileSync("git", ["config", "--global", "gpg.program", "ibmi-member-workspace-no-such-gpg"]);
+      execFileSync("git", ["config", "--global", "core.hooksPath", hooks]);
+
+      const member = join(folder, "MEMBER.RPGLE");
+      writeFileSync(member, "signed?\n");
+      assert.equal((await service.saveCheckpoint(folder, [member], "unsigned checkpoint")).status, "success");
+    } finally {
+      execFileSync("git", ["config", "--global", "--unset", "commit.gpgsign"]);
+      execFileSync("git", ["config", "--global", "--unset", "gpg.program"]);
+      execFileSync("git", ["config", "--global", "--unset", "core.hooksPath"]);
+      rmSync(hooks, { recursive: true, force: true });
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("never treats a work-item name as a path to restore", async () => {
+    const { folder, service } = await readyRepository();
+    try {
+      const member = join(folder, "LIB", "SRC.RPGLE");
+      mkdirSync(join(folder, "LIB"));
+      writeFileSync(member, "committed\n");
+      assert.equal((await service.saveCheckpoint(folder, [member], "checkout")).status, "success");
+      writeFileSync(member, "local edit\n");
+
+      // "LIB" is a directory, not a work item: `git checkout LIB` would silently discard the edit.
+      assert.equal((await service.switchWorkItem(folder, "LIB", true)).status, "failure");
+      assert.equal(readFileSync(member, "utf-8"), "local edit\n");
+      assert.equal(await service.currentBranch(folder), "workspace");
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a repository it could not fully list as unsafe to repair", async () => {
+    const { folder, service } = await readyRepository();
+    try {
+      const inspection = await service.inspectRepository(folder);
+      assert.equal(inspection.complete, true);
+      assert.equal(service.isSafeMisplacedRepository(inspection, ["alpha.example"]), true);
+      assert.equal(service.isSafeMisplacedRepository({ ...inspection, complete: false }, ["alpha.example"]), false);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("gitVersionProblem", () => {
+  it("accepts Git 2.25 and later, including vendor suffixes", () => {
+    assert.equal(gitVersionProblem("git version 2.25.0"), undefined);
+    assert.equal(gitVersionProblem("git version 2.54.0 (Apple Git-157)"), undefined);
+    assert.equal(gitVersionProblem("git version 2.45.1.windows.1"), undefined);
+    assert.equal(gitVersionProblem("git version 3.0.0"), undefined);
+  });
+
+  it("rejects Git older than 2.25", () => {
+    assert.match(gitVersionProblem("git version 2.24.3\n") ?? "", /2\.25 or later is required \(found git version 2\.24\.3\)/);
+    assert.ok(gitVersionProblem("git version 1.9.5"));
+  });
+
+  it("allows a version it can't read", () => {
+    assert.equal(gitVersionProblem("git version unknown"), undefined);
   });
 });

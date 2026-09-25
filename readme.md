@@ -98,12 +98,12 @@ Local Change History does not upload members to IBM i and does not send files to
 
 ### Prerequisites
 
-- Git must be installed and on your system PATH.
+- Git 2.25 or later must be installed and on your system PATH.
 - A checkout container must be configured for the workspace.
 
 ### Set Up
 
-Run **IBM i Member Workspace: Set Up Local Change History**, or enable `ibmi-member-workspace.gitIntegration` in VS Code Settings. The selected folder (for example, `checkout`) is the **checkout container**. Each system working directory (for example, `checkout/alex.acklie.com`) is its own Git repository. Existing repositories at that exact system directory are adopted without changing their commits, branches, configuration, or remotes. If Git does not already know your name and email, the extension asks for them and saves them only in that system repository.
+Run **IBM i Member Workspace: Set Up Local Change History**, or enable `ibmi-member-workspace.gitIntegration` in VS Code Settings. The selected folder (for example, `checkout`) is the **checkout container**. Each system working directory (for example, `checkout/alex.acklie.com`) is its own Git repository. Existing repositories at that exact system directory are adopted without changing their commits, branches, configuration, or remotes. If Git does not already know your name and email, the extension asks for them and saves them only in that system repository. Automatic checkpoints are never signed and skip Git hooks, so a global `commit.gpgsign` setting or hook can't block them.
 
 ### Work Items
 

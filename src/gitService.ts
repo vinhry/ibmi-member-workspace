@@ -36,6 +36,52 @@ export interface GitIdentity {
   email: string;
 }
 
+interface RunOptions {
+  /** Log a failed command to the output channel (default true). */
+  logFailure?: boolean;
+  /** Trim stdout (default true); off for NUL-separated output. */
+  trimOutput?: boolean;
+  /** Written to the command's stdin, e.g. a NUL-separated `--pathspec-from-file=-` list. */
+  input?: string;
+}
+
+/** `--pathspec-from-file` and `git switch` need Git 2.25. */
+const MIN_GIT_VERSION: readonly [number, number] = [2, 25];
+
+/** Large repositories list many paths; the 1 MB default would make inspection fail. */
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+/** Major and minor version from `git --version` output, e.g. "git version 2.45.1.windows.1". */
+export function parseGitVersion(output: string): [number, number] | undefined {
+  const match = /(\d+)\.(\d+)/.exec(output);
+  return match ? [Number(match[1]), Number(match[2])] : undefined;
+}
+
+/** Why Local Change History can't use this Git, or undefined when it can. Unknown versions are allowed. */
+export function gitVersionProblem(versionOutput: string): string | undefined {
+  const version = parseGitVersion(versionOutput);
+  if (!version) {
+    return undefined;
+  }
+  const [major, minor] = version;
+  const [minMajor, minMinor] = MIN_GIT_VERSION;
+  return major > minMajor || (major === minMajor && minor >= minMinor)
+    ? undefined
+    : `Git ${minMajor}.${minMinor} or later is required (found ${versionOutput.trim()}).`;
+}
+
+/** Repository-relative path in Git's form, for comparing with Git output. */
+function gitPath(relative: string): string {
+  return relative.split(path.sep).join("/");
+}
+
+/** Comparison key for a Git path: macOS and Windows file systems ignore case. */
+function pathKey(gitRelative: string): string {
+  return process.platform === "win32" || process.platform === "darwin"
+    ? gitRelative.toLowerCase()
+    : gitRelative;
+}
+
 interface CommandResult {
   ok: boolean;
   stdout: string;
@@ -52,6 +98,8 @@ export interface RepositoryInspection {
   remotes: string[];
   trackedPaths: Array<{ mode: string; path: string }>;
   historicalPaths: string[];
+  /** False when a listing command failed, so the path lists may be incomplete. */
+  complete: boolean;
 }
 
 export interface LegacySystemMigration {
@@ -65,22 +113,29 @@ export interface LegacyMigrationResult extends GitOperationResult {
 }
 
 export class GitService {
-  private gitAvailable: boolean | undefined;
+  /** Cached result of the Git check: null when Git is usable, otherwise the problem. */
+  private gitProblem: string | null | undefined;
 
   constructor(private readonly log: Pick<vscode.OutputChannel, "appendLine">) {}
 
   invalidateAvailability(): void {
-    this.gitAvailable = undefined;
+    this.gitProblem = undefined;
   }
 
   private async run(
     folder: string,
     args: string[],
-    logFailure = true,
-    trimOutput = true
+    { logFailure = true, trimOutput = true, input }: RunOptions = {}
   ): Promise<CommandResult> {
     try {
-      const { stdout, stderr } = await pExecFile("git", ["-C", folder, ...args]);
+      const pending = pExecFile("git", ["-C", folder, ...args], {
+        maxBuffer: MAX_OUTPUT_BYTES,
+        // Never wait for credentials or other terminal input from a background command.
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      });
+      // Always close stdin so no command can block waiting for input.
+      pending.child.stdin?.end(input ?? "");
+      const { stdout, stderr } = await pending;
       return {
         ok: true,
         stdout: trimOutput ? stdout.trim() : stdout,
@@ -107,16 +162,20 @@ export class GitService {
   }
 
   async checkGitAvailable(): Promise<boolean> {
-    if (this.gitAvailable !== undefined) {
-      return this.gitAvailable;
+    return (await this.gitAvailabilityProblem()) === undefined;
+  }
+
+  /** Why Git can't be used for Local Change History (missing or too old), or undefined when it can. */
+  async gitAvailabilityProblem(): Promise<string | undefined> {
+    if (this.gitProblem === undefined) {
+      try {
+        const { stdout } = await pExecFile("git", ["--version"]);
+        this.gitProblem = gitVersionProblem(stdout) ?? null;
+      } catch {
+        this.gitProblem = "Git was not found on PATH.";
+      }
     }
-    try {
-      await pExecFile("git", ["--version"]);
-      this.gitAvailable = true;
-    } catch {
-      this.gitAvailable = false;
-    }
-    return this.gitAvailable;
+    return this.gitProblem ?? undefined;
   }
 
   async isExactRepository(folder: string): Promise<boolean> {
@@ -128,7 +187,7 @@ export class GitService {
    * VS Code reports "c:\..." while Git reports "C:/...", and 8.3 short names or subst drives differ too.
    */
   private async checkExactRepository(folder: string): Promise<CommandResult> {
-    const result = await this.run(folder, ["rev-parse", "--show-cdup"], false);
+    const result = await this.run(folder, ["rev-parse", "--show-cdup"], { logFailure: false });
     return result.ok && result.stdout !== ""
       ? { ok: false, stdout: result.stdout, stderr: "The folder is inside another repository." }
       : result;
@@ -158,14 +217,15 @@ export class GitService {
         remotes: [],
         trackedPaths: [],
         historicalPaths: [],
+        complete: true,
       };
     }
     const [head, branches, remotes, tracked, history] = await Promise.all([
-      this.run(folder, ["rev-parse", "--verify", "HEAD"], false),
+      this.run(folder, ["rev-parse", "--verify", "HEAD"], { logFailure: false }),
       this.listBranches(folder),
-      this.run(folder, ["remote"], false),
-      this.run(folder, ["ls-files", "--stage", "-z"], false, false),
-      this.run(folder, ["log", "--all", "--format=", "--name-only"], false),
+      this.run(folder, ["remote"], { logFailure: false }),
+      this.run(folder, ["ls-files", "--stage", "-z"], { logFailure: false, trimOutput: false }),
+      this.run(folder, ["log", "--all", "--format=", "--name-only"], { logFailure: false }),
     ]);
     const trackedPaths = tracked.ok && tracked.stdout
       ? tracked.stdout.split("\0").filter(Boolean).map((record) => {
@@ -173,9 +233,12 @@ export class GitService {
         return { mode: match?.[1] ?? "", path: match?.[2] ?? record };
       })
       : [];
+    // A repository without commits has no history to list; any other failure leaves the lists unknown.
+    const complete = remotes.ok && tracked.ok && (history.ok || !head.ok);
     return {
       folder,
       exactRepository,
+      complete,
       managedByExtension: await this.isManagedRepository(folder),
       hasHead: head.ok,
       branches,
@@ -214,6 +277,10 @@ export class GitService {
         return memberPath.length === 3 && memberPath.every(Boolean);
       });
     };
+    if (!inspection.complete) {
+      this.log.appendLine(`[git] Could not list everything in ${inspection.folder}; treating it as unsafe to repair.`);
+      return false;
+    }
     return inspection.managedByExtension &&
       inspection.trackedPaths.every((entry) => allowed(entry.path, entry.mode)) &&
       inspection.historicalPaths.every((entry) => allowed(entry));
@@ -237,7 +304,7 @@ export class GitService {
       if (prepared.status !== "success" && prepared.status !== "setupRequired") {
         return prepared;
       }
-      const hasHead = await this.run(system.folder, ["rev-parse", "--verify", "HEAD"], false);
+      const hasHead = await this.run(system.folder, ["rev-parse", "--verify", "HEAD"], { logFailure: false });
       if (!hasHead.ok) {
         continue;
       }
@@ -276,8 +343,8 @@ export class GitService {
 
   async getIdentity(folder: string): Promise<GitIdentity | undefined> {
     const [name, email] = await Promise.all([
-      this.run(folder, ["config", "--get", "user.name"], false),
-      this.run(folder, ["config", "--get", "user.email"], false),
+      this.run(folder, ["config", "--get", "user.name"], { logFailure: false }),
+      this.run(folder, ["config", "--get", "user.email"], { logFailure: false }),
     ]);
     if (!name.ok || !email.ok || !name.stdout || !email.stdout) {
       return undefined;
@@ -303,11 +370,9 @@ export class GitService {
   }
 
   async prepareRepository(folder: string): Promise<GitOperationResult> {
-    if (!(await this.checkGitAvailable())) {
-      return {
-        status: "setupRequired",
-        message: "Git is not installed or is not available on PATH.",
-      };
+    const gitProblem = await this.gitAvailabilityProblem();
+    if (gitProblem) {
+      return { status: "setupRequired", message: gitProblem };
     }
 
     try {
@@ -343,7 +408,7 @@ export class GitService {
         };
       }
 
-      const hasHead = await this.run(folder, ["rev-parse", "--verify", "HEAD"], false);
+      const hasHead = await this.run(folder, ["rev-parse", "--verify", "HEAD"], { logFailure: false });
       if (!hasHead.ok && (!exactRepository || managedRepository)) {
         const initial = await this.saveCheckpoint(folder, [gitignorePath], "Initialize local change history", false);
         if (initial.status !== "success" && initial.status !== "noChanges") {
@@ -376,7 +441,7 @@ export class GitService {
 
   async currentBranch(folder: string): Promise<string> {
     // Fails quietly on a detached HEAD, which callers treat as "no work item".
-    const branch = await this.run(folder, ["symbolic-ref", "--quiet", "--short", "HEAD"], false);
+    const branch = await this.run(folder, ["symbolic-ref", "--quiet", "--short", "HEAD"], { logFailure: false });
     return branch.ok ? branch.stdout : "";
   }
 
@@ -386,12 +451,12 @@ export class GitService {
    * adopted with their own history have no such commit.
    */
   async findCleanBase(folder: string): Promise<string | undefined> {
-    const roots = await this.run(folder, ["rev-list", "--max-parents=0", "--first-parent", "HEAD"], false);
+    const roots = await this.run(folder, ["rev-list", "--max-parents=0", "--first-parent", "HEAD"], { logFailure: false });
     const base = roots.ok ? roots.stdout.split("\n").filter(Boolean).at(-1) : undefined;
     if (!base) {
       return undefined;
     }
-    const tree = await this.run(folder, ["ls-tree", "--name-only", "-z", base], false, false);
+    const tree = await this.run(folder, ["ls-tree", "--name-only", "-z", base], { logFailure: false, trimOutput: false });
     if (!tree.ok) {
       return undefined;
     }
@@ -423,20 +488,23 @@ export class GitService {
   /** Which of `filePaths` are committed on `branch`. */
   async trackedInBranch(folder: string, branch: string, filePaths: string[]): Promise<string[]> {
     const root = path.resolve(folder);
-    const relative = new Map(filePaths.map((filePath) => [
-      path.relative(root, path.resolve(filePath)).split(path.sep).join("/"),
+    const wanted = new Map(filePaths.map((filePath) => [
+      pathKey(gitPath(path.relative(root, path.resolve(filePath)))),
       filePath,
     ]));
+    // List the whole branch and filter here: passing every path could exceed the command-line limit.
     const result = await this.run(
       folder,
-      ["ls-tree", "-r", "--name-only", "-z", branch, "--", ...relative.keys()],
-      true,
-      false
+      ["ls-tree", "-r", "--name-only", "-z", branch],
+      { trimOutput: false }
     );
     if (!result.ok) {
       throw new Error(`Could not read work item “${branch}”: ${result.stderr}`);
     }
-    return result.stdout.split("\0").filter(Boolean).map((name) => relative.get(name) ?? path.join(folder, name));
+    return result.stdout.split("\0").filter(Boolean).flatMap((name) => {
+      const filePath = wanted.get(pathKey(name));
+      return filePath === undefined ? [] : [filePath];
+    });
   }
 
   async listBranches(folder: string): Promise<string[]> {
@@ -447,7 +515,7 @@ export class GitService {
   }
 
   async validateBranchName(folder: string, name: string): Promise<boolean> {
-    return (await this.run(folder, ["check-ref-format", "--branch", name], false)).ok;
+    return (await this.run(folder, ["check-ref-format", "--branch", name], { logFailure: false })).ok;
   }
 
   async createWorkItem(folder: string, name: string, startPoint?: string): Promise<GitOperationResult> {
@@ -457,7 +525,8 @@ export class GitService {
         message: "Use a short name without spaces or special Git characters, such as TICKET-123.",
       };
     }
-    const result = await this.run(folder, ["checkout", "-b", name, ...(startPoint ? [startPoint] : [])]);
+    // `switch`, unlike `checkout`, never reads a work item named like a file as a path.
+    const result = await this.run(folder, ["switch", "--no-guess", "-c", name, ...(startPoint ? [startPoint] : [])]);
     if (!result.ok) {
       return {
         status: result.stderr.includes("already exists") ? "conflict" : "failure",
@@ -477,7 +546,7 @@ export class GitService {
         return state;
       }
     }
-    const result = await this.run(folder, ["checkout", name]);
+    const result = await this.run(folder, ["switch", "--no-guess", name]);
     if (!result.ok) {
       return {
         status: result.stderr.includes("would be overwritten") ? "conflict" : "failure",
@@ -499,7 +568,7 @@ export class GitService {
   }
 
   async changedPaths(folder: string): Promise<string[]> {
-    const status = await this.run(folder, ["status", "--porcelain", "-z"], true, false);
+    const status = await this.run(folder, ["status", "--porcelain", "-z"], { trimOutput: false });
     if (!status.ok || !status.stdout) {
       return [];
     }
@@ -550,23 +619,31 @@ export class GitService {
       };
     }
 
-    const stage = await this.run(folder, ["add", "-A", "--", ...relativePaths]);
+    // Paths go through stdin, not the command line: a batch of ~1000 members would exceed
+    // Windows' 32K command-line limit. Literal pathspecs keep names like A*B from matching as globs.
+    const pathspecs = { input: relativePaths.map(gitPath).join("\0") };
+    const fromStdin = ["--pathspec-from-file=-", "--pathspec-file-nul"];
+    const stage = await this.run(folder, ["--literal-pathspecs", "add", "-A", ...fromStdin], pathspecs);
     if (!stage.ok) {
       return { status: "failure", message: "Could not prepare files for the checkpoint.", details: stage.stderr };
     }
-    const changed = await this.run(
-      folder,
-      ["diff", "--cached", "--quiet", "--", ...relativePaths],
-      false
-    );
-    if (changed.ok) {
+    // `diff` has no --pathspec-from-file, so list everything staged and match the paths here.
+    const staged = await this.run(folder, ["diff", "--cached", "--name-only", "-z"], { trimOutput: false });
+    if (!staged.ok) {
+      return { status: "failure", message: "Could not inspect checkpoint changes.", details: staged.stderr };
+    }
+    const requested = new Set(relativePaths.map((relative) => pathKey(gitPath(relative))));
+    if (!staged.stdout.split("\0").some((name) => name && requested.has(pathKey(name)))) {
       return { status: "noChanges", message: "No changes since the last checkpoint." };
     }
-    if (changed.code !== 1) {
-      return { status: "failure", message: "Could not inspect checkpoint changes.", details: changed.stderr };
-    }
 
-    const commit = await this.run(folder, ["commit", "--only", "-m", message, "--", ...relativePaths]);
+    // Automatic checkpoints must not block on a signing passphrase prompt or be rejected by hooks
+    // inherited from the user's global Git config.
+    const commit = await this.run(
+      folder,
+      ["--literal-pathspecs", "-c", "commit.gpgsign=false", "commit", "--only", "--no-verify", "-m", message, ...fromStdin],
+      pathspecs
+    );
     if (!commit.ok) {
       return { status: "failure", message: "Could not save the checkpoint.", details: commit.stderr };
     }

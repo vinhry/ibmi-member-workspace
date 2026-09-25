@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as vscode from "vscode";
 import { CheckoutService } from "./checkoutService";
 import { errorMessage } from "./errors";
@@ -7,7 +8,8 @@ const debounceMs = 300;
 
 /**
  * Watches the checkout folder so edits made outside VS Code (AI tools, scripts,
- * git) update a checkout's status just like a save in the editor does.
+ * git) update a checkout's status just like a save in the editor does, and a
+ * deleted local file shows up in the checkout view right away.
  */
 export class LocalFileWatcher implements vscode.Disposable {
   private watcher: vscode.FileSystemWatcher | undefined;
@@ -26,13 +28,11 @@ export class LocalFileWatcher implements vscode.Disposable {
       return;
     }
     this.watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(root, "**/*"),
-      false,
-      false,
-      true
+      new vscode.RelativePattern(root, "**/*")
     );
     this.watcher.onDidChange((uri) => this.schedule(uri));
     this.watcher.onDidCreate((uri) => this.schedule(uri));
+    this.watcher.onDidDelete((uri) => this.schedule(uri));
   }
 
   dispose(): void {
@@ -63,6 +63,11 @@ export class LocalFileWatcher implements vscode.Disposable {
   private async update(localPath: string): Promise<void> {
     const entry = this.service.findEntryByLocalPath(localPath);
     if (!entry) {
+      return;
+    }
+    if (!fs.existsSync(localPath)) {
+      // Shows the checkout as "local file missing"; Refresh offers Re-checkout or Remove.
+      this.service.notifyLocalFileChanged();
       return;
     }
     try {

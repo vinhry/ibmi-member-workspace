@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as vscode from "vscode";
 import {
   CheckedOutMember,
@@ -184,9 +185,14 @@ export class CheckoutTreeProvider
 
     item.id = `member:${entry.id}`;
     item.resourceUri = vscode.Uri.file(entry.localPath);
-    item.description = this.getStatusDescription(entry);
-    item.tooltip = this.getTooltip(entry);
-    item.iconPath = this.getStatusIcon(entry);
+    const localMissing = !fs.existsSync(entry.localPath);
+    item.description = localMissing
+      ? "local file missing — Refresh to re-checkout or remove"
+      : this.getStatusDescription(entry);
+    item.tooltip = this.getTooltip(entry, localMissing);
+    item.iconPath = localMissing
+      ? new vscode.ThemeIcon("error", new vscode.ThemeColor("problemsErrorIcon.foreground"))
+      : this.getStatusIcon(entry);
     item.contextValue = `checkout-${entry.status}`;
 
     item.command = {
@@ -220,7 +226,7 @@ export class CheckoutTreeProvider
     }
   }
 
-  private getTooltip(entry: CheckedOutMember): vscode.MarkdownString {
+  private getTooltip(entry: CheckedOutMember, localMissing: boolean): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.appendMarkdown(`**${formatMemberPath(entry)}**\n\n`);
     md.appendMarkdown(`- **System:** ${entry.system}\n`);
@@ -233,7 +239,7 @@ export class CheckoutTreeProvider
         `- **Last checked:** ${new Date(entry.lastCheckedAt).toLocaleString()}\n`
       );
     }
-    md.appendMarkdown(`- **Local:** ${entry.localPath}\n`);
+    md.appendMarkdown(`- **Local:** ${entry.localPath}${localMissing ? " (missing)" : ""}\n`);
     return md;
   }
 
