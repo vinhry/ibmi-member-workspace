@@ -1,5 +1,11 @@
 # Change Log
 
+## 1.2.2 - 2026-09-25
+
+- Fix: a local file saved with a byte-order mark (BOM), for example by Windows PowerShell 5.1 or some AI tools, no longer shows as **Modified**, and no longer triggers the "IBM i copy differs" warning after upload.
+- Fix: changing VS Code's `files.trimTrailingWhitespace` setting no longer turns members into **Modified** or **Conflict**. Trailing blanks on a line are never significant in source members.
+- Existing checkouts are upgraded automatically the next time they are saved, refreshed, or uploaded. A member that was changed on both sides before the upgrade still shows as **Conflict** until you Merge Back.
+
 ## 1.2.1 - 2026-09-24
 
 - Fix: **Upload to IBM i** no longer resets every source date (SRCDAT) to `000000`. When source dates are enabled in Code for IBM i, uploads save through Code for IBM i like an edit in its editor: unchanged lines keep their dates and changed lines are dated today. CRLF line endings in the local file no longer affect the dates.
