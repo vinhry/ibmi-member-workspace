@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.2.4 - 2026-09-25
+
+- Fix: Local Change History could fail with "write EPIPE" when a Git command finished before the extension had finished sending it input (seen on Linux, introduced in 1.2.3).
+
 ## 1.2.3 - 2026-09-25
 
 - Fix: checking out or uploading many members at once (for example, **Check Out All Members** on a source file with about 1,000 members) no longer fails to save its checkpoint on Windows because the Git command line was too long.
