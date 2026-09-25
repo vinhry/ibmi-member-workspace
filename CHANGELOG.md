@@ -1,5 +1,14 @@
 # Change Log
 
+## 1.2.3 - 2026-09-25
+
+- Fix: checking out or uploading many members at once (for example, **Check Out All Members** on a source file with about 1,000 members) no longer fails to save its checkpoint on Windows because the Git command line was too long.
+- Fix: automatic checkpoints no longer hang or fail when your global Git config signs commits (`commit.gpgsign`) or runs hooks.
+- Fix: switching to a work item whose name matches a folder in the checkout folder can no longer discard local edits in that folder.
+- Fix: the repair of a misplaced checkout repository refuses to run when Git could not list the repository's contents, instead of treating it as empty and safe.
+- A checked-out file deleted outside VS Code shows as **local file missing** in Checked Out Members right away. Refresh offers **Re-checkout** or **Remove from Checkouts**.
+- Local Change History now requires Git 2.25 or later, and says so if an older Git is found.
+
 ## 1.2.2 - 2026-09-25
 
 - Fix: a local file saved with a byte-order mark (BOM), for example by Windows PowerShell 5.1 or some AI tools, no longer shows as **Modified**, and no longer triggers the "IBM i copy differs" warning after upload.
