@@ -1,5 +1,11 @@
 # Change Log
 
+## 1.3.0 - 2026-09-25
+
+- **Upload on Save.** The new `ibmi-member-workspace.autoUploadOnSave` setting (`off`, `ask`, or `silent`) uploads a checked-out member when you save it in the editor. Saves without local changes are skipped. A member changed on the IBM i since checkout always asks before it is overwritten, and files changed by other tools are never uploaded automatically.
+- A status-bar item shows the upload-on-save mode while it is on. Click it, or run **Change Upload on Save**, to switch modes.
+- **Upload to IBM i** and upload on save share one code path, so they handle remote changes and truncated lines the same way.
+
 ## 1.2.4 - 2026-09-25
 
 - Fix: Local Change History could fail with "write EPIPE" when a Git command finished before the extension had finished sending it input (seen on Linux, introduced in 1.2.3).
