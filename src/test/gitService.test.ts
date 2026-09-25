@@ -422,6 +422,26 @@ describe("GitService", () => {
     }
   });
 
+  it("switches work items over read-only files, as reference copies are", async () => {
+    const { folder, service } = await readyRepository();
+    try {
+      assert.equal((await service.createWorkItem(folder, "TICKET-1")).status, "success");
+      const reference = join(folder, "PRODLIB", "QRPGLESRC", "DATEUTIL.RPGLEINC");
+      mkdirSync(join(folder, "PRODLIB", "QRPGLESRC"), { recursive: true });
+      writeFileSync(reference, "reference\n");
+      assert.equal((await service.saveCheckpoint(folder, [reference], "reference")).status, "success");
+      chmodSync(reference, 0o444);
+
+      // Git must remove the read-only file (Windows refuses a plain delete) and restore it later.
+      assert.equal((await service.switchWorkItem(folder, "workspace")).status, "success");
+      assert.equal(existsSync(reference), false);
+      assert.equal((await service.switchWorkItem(folder, "TICKET-1")).status, "success");
+      assert.equal(readFileSync(reference, "utf-8"), "reference\n");
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it("survives a command that exits without reading its input", async () => {
     const folder = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-epipe-"));
     try {

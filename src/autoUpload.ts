@@ -1,4 +1,4 @@
-import type { CheckedOutMember, CheckoutStatus } from "./types";
+import { CheckedOutMember, CheckoutStatus, isReferenceCopy } from "./types";
 
 export type AutoUploadMode = "off" | "ask" | "silent";
 
@@ -143,6 +143,10 @@ export class AutoUploadScheduler {
       return undefined;
     }
     if (!hasLocalEditsToUpload(entry.status)) {
+      return undefined;
+    }
+    if (isReferenceCopy(entry)) {
+      this.deps.log(`[auto-upload] Not uploaded: ${localPath} (read-only reference copy)`);
       return undefined;
     }
     const reason = this.deps.skipReason(entry);

@@ -134,6 +134,14 @@ describe("AutoUploadScheduler", () => {
     }
   });
 
+  it("never uploads a read-only reference copy", async () => {
+    const h = harness({ entry: { ...member(), kind: "reference" } });
+    h.scheduler.schedule(PATH);
+    await h.fireTimers();
+    assert.equal(h.uploads.length, 0);
+    assert.match(h.logs.join("\n"), /reference copy/);
+  });
+
   it("skips and logs when the checkout can't be uploaded now", async () => {
     const h = harness({ skipReason: () => "not connected to the IBM i" });
     h.scheduler.schedule(PATH);

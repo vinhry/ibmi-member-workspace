@@ -11,7 +11,16 @@ export interface CheckedOutMember {
   remoteHashAtCheckout: string;
   /** 2 when `remoteHashAtCheckout` uses the current hash; absent for baselines stored before 1.2.2. */
   hashVersion?: 2;
+  /**
+   * "reference": a read-only copy brought in to read (e.g. a dependency from production). It is
+   * never uploaded or merged back; changes go through the shop's change management instead.
+   */
+  kind?: "reference";
   status: CheckoutStatus;
+}
+
+export function isReferenceCopy(entry: Pick<CheckedOutMember, "kind">): boolean {
+  return entry.kind === "reference";
 }
 
 export type CheckoutStatus =

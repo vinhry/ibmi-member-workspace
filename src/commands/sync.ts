@@ -4,7 +4,7 @@ import { getSystemName, memberUri, sourceDatesEnabled } from "../codeForIBMi";
 import { LocalFileMissingError, errorMessage } from "../errors";
 import { mergeDocumentKey } from "../mergeHandler";
 import { countLocalChanges, resolveMemberSelections, saveDirtyLocalFiles } from "../prompts";
-import { CheckedOutMember, RefreshTally, TreeItemType, formatMemberPath } from "../types";
+import { CheckedOutMember, RefreshTally, TreeItemType, formatMemberPath, isReferenceCopy } from "../types";
 import { CommandContext } from "./context";
 import { uploadWithConflictHandling } from "./uploadMember";
 
@@ -80,6 +80,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
             let succeeded = 0;
             let altered = 0;
             let skipped = 0;
+            let references = 0;
             let errors = 0;
             let cancelled = false;
             const uploaded: string[] = [];
@@ -92,6 +93,11 @@ export function registerSyncCommands(ctx: CommandContext): void {
                 }
                 const entry = selections[i].entry;
                 progress.report({ message: `${entry.memberName} (${i + 1}/${selections.length})` });
+                if (isReferenceCopy(entry)) {
+                  references++;
+                  log.appendLine(`[upload] Skipped ${formatMemberPath(entry)}: read-only reference copy`);
+                  continue;
+                }
                 try {
                   const result = await service.uploadToRemote(entry, { deferCheckpointTo: uploaded });
                   if (result === "uploaded") {
@@ -126,16 +132,19 @@ export function registerSyncCommands(ctx: CommandContext): void {
               vscode.window.showInformationMessage(
                 `Upload cancelled. ${succeeded}/${selections.length} member(s) uploaded before cancelling.`
               );
-            } else if (errors > 0 || skipped > 0 || altered > 0) {
+            } else if (errors > 0 || skipped > 0 || altered > 0 || references > 0) {
               const alteredText = altered > 0
                 ? ` ${altered} differ on the IBM i from the local copy (e.g. truncated lines).`
                 : "";
               const skippedText = skipped > 0
                 ? ` ${skipped} skipped because they changed on the IBM i since checkout.`
                 : "";
+              const referenceText = references > 0
+                ? ` ${references} skipped because they are read-only reference copies.`
+                : "";
               const errorText = errors > 0 ? ` ${errors} error(s).` : "";
               vscode.window.showWarningMessage(
-                `Uploaded ${succeeded}/${selections.length} member(s) to IBM i.${alteredText}${skippedText}${errorText} See IBM i Member Workspace output panel.`
+                `Uploaded ${succeeded}/${selections.length} member(s) to IBM i.${alteredText}${skippedText}${referenceText}${errorText} See IBM i Member Workspace output panel.`
               );
               log.show();
             } else {
@@ -239,7 +248,16 @@ export function registerSyncCommands(ctx: CommandContext): void {
             const result = await service.refreshRemoteStatus(entry);
             const memberPath = formatMemberPath(entry);
 
-            if (result === "in-sync") {
+            if (isReferenceCopy(entry) && result !== "in-sync") {
+              const choice = await vscode.window.showInformationMessage(
+                `The reference copy of ${memberPath} differs from the IBM i.`,
+                "Update Reference Copy"
+              );
+              if (choice === "Update Reference Copy") {
+                await service.recheckout(entry);
+                vscode.window.showInformationMessage(`Updated the reference copy of ${memberPath}.`);
+              }
+            } else if (result === "in-sync") {
               vscode.window.showInformationMessage(
                 `${memberPath} is in sync with the remote.`
               );

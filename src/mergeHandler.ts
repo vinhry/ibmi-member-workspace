@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { CheckedOutMember, formatMemberPath } from "./types";
+import { assertEditable } from "./checkoutService";
 import { memberUri } from "./codeForIBMi";
 
 /** Identifies a member document regardless of query options such as `readonly=false`. */
@@ -10,6 +11,7 @@ export function mergeDocumentKey(uri: vscode.Uri): string {
 export class MergeHandler {
 
   async openMergeDiff(entry: CheckedOutMember): Promise<void> {
+    assertEditable(entry);
     const memberPath = formatMemberPath(entry);
 
     await vscode.window.withProgress(

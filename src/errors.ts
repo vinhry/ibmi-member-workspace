@@ -14,6 +14,14 @@ export class LocalFileMissingError extends Error {
   }
 }
 
+/** Thrown when an action that writes to the IBM i is attempted on a read-only reference copy. */
+export class ReferenceCopyError extends Error {
+  constructor(memberPath: string) {
+    super(`${memberPath} is a read-only reference copy and can't be uploaded or merged back. Check it out through your change-management process to change it.`);
+    this.name = "ReferenceCopyError";
+  }
+}
+
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

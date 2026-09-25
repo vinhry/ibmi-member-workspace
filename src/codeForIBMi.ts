@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type { CodeForIBMi, IBMiMember } from "@halcyontech/vscode-ibmi-types";
+import type { SourceMemberRow } from "./dependencyResolve";
 import { CheckedOutMember, buildLocalFileName } from "./types";
 
 type IBMi = ReturnType<CodeForIBMi["instance"]["getConnection"]>;
@@ -125,6 +126,57 @@ export async function uploadMemberContentWithDates(
   const uri = memberUri(entry, { editable: true });
   await vscode.workspace.fs.readFile(uri);
   await vscode.workspace.fs.writeFile(uri, Buffer.from(fileContent, "utf-8"));
+}
+
+/** The connection's current library followed by its library list, without duplicates. */
+export function connectionLibraryList(): string[] {
+  const config = getConnection()?.getConfig();
+  if (!config) {
+    return [];
+  }
+  const libraries = [config.currentLibrary, ...config.libraryList]
+    .filter((library): library is string => Boolean(library))
+    .map((library) => library.toUpperCase());
+  return [...new Set(libraries)];
+}
+
+/** Members looked up per SQL statement, to keep the statement and its bindings small. */
+const MEMBERS_PER_LOOKUP = 100;
+
+/**
+ * Source members named `members` in any source file of `libraries`.
+ * SYSPARTITIONSTAT has a null SOURCE_TYPE for members of data files.
+ */
+export async function findSourceMembers(
+  members: string[],
+  libraries: string[]
+): Promise<SourceMemberRow[]> {
+  const connection = getConnection();
+  if (!connection) {
+    throw new Error("Not connected to IBM i");
+  }
+  if (members.length === 0 || libraries.length === 0) {
+    return [];
+  }
+  const rows: SourceMemberRow[] = [];
+  for (let i = 0; i < members.length; i += MEMBERS_PER_LOOKUP) {
+    const chunk = members.slice(i, i + MEMBERS_PER_LOOKUP);
+    const result = await connection.runSQL(
+      `SELECT RTRIM(SYSTEM_TABLE_SCHEMA) AS LIBRARY, RTRIM(SYSTEM_TABLE_NAME) AS SOURCE_FILE, ` +
+      `RTRIM(SYSTEM_TABLE_MEMBER) AS MEMBER, COALESCE(RTRIM(CAST(SOURCE_TYPE AS VARCHAR(10))), '') AS SOURCE_TYPE ` +
+      `FROM QSYS2.SYSPARTITIONSTAT WHERE SOURCE_TYPE IS NOT NULL ` +
+      `AND SYSTEM_TABLE_SCHEMA IN (${libraries.map(() => "?").join(", ")}) ` +
+      `AND SYSTEM_TABLE_MEMBER IN (${chunk.map(() => "?").join(", ")})`,
+      { bindings: [...libraries, ...chunk] }
+    );
+    rows.push(...result.map((row) => ({
+      library: String(row.LIBRARY),
+      sourceFile: String(row.SOURCE_FILE),
+      member: String(row.MEMBER),
+      sourceType: String(row.SOURCE_TYPE ?? ""),
+    })));
+  }
+  return rows;
 }
 
 export async function listSourceFileMembers(

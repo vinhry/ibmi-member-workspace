@@ -4,6 +4,7 @@ import {
   CheckedOutMember,
   SystemCheckoutState,
   buildCheckoutId,
+  isReferenceCopy,
   moveEntriesState,
   parseCheckoutIndex,
   sanitizeSystemName,
@@ -136,6 +137,26 @@ describe("parseCheckoutIndex id migration", () => {
     }));
     assert.equal(index.systems.SYS.workItems.A[0].id, currentId);
     assert.equal(index.systems.SYS.workItems.B[0].id, currentId);
+  });
+
+  it("keeps reference copies marked through parsing and moves between work items", () => {
+    const index = parseCheckoutIndex(JSON.stringify({
+      version: 3,
+      systems: {
+        SYS: {
+          system: "SYS",
+          directory: "SYS",
+          activeWorkItem: "A",
+          workItems: { A: [{ ...legacy, kind: "reference" }], B: [] },
+        },
+      },
+      unassignedWorkItems: {},
+    }));
+    const state = index.systems.SYS;
+    assert.equal(isReferenceCopy(state.workItems.A[0]), true);
+    moveEntriesState(state, new Set([currentId]), "A", "B");
+    assert.equal(isReferenceCopy(state.workItems.B[0]), true);
+    assert.equal(isReferenceCopy(legacy), false);
   });
 
   it("keeps each entry's hash version, and leaves it absent on legacy entries", () => {

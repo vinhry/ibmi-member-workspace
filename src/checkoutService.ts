@@ -14,6 +14,7 @@ import {
   emptyTally,
   formatMemberPath,
   isDefaultWorkItem,
+  isReferenceCopy,
   moveEntriesState,
   parseCheckoutIndex,
   sanitizeSystemName,
@@ -27,7 +28,7 @@ import {
   sourceDatesEnabled,
   getSystemName,
 } from "./codeForIBMi";
-import { CheckoutCancelledError, LocalFileMissingError, errorMessage } from "./errors";
+import { CheckoutCancelledError, LocalFileMissingError, ReferenceCopyError, errorMessage } from "./errors";
 import {
   HASH_VERSION,
   RemoteStatus,
@@ -61,6 +62,11 @@ export interface CheckoutOptions {
    * instead of saving a checkpoint per member.
    */
   deferCheckpointTo?: string[];
+  /**
+   * Bring the member in as a read-only reference copy. A member already checked out for
+   * change is left as it is.
+   */
+  reference?: boolean;
 }
 
 export class CheckoutService implements vscode.Disposable {
@@ -446,6 +452,7 @@ export class CheckoutService implements vscode.Disposable {
     state.workItems[branch] = state.workItems[branch].filter((entry) =>
       fs.existsSync(entry.localPath)
     );
+    await this.protectReferenceCopies(state.workItems[branch]);
     await this.persist();
   }
 
@@ -456,6 +463,7 @@ export class CheckoutService implements vscode.Disposable {
     state.workItems[name] = (state.workItems[name] ?? []).filter((entry) =>
       fs.existsSync(entry.localPath)
     );
+    await this.protectReferenceCopies(state.workItems[name]);
     await this.persist();
   }
 
@@ -466,6 +474,7 @@ export class CheckoutService implements vscode.Disposable {
     state.workItems[name] = state.workItems[name].filter((entry) =>
       fs.existsSync(entry.localPath)
     );
+    await this.protectReferenceCopies(state.workItems[name]);
     await this.persist();
   }
 
@@ -631,6 +640,7 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   private async recordMergeBackNow(entry: CheckedOutMember, content: string): Promise<GitOperationResult> {
+    assertEditable(entry);
     await this.assertEntryInActiveWorkItem(entry);
     const localUri = vscode.Uri.file(entry.localPath);
     await vscode.workspace.fs.writeFile(localUri, Buffer.from(content, "utf-8"));
@@ -749,6 +759,7 @@ export class CheckoutService implements vscode.Disposable {
       suppressAutoOpen = false,
       discardLocalChanges = false,
       deferCheckpointTo,
+      reference = false,
     } = options ?? {};
     const checkoutRoot = this.getCheckoutRoot();
     if (!checkoutRoot) {
@@ -765,6 +776,10 @@ export class CheckoutService implements vscode.Disposable {
     this.logGitFailure(gitReady);
 
     const existing = this.findEntry(system, library, sourceFile, memberName);
+    if (existing && reference && !isReferenceCopy(existing)) {
+      this.log.appendLine(`[reference] Kept ${formatMemberPath(existing)}: already checked out for change`);
+      return existing;
+    }
     if (existing) {
       if (redownloadBehavior === "skip") {
         return existing;
@@ -830,6 +845,7 @@ export class CheckoutService implements vscode.Disposable {
       localPath: "",
       checkedOutAt: new Date().toISOString(),
       remoteHashAtCheckout: "",
+      ...(reference ? { kind: "reference" as const } : {}),
       status: "checked-out",
     };
 
@@ -843,10 +859,14 @@ export class CheckoutService implements vscode.Disposable {
       `[checkout] ${library}/${sourceFile}/${memberName}  remoteHashAtCheckout=${hash.substring(0, 12)}`
     );
 
+    await this.setReadOnly(localPath, false);
     await vscode.workspace.fs.writeFile(
       vscode.Uri.file(localPath),
       Buffer.from(content, "utf-8")
     );
+    if (reference) {
+      await this.setReadOnly(localPath, true);
+    }
 
     if (deferCheckpointTo) {
       deferCheckpointTo.push(localPath);
@@ -855,7 +875,7 @@ export class CheckoutService implements vscode.Disposable {
       const result = await this.gitService.saveCheckpoint(
         gitRoot.fsPath,
         [localPath],
-        `checkout: ${formatMemberPath(entry)} from ${entry.system}`,
+        `${reference ? "reference" : "checkout"}: ${formatMemberPath(entry)} from ${entry.system}`,
         false
       );
       this.logGitFailure(result);
@@ -933,10 +953,14 @@ export class CheckoutService implements vscode.Disposable {
     const localUri = vscode.Uri.file(entry.localPath);
 
     await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(localUri, ".."));
+    await this.setReadOnly(entry.localPath, false);
     await vscode.workspace.fs.writeFile(
       localUri,
       Buffer.from(content, "utf-8")
     );
+    if (isReferenceCopy(entry)) {
+      await this.setReadOnly(entry.localPath, true);
+    }
 
     this.setBaseline(entry, hashContent(content));
     entry.checkedOutAt = new Date().toISOString();
@@ -970,6 +994,7 @@ export class CheckoutService implements vscode.Disposable {
     entry: CheckedOutMember,
     options?: { overwriteRemoteChanges?: boolean; deferCheckpointTo?: string[] }
   ): Promise<UploadResult> {
+    assertEditable(entry);
     await this.assertEntryInActiveWorkItem(entry);
     const localUri = vscode.Uri.file(entry.localPath);
     const localContent = await this.readLocal(localUri);
@@ -1147,6 +1172,8 @@ export class CheckoutService implements vscode.Disposable {
     }
     for (const entry of entries) {
       try {
+        // Windows can't delete a read-only file.
+        await this.setReadOnly(entry.localPath, false);
         await vscode.workspace.fs.delete(vscode.Uri.file(entry.localPath));
       } catch {
         // file may already be gone
@@ -1233,6 +1260,36 @@ export class CheckoutService implements vscode.Disposable {
     vscode.window.showWarningMessage(
       `Local Change History is enabled, but ${problem} Install or update Git, then run Set Up Local Change History again.`
     );
+  }
+
+  /**
+   * Makes a local file read-only (reference copies) or writable again before it is rewritten or
+   * deleted. chmod sets the read-only attribute on Windows. A missing file is ignored.
+   */
+  private async setReadOnly(localPath: string, readOnly: boolean): Promise<void> {
+    try {
+      if (!readOnly) {
+        try {
+          // Leave the permissions of an already writable file (every ordinary checkout) alone.
+          await fs.promises.access(localPath, fs.constants.W_OK);
+          return;
+        } catch {
+          // Missing or read-only: fall through.
+        }
+      }
+      await fs.promises.chmod(localPath, readOnly ? 0o444 : 0o644);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        this.log.appendLine(`[reference] Could not make ${localPath} ${readOnly ? "read-only" : "writable"}: ${errorMessage(err)}`);
+      }
+    }
+  }
+
+  /** Git restores files as writable when it switches work items, so reference copies are protected again. */
+  private async protectReferenceCopies(entries: CheckedOutMember[]): Promise<void> {
+    for (const entry of entries.filter(isReferenceCopy)) {
+      await this.setReadOnly(entry.localPath, true);
+    }
   }
 
   /** Records a baseline computed with the current {@link hashContent}. */
@@ -1445,5 +1502,12 @@ export class CheckoutService implements vscode.Disposable {
     });
     this.saveQueue = result.catch(() => undefined);
     return result;
+  }
+}
+
+/** Refuses actions that would send a read-only reference copy to the IBM i. */
+export function assertEditable(entry: CheckedOutMember): void {
+  if (isReferenceCopy(entry)) {
+    throw new ReferenceCopyError(formatMemberPath(entry));
   }
 }

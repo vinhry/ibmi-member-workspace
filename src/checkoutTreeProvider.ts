@@ -5,6 +5,7 @@ import {
   TreeItemType,
   buildLocalFileName,
   formatMemberPath,
+  isReferenceCopy,
 } from "./types";
 import { CheckoutService } from "./checkoutService";
 import { getSystemName } from "./codeForIBMi";
@@ -186,14 +187,20 @@ export class CheckoutTreeProvider
     item.id = `member:${entry.id}`;
     item.resourceUri = vscode.Uri.file(entry.localPath);
     const localMissing = !fs.existsSync(entry.localPath);
+    const reference = isReferenceCopy(entry);
     item.description = localMissing
       ? "local file missing — Refresh to re-checkout or remove"
-      : this.getStatusDescription(entry);
+      : reference
+        ? `reference · ${this.getStatusDescription(entry)}`
+        : this.getStatusDescription(entry);
     item.tooltip = this.getTooltip(entry, localMissing);
     item.iconPath = localMissing
       ? new vscode.ThemeIcon("error", new vscode.ThemeColor("problemsErrorIcon.foreground"))
-      : this.getStatusIcon(entry);
-    item.contextValue = `checkout-${entry.status}`;
+      : reference
+        ? new vscode.ThemeIcon("lock")
+        : this.getStatusIcon(entry);
+    // Reference copies get their own prefix so Upload, Merge Back and Run Action don't apply.
+    item.contextValue = `${reference ? "reference" : "checkout"}-${entry.status}`;
 
     item.command = {
       command: "ibmi-member-workspace.openLocalFile",
@@ -229,6 +236,9 @@ export class CheckoutTreeProvider
   private getTooltip(entry: CheckedOutMember, localMissing: boolean): vscode.MarkdownString {
     const md = new vscode.MarkdownString();
     md.appendMarkdown(`**${formatMemberPath(entry)}**\n\n`);
+    if (isReferenceCopy(entry)) {
+      md.appendMarkdown("Read-only reference copy: it can't be uploaded or merged back.\n\n");
+    }
     md.appendMarkdown(`- **System:** ${entry.system}\n`);
     md.appendMarkdown(`- **Status:** ${entry.status}\n`);
     md.appendMarkdown(

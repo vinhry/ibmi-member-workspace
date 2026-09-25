@@ -14,6 +14,7 @@ import {
 import { countLocalChanges, saveDirtyLocalFiles } from "../prompts";
 import { CheckedOutMember } from "../types";
 import { CommandContext } from "./context";
+import { suggestDependencies } from "./dependencies";
 import { ensureWorkItemForCheckout } from "./git";
 
 export function registerCheckoutCommands(ctx: CommandContext): void {
@@ -48,12 +49,13 @@ export function registerCheckoutCommands(ctx: CommandContext): void {
             if (system && !(await ensureWorkItemForCheckout(ctx, system))) {
               return;
             }
-            await service.checkoutMember(
+            const entry = await service.checkoutMember(
               memberInfo.library,
               memberInfo.sourceFile,
               memberInfo.memberName,
               memberInfo.extension
             );
+            void suggestDependencies(ctx, entry);
           } catch (err) {
             if (!(err instanceof CheckoutCancelledError)) {
               log.appendLine(`Checkout error: ${errorMessage(err)}`);
@@ -162,19 +164,26 @@ export function registerCheckoutCommands(ctx: CommandContext): void {
   );
 }
 
-async function checkoutMembersBatch(
+/**
+ * Checks out several members with one progress notification and one checkpoint. With
+ * `reference`, they become read-only reference copies: existing reference copies are refreshed
+ * without asking, and members already checked out for change are left alone.
+ */
+export async function checkoutMembersBatch(
   service: CheckoutService,
   system: string,
   memberInfoList: MemberInfo[],
-  log: vscode.OutputChannel
+  log: vscode.OutputChannel,
+  { reference = false }: { reference?: boolean } = {}
 ): Promise<void> {
   const alreadyCheckedOut = memberInfoList.filter(
     (m) => service.findEntry(system, m.library, m.sourceFile, m.memberName)
   );
 
   let redownloadBehavior: "skip" | "force" = "force";
-  let discardLocalChanges = false;
-  if (alreadyCheckedOut.length > 0) {
+  // A reference copy has nothing worth keeping locally.
+  let discardLocalChanges = reference;
+  if (alreadyCheckedOut.length > 0 && !reference) {
     const choice = await vscode.window.showWarningMessage(
       `${alreadyCheckedOut.length} of ${memberInfoList.length} selected member(s) are already checked out. What would you like to do?`,
       "Re-download All",
@@ -210,7 +219,11 @@ async function checkoutMembersBatch(
   }
 
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: "Checking out members...", cancellable: true },
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: reference ? "Bringing reference copies..." : "Checking out members...",
+      cancellable: true,
+    },
     async (progress, token) => {
       let succeeded = 0;
       let errors = 0;
@@ -228,7 +241,7 @@ async function checkoutMembersBatch(
           try {
             await service.checkoutMember(
               m.library, m.sourceFile, m.memberName, m.extension,
-              { redownloadBehavior, suppressAutoOpen: true, discardLocalChanges, deferCheckpointTo: downloaded }
+              { redownloadBehavior, suppressAutoOpen: true, discardLocalChanges, deferCheckpointTo: downloaded, reference }
             );
             succeeded++;
           } catch (err) {
@@ -242,22 +255,24 @@ async function checkoutMembersBatch(
         await service.saveBatchCheckpoint(
           system,
           downloaded,
-          `checkout: ${describeBatch(memberInfoList, downloaded.length)} from ${system}`
+          `${reference ? "reference" : "checkout"}: ${describeBatch(memberInfoList, downloaded.length)} from ${system}`
         );
       });
 
+      const done = reference ? "Brought" : "Checked out";
+      const noun = (count: number) => reference ? `reference cop${count === 1 ? "y" : "ies"}` : "member(s)";
       if (cancelled) {
         vscode.window.showInformationMessage(
-          `Checkout cancelled. ${succeeded}/${memberInfoList.length} member(s) checked out from ${system} before cancelling.`
+          `${reference ? "Reference copies" : "Checkout"} cancelled. ${succeeded}/${memberInfoList.length} ${noun(memberInfoList.length)} ${done.toLowerCase()} from ${system} before cancelling.`
         );
       } else if (errors > 0) {
         vscode.window.showWarningMessage(
-          `Checked out ${succeeded}/${memberInfoList.length} members from ${system}. ${errors} error(s) — see IBM i Member Workspace output panel.`
+          `${done} ${succeeded}/${memberInfoList.length} ${noun(memberInfoList.length)} from ${system}. ${errors} error(s) — see IBM i Member Workspace output panel.`
         );
         log.show();
       } else {
         vscode.window.showInformationMessage(
-          `Checked out ${succeeded} member(s) from ${system}.`
+          `${done} ${succeeded} ${noun(succeeded)} from ${system}.`
         );
       }
     }
