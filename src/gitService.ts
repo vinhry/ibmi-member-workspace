@@ -133,8 +133,14 @@ export class GitService {
         // Never wait for credentials or other terminal input from a background command.
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
       });
-      // Always close stdin so no command can block waiting for input.
-      pending.child.stdin?.end(input ?? "");
+      const stdin = pending.child.stdin;
+      if (stdin) {
+        // A command can exit, closing the pipe, before reading its input; writing then fails
+        // with EPIPE. Its exit status decides the result, so the write error is not fatal.
+        stdin.on("error", () => undefined);
+        // Always close stdin so no command can block waiting for input.
+        stdin.end(input);
+      }
       const { stdout, stderr } = await pending;
       return {
         ok: true,

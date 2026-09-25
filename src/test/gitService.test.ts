@@ -422,6 +422,19 @@ describe("GitService", () => {
     }
   });
 
+  it("survives a command that exits without reading its input", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-epipe-"));
+    try {
+      const service = new GitService({ appendLine: () => undefined });
+      // More input than a pipe buffers: `git --version` exits first, so the write fails with EPIPE.
+      const result = await service["run"](folder, ["--version"], { input: "x".repeat(8 * 1024 * 1024) });
+      assert.equal(result.ok, true);
+      assert.match(result.stdout, /^git version /);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it("treats a repository it could not fully list as unsafe to repair", async () => {
     const { folder, service } = await readyRepository();
     try {
