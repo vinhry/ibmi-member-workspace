@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -477,6 +478,29 @@ describe("GitService", () => {
       await assert.rejects(service.trackedInBranch(folder, "--full-tree", [join(folder, "X")]));
     } finally {
       rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("never writes the generated .gitignore through a link", async (t) => {
+    const parent = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-ignore-link-"));
+    try {
+      const folder = join(parent, "PUB400");
+      const target = join(parent, "outside.txt");
+      mkdirSync(folder);
+      try {
+        symlinkSync(target, join(folder, ".gitignore"), "file");
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "EPERM") {
+          t.skip("creating file links needs Developer Mode on Windows");
+          return;
+        }
+        throw err;
+      }
+      const service = new GitService({ appendLine: () => undefined });
+      assert.ok(["success", "setupRequired"].includes((await service.prepareRepository(folder)).status));
+      assert.equal(existsSync(target), false);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
     }
   });
 

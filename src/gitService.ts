@@ -415,8 +415,15 @@ export class GitService {
       }
 
       const gitignorePath = path.join(folder, ".gitignore");
-      if (!exactRepository && !fs.existsSync(gitignorePath)) {
-        fs.writeFileSync(gitignorePath, GITIGNORE_CONTENT, "utf-8");
+      if (!exactRepository) {
+        try {
+          // "wx" never replaces an existing file and never follows a link, even one to nothing.
+          fs.writeFileSync(gitignorePath, GITIGNORE_CONTENT, { encoding: "utf-8", flag: "wx" });
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+            throw err;
+          }
+        }
       }
 
       if (!(await this.getIdentity(folder))) {
