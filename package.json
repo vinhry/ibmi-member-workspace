@@ -35,6 +35,12 @@
     "halcyontechltd.code-for-ibmi"
   ],
   "main": "./out/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Checked-out members are uploaded to the IBM i, and Local Change History runs Git in the checkout folder."
+    }
+  },
   "contributes": {
     "submenus": [
       {

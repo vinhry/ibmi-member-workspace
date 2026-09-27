@@ -83,6 +83,14 @@ describe("extension manifest", () => {
     assert.match(serviceSource, /workspaceState\.get<string>\("checkoutRoot"\)/);
   });
 
+  it("stays off in untrusted workspaces", () => {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      capabilities?: { untrustedWorkspaces?: { supported?: unknown } };
+    };
+
+    assert.equal(manifest.capabilities?.untrustedWorkspaces?.supported, false);
+  });
+
   it("reads settings that send code to the IBM i or run queries from user settings only", () => {
     const properties = readManifest().contributes.configuration.properties as Record<string, { scope?: string }>;
 
