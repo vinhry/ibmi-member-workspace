@@ -332,7 +332,7 @@ export class GitService {
         if (existing.has(workItem) || !(await this.validateBranchName(system.folder, workItem))) {
           continue;
         }
-        const created = await this.run(system.folder, ["branch", workItem, "HEAD"]);
+        const created = await this.run(system.folder, ["branch", "--end-of-options", workItem, "HEAD"]);
         if (!created.ok) {
           return { status: "failure", message: `Could not restore work item “${workItem}”.`, details: created.stderr };
         }
@@ -489,7 +489,7 @@ export class GitService {
     if (!(await this.validateBranchName(folder, to))) {
       return { status: "invalidName", message: "Use a short name without spaces or special Git characters, such as TICKET-123." };
     }
-    const result = await this.run(folder, ["branch", "-m", from, to]);
+    const result = await this.run(folder, ["branch", "-m", "--end-of-options", from, to]);
     return result.ok
       ? { status: "success" }
       : { status: "failure", message: `Could not rename work item “${from}” to “${to}”.`, details: result.stderr };
@@ -500,7 +500,7 @@ export class GitService {
     if (!(await this.validateBranchName(folder, name))) {
       return { status: "invalidName", message: "Use a short name without spaces or special Git characters, such as TICKET-123." };
     }
-    const result = await this.run(folder, ["branch", name, startPoint]);
+    const result = await this.run(folder, ["branch", "--end-of-options", name, startPoint]);
     return result.ok
       ? { status: "success" }
       : { status: "failure", message: `Could not create work item “${name}”.`, details: result.stderr };
@@ -516,7 +516,7 @@ export class GitService {
     // List the whole branch and filter here: passing every path could exceed the command-line limit.
     const result = await this.run(
       folder,
-      ["ls-tree", "-r", "--name-only", "-z", branch],
+      ["ls-tree", "-r", "--name-only", "-z", "--end-of-options", branch],
       { trimOutput: false }
     );
     if (!result.ok) {
@@ -546,8 +546,12 @@ export class GitService {
         message: "Use a short name without spaces or special Git characters, such as TICKET-123.",
       };
     }
-    // `switch`, unlike `checkout`, never reads a work item named like a file as a path.
-    const result = await this.run(folder, ["switch", "--no-guess", "-c", name, ...(startPoint ? [startPoint] : [])]);
+    // `switch`, unlike `checkout`, never reads a work item named like a file as a path, and
+    // --end-of-options keeps a name or start point beginning with "-" from reading as an option.
+    const result = await this.run(
+      folder,
+      ["switch", "--no-guess", "-c", name, ...(startPoint ? ["--end-of-options", startPoint] : [])]
+    );
     if (!result.ok) {
       return {
         status: result.stderr.includes("already exists") ? "conflict" : "failure",
@@ -567,7 +571,7 @@ export class GitService {
         return state;
       }
     }
-    const result = await this.run(folder, ["switch", "--no-guess", name]);
+    const result = await this.run(folder, ["switch", "--no-guess", "--end-of-options", name]);
     if (!result.ok) {
       return {
         status: result.stderr.includes("would be overwritten") ? "conflict" : "failure",

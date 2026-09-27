@@ -464,6 +464,22 @@ describe("GitService", () => {
     }
   });
 
+  it("never reads a work-item name or start point as an option", async () => {
+    const { folder, service } = await readyRepository();
+    try {
+      // Without --end-of-options, `git switch --detach` would leave the work item for a detached HEAD.
+      assert.equal((await service.switchWorkItem(folder, "--detach", true)).status, "failure");
+      assert.equal(await service.currentBranch(folder), "workspace");
+      // ...and `git branch NEW --track` would create NEW from HEAD.
+      assert.equal((await service.createBranch(folder, "NEW", "--track")).status, "failure");
+      assert.equal((await service.createWorkItem(folder, "NEW2", "--orphan")).status, "failure");
+      assert.deepEqual(await service.listBranches(folder), ["workspace"]);
+      await assert.rejects(service.trackedInBranch(folder, "--full-tree", [join(folder, "X")]));
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it("never treats a work-item name as a path to restore", async () => {
     const { folder, service } = await readyRepository();
     try {
