@@ -96,7 +96,7 @@ describe("GitService", () => {
     }
   });
 
-  it("explains how to trust a checkout folder that Git considers owned by another account", async () => {
+  it("warns before suggesting to trust a checkout folder owned by another account", async () => {
     const folder = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-owner-"));
     const previous = process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER;
     process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER = "1";
@@ -105,6 +105,8 @@ describe("GitService", () => {
       const result = await service.prepareRepository(folder);
       assert.equal(result.status, "failure");
       assert.match(result.message ?? "", /safe\.directory/);
+      assert.match(result.message ?? "", /folder that your account owns/);
+      assert.match(result.message ?? "", /run programs as you/);
     } finally {
       if (previous === undefined) {
         delete process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER;

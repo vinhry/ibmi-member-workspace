@@ -450,7 +450,10 @@ export class GitService {
     if (result.stderr.includes("dubious ownership")) {
       return {
         status: "failure",
-        message: `Git does not trust the checkout folder because another account owns it (common on network drives). Run "git config --global --add safe.directory ${folder.replace(/\\/g, "/")}", then try again.`,
+        message: "Git does not trust the checkout folder because another account owns it (common on network drives). " +
+          "Choose a checkout folder that your account owns. If you trust the owner, you can run " +
+          `"git config --global --add safe.directory ${folder.replace(/\\/g, "/")}" instead, but that account's Git ` +
+          "settings in the folder can then make Git run programs as you.",
         details: result.stderr,
       };
     }
