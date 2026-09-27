@@ -54,7 +54,7 @@ After uploading, the member is read back from the IBM i. If what was stored diff
 
 ### Upload on Save
 
-Set `ibmi-member-workspace.autoUploadOnSave` to upload a checked-out member whenever you save it in the editor:
+Set `ibmi-member-workspace.autoUploadOnSave` in your user settings to upload a checked-out member whenever you save it in the editor. Only user settings are read, so a workspace's `.vscode/settings.json` can't turn it on:
 
 - **`off`** (default): upload only with **Upload to IBM i**.
 - **`ask`**: after each save, a notification asks **Upload**, **Always Upload** (switches to `silent`), or **Not Now**.
@@ -186,7 +186,7 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.dependencies.searchLibraries` | `[]` | Libraries to search, in order, for the source members and compiled programs of dependencies (for example, `PRODOBJ`, `PRODSRC`). Empty uses the connection's library list. |
 | `ibmi-member-workspace.dependencies.sources` | all | Which kinds of dependency sources to use: `source`, `programReferences` (DSPPGMREF), `crossReferences`. Unavailable ones are skipped automatically. |
 | `ibmi-member-workspace.dependencies.crossReferences` | `[]` | Cross-reference tool queries (Abstract, Pathfinder, MDXREF…). User settings only. See **Dependencies**. |
-| `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. See **Upload on Save**. |
+| `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. User settings only. See **Upload on Save**. |
 | `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. |
 
 ## Local Change History

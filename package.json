@@ -552,6 +552,7 @@
         },
         "ibmi-member-workspace.autoUploadOnSave": {
           "type": "string",
+          "scope": "application",
           "enum": [
             "off",
             "ask",
@@ -563,7 +564,7 @@
             "Upload a checked-out member whenever you save it, without asking."
           ],
           "default": "off",
-          "markdownDescription": "Upload a checked-out member to the IBM i when you save it in the editor. Only saves with local changes upload, and a member changed on the IBM i since checkout always asks before it is overwritten. Files changed by other tools are never uploaded automatically."
+          "markdownDescription": "Upload a checked-out member to the IBM i when you save it in the editor. Only saves with local changes upload, and a member changed on the IBM i since checkout always asks before it is overwritten. Files changed by other tools are never uploaded automatically. Only user settings are read, so a workspace can't turn it on."
         },
         "ibmi-member-workspace.gitIntegration": {
           "type": "boolean",

@@ -23,16 +23,11 @@ export function getAutoUploadMode(): AutoUploadMode {
   return (AUTO_UPLOAD_MODES as readonly string[]).includes(mode) ? mode as AutoUploadMode : "off";
 }
 
-/** Saves the mode where it is currently set, so a workspace value isn't hidden behind a user value. */
+/** Saves the mode in user settings, the only place it is read: a workspace can't turn on uploads. */
 async function setAutoUploadMode(mode: AutoUploadMode): Promise<void> {
-  const config = vscode.workspace.getConfiguration("ibmi-member-workspace");
-  const inspected = config.inspect<string>(SETTING);
-  const target = inspected?.workspaceFolderValue !== undefined
-    ? vscode.ConfigurationTarget.WorkspaceFolder
-    : inspected?.workspaceValue !== undefined
-      ? vscode.ConfigurationTarget.Workspace
-      : vscode.ConfigurationTarget.Global;
-  await config.update(SETTING, mode, target);
+  await vscode.workspace
+    .getConfiguration("ibmi-member-workspace")
+    .update(SETTING, mode, vscode.ConfigurationTarget.Global);
 }
 
 /**

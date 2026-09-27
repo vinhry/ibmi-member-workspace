@@ -83,6 +83,14 @@ describe("extension manifest", () => {
     assert.match(serviceSource, /workspaceState\.get<string>\("checkoutRoot"\)/);
   });
 
+  it("reads settings that send code to the IBM i or run queries from user settings only", () => {
+    const properties = readManifest().contributes.configuration.properties as Record<string, { scope?: string }>;
+
+    for (const setting of ["autoUploadOnSave", "dependencies.crossReferences"]) {
+      assert.equal(properties[`ibmi-member-workspace.${setting}`].scope, "application", setting);
+    }
+  });
+
   it("packages only the files the extension needs", async () => {
     // Anything else (handoff notes, plans, old .vsix files, .claude/, tests) must not ship.
     const allowed = [
