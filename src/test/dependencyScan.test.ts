@@ -199,6 +199,38 @@ describe("scanReferences: DDS", () => {
   });
 });
 
+describe("scanReferences: hostile source", () => {
+  // Before 1.5.2 each of these blocked the extension host for seconds to minutes.
+  const LIMIT_MS = 2000;
+  const time = (text: string, type: string) => {
+    const started = Date.now();
+    scanReferences(text, type);
+    return Date.now() - started;
+  };
+  const ddsLine = (keywords: string) => "     A".padEnd(44) + keywords;
+
+  it("scans a DDS line of repeated REF( quickly", () => {
+    assert.ok(time(ddsLine("REF(".repeat(8000)), "pf") < LIMIT_MS);
+  });
+
+  it("scans a DDS REF( with a long unterminated name quickly", () => {
+    assert.ok(time(ddsLine(`REF(${"A".repeat(32000)}`), "pf") < LIMIT_MS);
+    assert.ok(time(ddsLine(`REF(A ${"B ".repeat(16000)}`), "pf") < LIMIT_MS);
+  });
+
+  it("scans a DDS line of repeated PFILE( quickly", () => {
+    assert.ok(time(ddsLine("PFILE(A ".repeat(4000)), "lf") < LIMIT_MS);
+  });
+
+  it("joins a long run of CL continuation lines quickly", () => {
+    assert.ok(time(Array(300000).fill("a+").join("\n"), "clle") < LIMIT_MS);
+  });
+
+  it("still reads REF with a record format after the file name", () => {
+    assert.deepEqual(brief(scanReferences(ddsLine("REF(PRODLIB/FLDREF FLDREFR)"), "pf")), ["file|PRODLIB||FLDREF|"]);
+  });
+});
+
 describe("scanReferences: other types", () => {
   it("finds nothing in source types it does not scan", () => {
     assert.deepEqual(scanReferences("CALL PGM(X)\n/COPY A", "txt"), []);

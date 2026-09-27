@@ -193,14 +193,20 @@ function scanCl(lines: string[]): RawReference[] {
   const refs: RawReference[] = [];
   for (let i = 0; i < clean.length; i++) {
     // Join continuation lines into one command: "+" skips the next line's leading blanks, "-" keeps them.
+    // Only the last line is tested and trimmed: re-scanning the joined command each time would
+    // make a long run of continuation lines quadratic.
     const start = i;
-    let command = clean[i];
-    while (/[+-]\s*$/.test(command) && i + 1 < clean.length) {
+    const parts = [clean[i]];
+    while (/[+-]\s*$/.test(parts[parts.length - 1]) && i + 1 < clean.length) {
+      const last = parts.pop()!;
       const next = clean[++i];
-      command = /\+\s*$/.test(command)
-        ? command.replace(/\+\s*$/, "") + next.trimStart()
-        : command.replace(/-\s*$/, "") + next;
+      parts.push(
+        ...(/\+\s*$/.test(last)
+          ? [last.replace(/\+\s*$/, ""), next.trimStart()]
+          : [last.replace(/-\s*$/, ""), next])
+      );
     }
+    let command = parts.join("");
     // Text in quotes (messages, commands built at run time) is never a call target here.
     command = command.replace(/'[^']*'/g, (quoted) => " ".repeat(quoted.length));
     const at = { line: start + 1, text: lines[start].trim() };
@@ -238,14 +244,16 @@ function scanDds(lines: string[]): RawReference[] {
       const { library, name } = splitQualified(token);
       refs.push({ kind: "file", library, member: name, ...at });
     };
-    for (const match of raw.matchAll(/\bREF\(\s*([^)\s]+)[^)]*\)/gi)) {
+    // The name and the rest can't both match the same characters, which would backtrack
+    // polynomially on a long line with no ")".
+    for (const match of raw.matchAll(/\bREF\(\s*([^()\s]+)(?:\s[^()]*)?\)/gi)) {
       file(match[1]);
     }
     // REFFLD(field [LIB/]FILE): without a file it uses the REF file, already listed.
     for (const match of raw.matchAll(/\bREFFLD\(\s*[^)\s]+\s+([^)\s]+)\s*\)/gi)) {
       file(match[1]);
     }
-    for (const match of raw.matchAll(/\b(?:PFILE|JFILE)\(([^)]*)\)/gi)) {
+    for (const match of raw.matchAll(/\b(?:PFILE|JFILE)\(([^()]*)\)/gi)) {
       match[1].split(/\s+/).filter(Boolean).forEach(file);
     }
   });
