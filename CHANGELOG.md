@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.5.1 - 2026-09-27
+
+- README: a ready-made `dependencies.crossReferences` entry for **Abstract R11** (`ABSTRACT` library). It finds copybooks from `CPYXRF` (with their exact source location), files and programs from `PGMREF`, and calls from `OBJREF`, and is skipped on systems without Abstract.
+
 ## 1.5.0 - 2026-09-25
 
 - **Find Dependencies asks more sources, and only those the connected IBM i has.** Each source is checked on the system once per connection and left out when it isn't available. The list says which sources found each dependency and which weren't available.
