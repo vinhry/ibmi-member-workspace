@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import { describe, it } from "node:test";
+import { PackageManager, listFiles } from "@vscode/vsce";
 
 interface ExtensionManifest {
   name: string;
@@ -80,5 +81,23 @@ describe("extension manifest", () => {
     assert.doesNotMatch(serviceSource, /get<string>\("localFolder"/);
     assert.match(serviceSource, /context\.storageUri/);
     assert.match(serviceSource, /workspaceState\.get<string>\("checkoutRoot"\)/);
+  });
+
+  it("packages only the files the extension needs", async () => {
+    // Anything else (handoff notes, plans, old .vsix files, .claude/, tests) must not ship.
+    const allowed = [
+      /^package\.json$/,
+      /^readme\.md$/,
+      /^CHANGELOG\.md$/,
+      /^LICENSE$/,
+      /^NOTICE$/,
+      /^images\/icon\.png$/,
+      /^resources\/[^/]+\.svg$/,
+      /^out\/(?!test\/)[^/]+(?:\/[^/]+)*\.js$/,
+    ];
+    const files = await listFiles({ cwd: root, packageManager: PackageManager.None });
+
+    assert.deepEqual(files.filter((file) => !allowed.some((pattern) => pattern.test(file))), []);
+    assert.ok(files.includes("out/extension.js"));
   });
 });

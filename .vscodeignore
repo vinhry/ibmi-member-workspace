@@ -11,5 +11,7 @@ node_modules/**
 **/*.map
 eslint.config.mjs
 git-integration-plan.md
+HANDOFF.md
+*.vsix
 out/test/**
 .github/**
