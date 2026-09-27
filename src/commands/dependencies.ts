@@ -28,6 +28,7 @@ import {
 } from "../dependencySources";
 import { errorMessage } from "../errors";
 import { MemberInfo } from "../memberInfo";
+import { resolveMember } from "../prompts";
 import { CheckedOutMember, TreeItemType, formatMemberPath, systemKey } from "../types";
 import { checkoutMembersBatch } from "./checkout";
 import { CommandContext } from "./context";
@@ -49,8 +50,9 @@ export function registerDependencyCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.findDependencies",
       async (item: TreeItemType) => {
-        if (item?.kind === "member") {
-          await reviewDependencies(ctx, item.entry);
+        const entry = resolveMember(ctx.service, item);
+        if (entry) {
+          await reviewDependencies(ctx, entry);
         }
       }
     )

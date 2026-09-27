@@ -3,7 +3,7 @@ import { CheckoutService } from "../checkoutService";
 import { getSystemName, memberUri, sourceDatesEnabled } from "../codeForIBMi";
 import { LocalFileMissingError, errorMessage } from "../errors";
 import { mergeDocumentKey } from "../mergeHandler";
-import { countLocalChanges, resolveMemberSelections, saveDirtyLocalFiles } from "../prompts";
+import { countLocalChanges, resolveMember, resolveMemberSelections, saveDirtyLocalFiles } from "../prompts";
 import { CheckedOutMember, RefreshTally, TreeItemType, formatMemberPath, isReferenceCopy } from "../types";
 import { CommandContext } from "./context";
 import { uploadWithConflictHandling } from "./uploadMember";
@@ -15,13 +15,14 @@ export function registerSyncCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.mergeBack",
       async (item: TreeItemType) => {
-        if (item?.kind !== "member") {
+        const entry = resolveMember(service, item);
+        if (!entry) {
           return;
         }
-        const key = mergeDocumentKey(memberUri(item.entry, { editable: true }));
+        const key = mergeDocumentKey(memberUri(entry, { editable: true }));
         try {
-          pendingMergeBacks.set(key, item.entry);
-          await mergeHandler.openMergeDiff(item.entry);
+          pendingMergeBacks.set(key, entry);
+          await mergeHandler.openMergeDiff(entry);
         } catch (err) {
           pendingMergeBacks.delete(key);
           vscode.window.showErrorMessage(
@@ -36,7 +37,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.uploadToRemote",
       async (item: TreeItemType, allSelections?: TreeItemType[]) => {
-        const selections = resolveMemberSelections(item, allSelections);
+        const selections = resolveMemberSelections(service, item, allSelections);
         if (selections.length === 0) {
           return;
         }
@@ -233,7 +234,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.refreshRemote",
       async (item: TreeItemType, allSelections?: TreeItemType[]) => {
-        const selections = resolveMemberSelections(item, allSelections);
+        const selections = resolveMemberSelections(service, item, allSelections);
         if (selections.length === 0) {
           return;
         }
@@ -340,7 +341,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.discardCheckout",
       async (item: TreeItemType, allSelections?: TreeItemType[]) => {
-        const selections = resolveMemberSelections(item, allSelections);
+        const selections = resolveMemberSelections(service, item, allSelections);
         if (selections.length === 0) {
           return;
         }

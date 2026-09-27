@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { resolveMember } from "../prompts";
 import { TreeItemType, buildLocalFileName } from "../types";
 import { CommandContext } from "./context";
 
@@ -18,14 +19,15 @@ export function registerCompareCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.selectForCompare",
       async (item: TreeItemType) => {
-        if (item?.kind !== "member") {
+        const entry = resolveMember(service, item);
+        if (!entry) {
           return;
         }
-        selectedForCompareId = item.entry.id;
+        selectedForCompareId = entry.id;
         await vscode.commands.executeCommand("setContext", "ibmi-member-workspace:hasCompareSelection", true);
         treeProvider.refresh();
         vscode.window.setStatusBarMessage(
-          `Selected for compare: ${buildLocalFileName(item.entry)}`,
+          `Selected for compare: ${buildLocalFileName(entry)}`,
           3000
         );
       }
@@ -36,7 +38,8 @@ export function registerCompareCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.compareWithActive",
       async (item: TreeItemType) => {
-        if (item?.kind !== "member") {
+        const entry = resolveMember(service, item);
+        if (!entry) {
           return;
         }
         const rightUri = vscode.window.activeTextEditor?.document.uri;
@@ -44,12 +47,12 @@ export function registerCompareCommands(ctx: CommandContext): void {
           vscode.window.showErrorMessage("No active editor to compare with.");
           return;
         }
-        const localUri = vscode.Uri.file(item.entry.localPath);
+        const localUri = vscode.Uri.file(entry.localPath);
         await vscode.commands.executeCommand(
           "vscode.diff",
           localUri,
           rightUri,
-          `${buildLocalFileName(item.entry)} ↔ Active File`
+          `${buildLocalFileName(entry)} ↔ Active File`
         );
       }
     )
@@ -62,13 +65,14 @@ export function registerCompareCommands(ctx: CommandContext): void {
         const selectedForCompare = selectedForCompareId
           ? service.findEntryById(selectedForCompareId)
           : undefined;
-        if (item?.kind !== "member" || !selectedForCompare) {
+        const entry = resolveMember(service, item);
+        if (!entry || !selectedForCompare) {
           return;
         }
         const leftUri = vscode.Uri.file(selectedForCompare.localPath);
-        const rightUri = vscode.Uri.file(item.entry.localPath);
+        const rightUri = vscode.Uri.file(entry.localPath);
         const leftLabel = buildLocalFileName(selectedForCompare);
-        const rightLabel = buildLocalFileName(item.entry);
+        const rightLabel = buildLocalFileName(entry);
         await vscode.commands.executeCommand(
           "vscode.diff",
           leftUri,
@@ -83,7 +87,8 @@ export function registerCompareCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.compareWithLocalFile",
       async (item: TreeItemType) => {
-        if (item?.kind !== "member") {
+        const entry = resolveMember(service, item);
+        if (!entry) {
           return;
         }
         const picks = await vscode.window.showOpenDialog({
@@ -93,12 +98,12 @@ export function registerCompareCommands(ctx: CommandContext): void {
         if (!picks?.length) {
           return;
         }
-        const localUri = vscode.Uri.file(item.entry.localPath);
+        const localUri = vscode.Uri.file(entry.localPath);
         await vscode.commands.executeCommand(
           "vscode.diff",
           localUri,
           picks[0],
-          `${buildLocalFileName(item.entry)} ↔ Local File`
+          `${buildLocalFileName(entry)} ↔ Local File`
         );
       }
     )
@@ -108,7 +113,8 @@ export function registerCompareCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.compareWithIfsFile",
       async (item: TreeItemType) => {
-        if (item?.kind !== "member") {
+        const entry = resolveMember(service, item);
+        if (!entry) {
           return;
         }
         const ifsPath = await vscode.window.showInputBox({
@@ -119,12 +125,12 @@ export function registerCompareCommands(ctx: CommandContext): void {
           return;
         }
         const ifsUri = vscode.Uri.from({ scheme: "streamfile", path: ifsPath.trim() });
-        const localUri = vscode.Uri.file(item.entry.localPath);
+        const localUri = vscode.Uri.file(entry.localPath);
         await vscode.commands.executeCommand(
           "vscode.diff",
           localUri,
           ifsUri,
-          `${buildLocalFileName(item.entry)} ↔ IFS`
+          `${buildLocalFileName(entry)} ↔ IFS`
         );
       }
     )
@@ -134,10 +140,10 @@ export function registerCompareCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.compareWithMember",
       async (item: TreeItemType) => {
-        if (item?.kind !== "member") {
+        const entry = resolveMember(service, item);
+        if (!entry) {
           return;
         }
-        const entry = item.entry;
         const defaultValue = `${entry.library}/${entry.sourceFile}/${buildLocalFileName(entry)}`;
         const input = await vscode.window.showInputBox({
           prompt: "Enter member path (LIBRARY/FILE/NAME.EXT or ASP/LIBRARY/FILE/NAME.EXT)",

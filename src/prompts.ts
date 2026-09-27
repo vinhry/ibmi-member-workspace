@@ -1,16 +1,23 @@
 import * as vscode from "vscode";
 import { CheckoutService } from "./checkoutService";
 import { errorMessage } from "./errors";
-import { CheckedOutMember, TreeItemType } from "./types";
+import { CheckedOutMember, TreeItemType, storedEntryFor } from "./types";
+
+/** The stored checkout a command's tree-item argument refers to; see {@link storedEntryFor}. */
+export function resolveMember(service: CheckoutService, item: TreeItemType | undefined): CheckedOutMember | undefined {
+  return storedEntryFor(item, (system) => service.getEntriesForSystem(system));
+}
 
 export function resolveMemberSelections(
+  service: CheckoutService,
   item: TreeItemType,
   allSelections?: TreeItemType[]
 ): Extract<TreeItemType, { kind: "member" }>[] {
   const selections = allSelections && allSelections.length > 1 ? allSelections : [item];
-  return selections.filter(
-    (s): s is Extract<TreeItemType, { kind: "member" }> => s?.kind === "member"
-  );
+  return selections.flatMap((selection) => {
+    const entry = resolveMember(service, selection);
+    return entry ? [{ kind: "member" as const, entry }] : [];
+  });
 }
 
 /**

@@ -5,7 +5,7 @@ import { configureCheckoutFolder } from "../checkoutFolder";
 import { getSystemName } from "../codeForIBMi";
 import { errorMessage } from "../errors";
 import { GitService } from "../gitService";
-import { resolveMemberSelections, saveDirtyLocalFiles } from "../prompts";
+import { resolveMember, resolveMemberSelections, saveDirtyLocalFiles } from "../prompts";
 import {
   TreeItemType,
   WorkItemCarry,
@@ -119,7 +119,7 @@ export function registerGitCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.moveToWorkItem",
       async (item: TreeItemType, allSelections?: TreeItemType[]) => {
-        const entries = resolveMemberSelections(item, allSelections).map((selection) => selection.entry);
+        const entries = resolveMemberSelections(service, item, allSelections).map((selection) => selection.entry);
         if (entries.length === 0) {
           return;
         }
@@ -207,11 +207,11 @@ export function registerGitCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.commitNow",
       async (item: TreeItemType) => {
-        if (item?.kind !== "member") {
+        const entry = resolveMember(service, item);
+        if (!entry) {
           return;
         }
 
-        const entry = item.entry;
         const defaultMessage = `snapshot: ${formatMemberPath(entry)}`;
 
         const userMessage = await vscode.window.showInputBox({

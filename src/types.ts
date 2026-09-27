@@ -266,3 +266,20 @@ export function formatMemberPath(entry: CheckedOutMember): string {
 export type TreeItemType =
   | { kind: "sourceFile"; system: string; library: string; sourceFile: string }
   | { kind: "member"; entry: CheckedOutMember };
+
+/**
+ * The stored checkout a command argument refers to. Commands receive tree items, but a `command:`
+ * link can pass any object, so only its system and id are used, to find the real checkout.
+ */
+export function storedEntryFor(
+  item: unknown,
+  entriesFor: (system: string) => readonly CheckedOutMember[]
+): CheckedOutMember | undefined {
+  const entry = (item as { kind?: unknown; entry?: { system?: unknown; id?: unknown } } | undefined)?.entry;
+  if ((item as { kind?: unknown } | undefined)?.kind !== "member" ||
+      typeof entry?.system !== "string" || typeof entry.id !== "string") {
+    return undefined;
+  }
+  const id = entry.id;
+  return entriesFor(entry.system).find((stored) => stored.id === id);
+}

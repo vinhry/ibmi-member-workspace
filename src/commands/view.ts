@@ -1,18 +1,18 @@
 import * as vscode from "vscode";
 import { memberUri } from "../codeForIBMi";
 import { errorMessage } from "../errors";
-import { resolveMemberSelections } from "../prompts";
+import { resolveMember, resolveMemberSelections } from "../prompts";
 import { TreeItemType, formatMemberPath } from "../types";
 import { CommandContext } from "./context";
 
 export function registerViewCommands(ctx: CommandContext): void {
-  const { context, treeProvider, treeView } = ctx;
+  const { context, service, treeProvider, treeView } = ctx;
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "ibmi-member-workspace.openLocalFile",
       async (item: TreeItemType, allSelections?: TreeItemType[]) => {
-        const selections = resolveMemberSelections(item, allSelections);
+        const selections = resolveMemberSelections(service, item, allSelections);
         if (selections.length === 0) {
           return;
         }
@@ -51,7 +51,7 @@ export function registerViewCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.openRemoteFile",
       async (item: TreeItemType, allSelections?: TreeItemType[]) => {
-        const selections = resolveMemberSelections(item, allSelections);
+        const selections = resolveMemberSelections(service, item, allSelections);
         if (selections.length === 0) {
           return;
         }
@@ -89,7 +89,7 @@ export function registerViewCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.runAction",
       async (item: TreeItemType, allSelections?: TreeItemType[]) => {
-        const selections = resolveMemberSelections(item, allSelections);
+        const selections = resolveMemberSelections(service, item, allSelections);
         if (selections.length === 0) {
           return;
         }
@@ -120,12 +120,13 @@ export function registerViewCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.revealInExplorer",
       async (item: TreeItemType) => {
-        if (item?.kind !== "member") {
+        const entry = resolveMember(service, item);
+        if (!entry) {
           return;
         }
         await vscode.commands.executeCommand(
           "revealFileInOS",
-          vscode.Uri.file(item.entry.localPath)
+          vscode.Uri.file(entry.localPath)
         );
       }
     )
@@ -135,10 +136,11 @@ export function registerViewCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand(
       "ibmi-member-workspace.copyMemberPath",
       async (item: TreeItemType) => {
-        if (item?.kind !== "member") {
+        const entry = resolveMember(service, item);
+        if (!entry) {
           return;
         }
-        const path = formatMemberPath(item.entry);
+        const path = formatMemberPath(entry);
         await vscode.env.clipboard.writeText(path);
         vscode.window.showInformationMessage(`Copied: ${path}`);
       }

@@ -10,6 +10,7 @@ import {
   parseCheckoutIndex,
   sanitizeSystemName,
   startWorkItemState,
+  storedEntryFor,
 } from "../types";
 
 describe("parseCheckoutIndex", () => {
@@ -121,6 +122,48 @@ describe("memberNameProblem", () => {
   it("rejects names longer than 10 characters", () => {
     assert.notEqual(memberNameProblem({ ...member, memberName: "ABCDEFGHIJK" }), undefined);
     assert.notEqual(memberNameProblem({ ...member, extension: "ABCDEFGHIJK" }), undefined);
+  });
+});
+
+describe("storedEntryFor", () => {
+  const stored: CheckedOutMember = {
+    id: "PUB400/MYLIB/QRPGLESRC/PAYROLL",
+    system: "PUB400",
+    library: "MYLIB",
+    sourceFile: "QRPGLESRC",
+    memberName: "PAYROLL",
+    extension: "rpgle",
+    localPath: "/checkouts/PUB400/MYLIB/QRPGLESRC/PAYROLL.RPGLE",
+    checkedOutAt: "2026-09-27T00:00:00.000Z",
+    remoteHashAtCheckout: "abc",
+    status: "modified",
+  };
+  const entriesFor = (system: string) => (system === "PUB400" ? [stored] : []);
+
+  it("returns the stored checkout for a tree item", () => {
+    assert.equal(storedEntryFor({ kind: "member", entry: stored }, entriesFor), stored);
+  });
+
+  it("ignores every field of the argument except system and id", () => {
+    const forged = {
+      kind: "member",
+      entry: { ...stored, localPath: "/home/dev/.ssh/id_ed25519", library: "PRODLIB", remoteHashAtCheckout: "forged" },
+    };
+    const resolved = storedEntryFor(forged, entriesFor);
+    assert.equal(resolved, stored);
+    assert.equal(resolved?.localPath, stored.localPath);
+  });
+
+  it("returns nothing for a checkout that isn't stored", () => {
+    assert.equal(storedEntryFor({ kind: "member", entry: { ...stored, id: "PUB400/X/Y/Z" } }, entriesFor), undefined);
+    assert.equal(storedEntryFor({ kind: "member", entry: { ...stored, system: "OTHER" } }, entriesFor), undefined);
+  });
+
+  it("returns nothing for arguments that aren't member items", () => {
+    for (const item of [undefined, null, "x", {}, { kind: "sourceFile", entry: stored }, { kind: "member" },
+      { kind: "member", entry: { system: 1, id: stored.id } }]) {
+      assert.equal(storedEntryFor(item, entriesFor), undefined, JSON.stringify(item));
+    }
   });
 });
 
