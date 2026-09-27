@@ -82,6 +82,19 @@ export function gitVersionProblem(versionOutput: string): string | undefined {
     : `Git ${minMajor}.${minMinor} or later is required (found ${versionOutput.trim()}).`;
 }
 
+/** Whether anything is at `target`, including a link to nothing. */
+function entryExists(target: string): boolean {
+  try {
+    fs.lstatSync(target);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw err;
+  }
+}
+
 /** Repository-relative path in Git's form, for comparing with Git output. */
 function gitPath(relative: string): string {
   return relative.split(path.sep).join("/");
@@ -415,9 +428,10 @@ export class GitService {
       }
 
       const gitignorePath = path.join(folder, ".gitignore");
-      if (!exactRepository) {
+      // lstat sees a link even to nothing, which "wx" alone follows on Windows; "wx" still
+      // refuses a file created in between.
+      if (!exactRepository && !entryExists(gitignorePath)) {
         try {
-          // "wx" never replaces an existing file and never follows a link, even one to nothing.
           fs.writeFileSync(gitignorePath, GITIGNORE_CONTENT, { encoding: "utf-8", flag: "wx" });
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
