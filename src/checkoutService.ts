@@ -48,6 +48,7 @@ import {
   RepositoryInspection,
 } from "./gitService";
 import { RepositoryTrust } from "./repositoryTrust";
+import { assertNoLinkBelow } from "./localPath";
 
 /** "uploaded-altered": uploaded, but the IBM i stored content that differs from the local copy. */
 export type UploadResult = "uploaded" | "uploaded-altered" | "failed" | "remote-changed";
@@ -610,6 +611,7 @@ export class CheckoutService implements vscode.Disposable {
     if (paths.some((candidate) => !this.pathIsInside(folder, candidate))) {
       return { status: "failure", message: "A checkout path belongs to another system repository." };
     }
+    paths.forEach((candidate) => this.assertLocalPathSafe(candidate));
     const clean = await git.getWorkingTreeState(folder);
     if (clean.status !== "success") {
       return clean;
@@ -734,6 +736,7 @@ export class CheckoutService implements vscode.Disposable {
   private async recordMergeBackNow(entry: CheckedOutMember, content: string): Promise<GitOperationResult> {
     assertEditable(entry);
     await this.assertEntryInActiveWorkItem(entry);
+    this.assertLocalPathSafe(entry.localPath);
     const localUri = vscode.Uri.file(entry.localPath);
     await vscode.workspace.fs.writeFile(localUri, Buffer.from(content, "utf-8"));
     this.setBaseline(entry, hashContent(content));
@@ -955,6 +958,7 @@ export class CheckoutService implements vscode.Disposable {
       `[checkout] ${library}/${sourceFile}/${memberName}  remoteHashAtCheckout=${hash.substring(0, 12)}`
     );
 
+    this.assertLocalPathSafe(localPath);
     await this.setReadOnly(localPath, false);
     await vscode.workspace.fs.writeFile(
       vscode.Uri.file(localPath),
@@ -1047,6 +1051,7 @@ export class CheckoutService implements vscode.Disposable {
       entry.memberName
     );
     const localUri = vscode.Uri.file(entry.localPath);
+    this.assertLocalPathSafe(entry.localPath);
 
     await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(localUri, ".."));
     await this.setReadOnly(entry.localPath, false);
@@ -1092,6 +1097,8 @@ export class CheckoutService implements vscode.Disposable {
   ): Promise<UploadResult> {
     assertEditable(entry);
     await this.assertEntryInActiveWorkItem(entry);
+    // Uploading through a link would send whatever file it points at to the IBM i.
+    this.assertLocalPathSafe(entry.localPath);
     const localUri = vscode.Uri.file(entry.localPath);
     const localContent = await this.readLocal(localUri);
     const localHash = hashContent(localContent);
@@ -1265,6 +1272,7 @@ export class CheckoutService implements vscode.Disposable {
   private async discardEntriesNow(entries: CheckedOutMember[]): Promise<void> {
     for (const entry of entries) {
       await this.assertEntryInActiveWorkItem(entry);
+      this.assertLocalPathSafe(entry.localPath);
     }
     for (const entry of entries) {
       try {
@@ -1364,6 +1372,8 @@ export class CheckoutService implements vscode.Disposable {
    */
   private async setReadOnly(localPath: string, readOnly: boolean): Promise<void> {
     try {
+      // chmod follows links; a linked path was refused before it was written, so leave it alone.
+      this.assertLocalPathSafe(localPath);
       if (!readOnly) {
         try {
           // Leave the permissions of an already writable file (every ordinary checkout) alone.
@@ -1420,6 +1430,15 @@ export class CheckoutService implements vscode.Disposable {
     }
   }
 
+  /** Refuses a checkout path that leaves the checkout folder or passes through a link inside it. */
+  private assertLocalPathSafe(localPath: string): void {
+    const root = this.getCheckoutRoot();
+    if (!root) {
+      throw new Error("Choose a checkout folder first.");
+    }
+    assertNoLinkBelow(root.fsPath, localPath);
+  }
+
   private async readLocal(localUri: vscode.Uri): Promise<string> {
     try {
       return Buffer.from(await vscode.workspace.fs.readFile(localUri)).toString("utf-8");
@@ -1473,6 +1492,7 @@ export class CheckoutService implements vscode.Disposable {
     if (!this.pathIsInside(systemRoot.fsPath, localPath)) {
       throw new Error(`The checkout path for ${formatMemberPath(entry)} is outside the checkout folder.`);
     }
+    this.assertLocalPathSafe(localPath);
 
     await vscode.workspace.fs.createDirectory(baseDir);
 
