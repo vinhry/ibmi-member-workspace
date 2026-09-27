@@ -5,6 +5,7 @@ import {
   SystemCheckoutState,
   buildCheckoutId,
   isReferenceCopy,
+  memberNameProblem,
   moveEntriesState,
   parseCheckoutIndex,
   sanitizeSystemName,
@@ -84,6 +85,42 @@ describe("sanitizeSystemName", () => {
     assert.equal(sanitizeSystemName("."), "_");
     assert.equal(sanitizeSystemName(".."), "_");
     assert.equal(sanitizeSystemName("host/name"), "host_name");
+  });
+});
+
+describe("memberNameProblem", () => {
+  const member = { library: "MYLIB", sourceFile: "QRPGLESRC", memberName: "PAYROLL", extension: "rpgle" };
+
+  it("accepts IBM i system names and source types in either case", () => {
+    assert.equal(memberNameProblem(member), undefined);
+    assert.equal(memberNameProblem({ library: "#LIB$", sourceFile: "Q_SRC.V2", memberName: "@Pgm01", extension: "SQLRPGLE" }), undefined);
+    assert.equal(memberNameProblem({ ...member, memberName: "ABCDEFGHIJ" }), undefined);
+  });
+
+  it("rejects names that would leave the checkout folder", () => {
+    for (const bad of ["..", "../X", "A/B", "A\\B", "/ABS", "C:", "C:\\X", "\\\\SERVER\\SHARE", ".X", ""]) {
+      assert.match(memberNameProblem({ ...member, library: bad }) ?? "", /library/, `library ${JSON.stringify(bad)}`);
+      assert.match(memberNameProblem({ ...member, sourceFile: bad }) ?? "", /source file/, `file ${JSON.stringify(bad)}`);
+      assert.match(memberNameProblem({ ...member, memberName: bad }) ?? "", /member/, `member ${JSON.stringify(bad)}`);
+    }
+  });
+
+  it("rejects a source type that would become a path", () => {
+    for (const bad of ["x/../../../tmp/evil", "rpgle\\..\\x", "", "a b"]) {
+      assert.match(memberNameProblem({ ...member, extension: bad }) ?? "", /source type/, JSON.stringify(bad));
+    }
+  });
+
+  it("rejects names that start with - or hold quotes, blanks or control characters", () => {
+    for (const bad of ["-X", "--force", "A'B", "\"A\"", "A B", "A\nB", "A;B"]) {
+      assert.notEqual(memberNameProblem({ ...member, memberName: bad }), undefined, JSON.stringify(bad));
+    }
+    assert.notEqual(memberNameProblem({ ...member, extension: "-x" }), undefined);
+  });
+
+  it("rejects names longer than 10 characters", () => {
+    assert.notEqual(memberNameProblem({ ...member, memberName: "ABCDEFGHIJK" }), undefined);
+    assert.notEqual(memberNameProblem({ ...member, extension: "ABCDEFGHIJK" }), undefined);
   });
 });
 

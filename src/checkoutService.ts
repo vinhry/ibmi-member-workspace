@@ -15,6 +15,7 @@ import {
   formatMemberPath,
   isDefaultWorkItem,
   isReferenceCopy,
+  memberNameProblem,
   moveEntriesState,
   parseCheckoutIndex,
   sanitizeSystemName,
@@ -856,6 +857,10 @@ export class CheckoutService implements vscode.Disposable {
     if (!checkoutRoot) {
       throw new Error("Choose a checkout folder before checking out members.");
     }
+    const nameProblem = memberNameProblem({ library, sourceFile, memberName, extension: memberExtension });
+    if (nameProblem) {
+      throw new Error(`Can't check out ${library}/${sourceFile}(${memberName}): ${nameProblem}`);
+    }
 
     const system = getSystemName();
     if (!system) {
@@ -1460,18 +1465,18 @@ export class CheckoutService implements vscode.Disposable {
     checkoutRoot: vscode.Uri,
     entry: CheckedOutMember
   ): Promise<string> {
-    const systemFolder = sanitizeSystemName(entry.system);
+    const systemRoot = vscode.Uri.joinPath(checkoutRoot, sanitizeSystemName(entry.system));
     const fileName = buildLocalFileName(entry);
-    const baseDir = vscode.Uri.joinPath(
-      checkoutRoot,
-      systemFolder,
-      entry.library,
-      entry.sourceFile
-    );
+    const baseDir = vscode.Uri.joinPath(systemRoot, entry.library, entry.sourceFile);
+    const localPath = vscode.Uri.joinPath(baseDir, fileName).fsPath;
+    // joinPath resolves "..", so this also catches any name the validation above let through.
+    if (!this.pathIsInside(systemRoot.fsPath, localPath)) {
+      throw new Error(`The checkout path for ${formatMemberPath(entry)} is outside the checkout folder.`);
+    }
 
     await vscode.workspace.fs.createDirectory(baseDir);
 
-    return vscode.Uri.joinPath(baseDir, fileName).fsPath;
+    return localPath;
   }
 
   private emptyIndex(): CheckoutIndex {

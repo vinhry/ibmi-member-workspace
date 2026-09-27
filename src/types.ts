@@ -218,6 +218,35 @@ export function buildCheckoutId(
   return `${system}/${library}/${sourceFile}/${memberName}`.toUpperCase();
 }
 
+/** An IBM i system name: a library, file or member as it appears in a local path and a host command. */
+const SYSTEM_NAME = /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/i;
+
+/** A source type, used as the local file extension. */
+const SOURCE_TYPE = /^[A-Z0-9_$#@.]{1,10}$/i;
+
+/**
+ * Why a member can't be checked out under these names, or undefined when it can. Names come from
+ * Object Browser nodes, command arguments and the IBM i, and become local path segments; "/", "\\",
+ * ".." or a drive letter would place the file outside the checkout folder.
+ */
+export function memberNameProblem(
+  member: { library: string; sourceFile: string; memberName: string; extension: string }
+): string | undefined {
+  const names: Array<[string, string]> = [
+    ["library", member.library],
+    ["source file", member.sourceFile],
+    ["member", member.memberName],
+  ];
+  for (const [label, value] of names) {
+    if (!SYSTEM_NAME.test(value)) {
+      return `"${value}" is not a valid IBM i ${label} name.`;
+    }
+  }
+  return SOURCE_TYPE.test(member.extension)
+    ? undefined
+    : `"${member.extension}" is not a valid source type.`;
+}
+
 export function buildLocalFileName(entry: CheckedOutMember): string {
   return `${entry.memberName}.${entry.extension}`.toUpperCase();
 }
