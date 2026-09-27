@@ -46,6 +46,7 @@ import {
   LegacyMigrationResult,
   RepositoryInspection,
 } from "./gitService";
+import { RepositoryTrust } from "./repositoryTrust";
 
 /** "uploaded-altered": uploaded, but the IBM i stored content that differs from the local copy. */
 export type UploadResult = "uploaded" | "uploaded-altered" | "failed" | "remote-changed";
@@ -84,6 +85,9 @@ export class CheckoutService implements vscode.Disposable {
   private saveQueue: Promise<void> = Promise.resolve();
   private gitWarningShown = false;
   private readonly gitSetupDeclinedSystems = new Set<string>();
+  /** Systems whose existing, untrusted repository the user chose not to use this session. */
+  private readonly repositoryDeclinedSystems = new Set<string>();
+  private readonly repositoryTrust: RepositoryTrust;
   private gitOperationWarningShown = false;
   private readonly gitPreparations = new Map<string, Promise<GitOperationResult>>();
   /** Successful repository preparation, reused until the running batch ends. */
@@ -102,6 +106,7 @@ export class CheckoutService implements vscode.Disposable {
     private readonly gitService?: GitService
   ) {
     this.storageUri = context.storageUri;
+    this.repositoryTrust = new RepositoryTrust(context.globalState);
     this.indexUri = this.storageUri
       ? vscode.Uri.joinPath(this.storageUri, "checkout-index.json")
       : undefined;
@@ -117,6 +122,7 @@ export class CheckoutService implements vscode.Disposable {
     }
     await vscode.workspace.fs.createDirectory(this.storageUri);
     await this.loadIndex();
+    await this.trustRepositoriesInUse();
     const system = getSystemName();
     if (system && Object.keys(this.index.unassignedWorkItems).length > 0) {
       this.ensureSystemState(system);
@@ -235,6 +241,12 @@ export class CheckoutService implements vscode.Disposable {
       this.ensureSystemState(connected);
     }
     const systems = this.getKnownSystems();
+    for (const state of systems) {
+      const folder = this.getGitRoot(state.system)!.fsPath;
+      if (!(await this.confirmRepositoryUse(state.system, folder))) {
+        return this.repositoryDeclined(state.system, folder);
+      }
+    }
     const result = await this.gitService.migrateLegacyRepository(
       checkoutRoot.fsPath,
       systems.map((state) => ({
@@ -243,6 +255,9 @@ export class CheckoutService implements vscode.Disposable {
         workItems: Object.keys(state.workItems),
       }))
     );
+    for (const state of systems) {
+      await this.trustCreatedRepository(this.getGitRoot(state.system)!.fsPath);
+    }
     if (result.status !== "success") {
       return result;
     }
@@ -375,7 +390,11 @@ export class CheckoutService implements vscode.Disposable {
       return { status: "setupRequired", message: "Choose a checkout folder first." };
     }
 
+    if (!(await this.confirmRepositoryUse(system, root.fsPath))) {
+      return this.repositoryDeclined(system, root.fsPath);
+    }
     let result = await this.gitService.prepareRepository(root.fsPath);
+    await this.trustCreatedRepository(root.fsPath);
     if (result.status !== "setupRequired" || this.gitSetupDeclinedSystems.has(systemKey(system))) {
       if (result.status === "success") {
         await this.synchronizeWorkItem(system);
@@ -418,9 +437,81 @@ export class CheckoutService implements vscode.Disposable {
     return result;
   }
 
+  /**
+   * Whether Git may run in a system folder: it holds no repository yet (one is created), holds one
+   * this extension created or the user chose, or the user chooses the one it holds now. A cloned or
+   * shared folder can carry a repository whose settings make Git run programs.
+   */
+  private async confirmRepositoryUse(system: string, folder: string): Promise<boolean> {
+    if (
+      !this.gitService ||
+      this.repositoryTrust.isTrusted(folder) ||
+      !(await this.gitService.isExactRepository(folder))
+    ) {
+      return true;
+    }
+    if (this.repositoryDeclinedSystems.has(systemKey(system))) {
+      return false;
+    }
+    const choice = await vscode.window.showWarningMessage(
+      `${folder} already has a Git repository that IBM i Member Workspace didn't create. Use it for Local Change History of ${system}?`,
+      {
+        modal: true,
+        detail: "Checkpoints will be saved as commits in that repository. Only use it if you trust where it came from: a repository's settings can make Git run programs.",
+      },
+      "Use This Repository"
+    );
+    if (choice !== "Use This Repository") {
+      this.repositoryDeclinedSystems.add(systemKey(system));
+      return false;
+    }
+    await this.repositoryTrust.trust(folder);
+    return true;
+  }
+
+  private repositoryDeclined(system: string, folder: string): GitOperationResult {
+    return {
+      status: "setupRequired",
+      message: `Local Change History is off for ${system}: ${folder} has a Git repository you haven't chosen to use. Run Set Up Local Change History to choose again.`,
+    };
+  }
+
+  /** Records a repository that was just created in a system folder as one this extension may use. */
+  private async trustCreatedRepository(folder: string): Promise<void> {
+    if (this.gitService && !this.repositoryTrust.isTrusted(folder) && await this.gitService.isExactRepository(folder)) {
+      await this.repositoryTrust.trust(folder);
+    }
+  }
+
+  /**
+   * Once per workspace, trusts the system repositories Local Change History was already using
+   * before repositories had to be trusted, so upgrading doesn't ask about them. A workspace opened
+   * for the first time has no checkout folder yet, so it trusts nothing here.
+   */
+  private async trustRepositoriesInUse(): Promise<void> {
+    const migrated = "repositoryTrustMigrated";
+    if (this.context.workspaceState.get<boolean>(migrated, false)) {
+      return;
+    }
+    await this.context.workspaceState.update(migrated, true);
+    const enabled = vscode.workspace
+      .getConfiguration("ibmi-member-workspace")
+      .get<boolean>("gitIntegration", false);
+    if (!enabled || !this.gitService || !this.getCheckoutRoot()) {
+      return;
+    }
+    for (const state of Object.values(this.index.systems)) {
+      const root = this.getGitRoot(state.system);
+      if (root && await this.gitService.isExactRepository(root.fsPath)) {
+        await this.repositoryTrust.trust(root.fsPath);
+      }
+    }
+  }
+
   resetGitSetupState(): void {
     this.gitWarningShown = false;
     this.gitSetupDeclinedSystems.clear();
+    this.repositoryDeclinedSystems.clear();
     this.gitOperationWarningShown = false;
     this.gitService?.invalidateAvailability();
   }
