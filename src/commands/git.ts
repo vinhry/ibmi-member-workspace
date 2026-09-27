@@ -36,6 +36,7 @@ export function registerGitCommands(ctx: CommandContext): void {
             return;
           }
         }
+        await service.confirmGitIntegration();
         await vscode.workspace
           .getConfiguration("ibmi-member-workspace")
           .update("gitIntegration", true, vscode.ConfigurationTarget.Workspace);
@@ -253,11 +254,8 @@ export function registerGitCommands(ctx: CommandContext): void {
  */
 export async function ensureWorkItemForCheckout(ctx: CommandContext, system: string): Promise<boolean> {
   const { service, gitService, refreshGitStatusBar } = ctx;
-  const enabled = vscode.workspace
-    .getConfiguration("ibmi-member-workspace")
-    .get<boolean>("gitIntegration", false);
   const root = service.getGitRoot(system);
-  if (!enabled || !root) {
+  if (!service.gitIntegrationOn() || !root) {
     return true;
   }
   // When history cannot be saved, the checkout itself reports why and continues without it.

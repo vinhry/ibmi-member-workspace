@@ -187,7 +187,7 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.dependencies.sources` | all | Which kinds of dependency sources to use: `source`, `programReferences` (DSPPGMREF), `crossReferences`. Unavailable ones are skipped automatically. |
 | `ibmi-member-workspace.dependencies.crossReferences` | `[]` | Cross-reference tool queries (Abstract, Pathfinder, MDXREF…). User settings only. See **Dependencies**. |
 | `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. User settings only. See **Upload on Save**. |
-| `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. |
+| `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. A workspace setting asks once before it turns this on. |
 
 ## Local Change History
 
@@ -202,7 +202,9 @@ Local Change History does not upload members to IBM i and does not send files to
 
 ### Set Up
 
-Run **IBM i Member Workspace: Set Up Local Change History**, or enable `ibmi-member-workspace.gitIntegration` in VS Code Settings. The selected folder (for example, `checkout`) is the **checkout container**. Each system working directory (for example, `checkout/alex.acklie.com`) is its own Git repository. Existing repositories at that exact system directory are adopted without changing their commits, branches, configuration, or remotes. If Git does not already know your name and email, the extension asks for them and saves them only in that system repository. Automatic checkpoints are never signed and skip Git hooks, so a global `commit.gpgsign` setting or hook can't block them.
+Run **IBM i Member Workspace: Set Up Local Change History**, or enable `ibmi-member-workspace.gitIntegration` in VS Code Settings. When the setting comes from a workspace's `.vscode/settings.json` rather than from you, the extension asks once before turning it on for that workspace. The selected folder (for example, `checkout`) is the **checkout container**. Each system working directory (for example, `checkout/alex.acklie.com`) is its own Git repository. If that directory already holds a repository the extension didn't create, it asks before using it; a repository you choose is used without changing its commits, branches, configuration, or remotes. If Git does not already know your name and email, the extension asks for them and saves them only in that system repository. Automatic checkpoints are never signed, so a global `commit.gpgsign` setting can't block them.
+
+Git commands run by the extension never run Git hooks or an fsmonitor command, and never use a bare repository found in the checkout folder, so files placed in the checkout folder (for example, by cloning a project into it) can't make Git run programs.
 
 ### Work Items
 

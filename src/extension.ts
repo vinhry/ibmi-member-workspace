@@ -37,7 +37,7 @@ export async function activate(
   const initialRoot = initialSystem ? service.getGitRoot(initialSystem) : undefined;
   if (
     initialRoot &&
-    vscode.workspace.getConfiguration("ibmi-member-workspace").get("gitIntegration", false) &&
+    service.gitIntegrationOn() &&
     await gitService.isExactRepository(initialRoot.fsPath)
   ) {
     await service.synchronizeWorkItem(initialSystem);
@@ -97,7 +97,7 @@ export async function activate(
     dependencyAvailability.reset();
     treeProvider.refresh();
     const system = getSystemName();
-    if (system && vscode.workspace.getConfiguration("ibmi-member-workspace").get("gitIntegration", false)) {
+    if (system && service.gitIntegrationOn()) {
       void service.ensureGitReady(system);
     }
     void refreshGitStatusBar();
@@ -105,17 +105,44 @@ export async function activate(
   service.onDidChange(() => void refreshGitStatusBar());
   void refreshGitStatusBar();
 
+  // A workspace's settings turn Local Change History on only after the user agrees, once per workspace.
+  let gitIntegrationOffered = false;
+  const confirmWorkspaceGitIntegration = async () => {
+    if (gitIntegrationOffered || service.gitIntegrationState() !== "needsConfirmation") {
+      return;
+    }
+    gitIntegrationOffered = true;
+    const choice = await vscode.window.showInformationMessage(
+      "This workspace's settings turn on Local Change History, which runs Git to keep checkpoints of your checkouts in the checkout folder. Turn it on for this workspace?",
+      "Turn On",
+      "Not Now"
+    );
+    if (choice !== "Turn On") {
+      return;
+    }
+    await service.confirmGitIntegration();
+    service.resetGitSetupState();
+    const result = await service.ensureGitReady();
+    if (result.status !== "success" && result.message) {
+      vscode.window.showWarningMessage(result.message);
+    }
+    await refreshGitStatusBar();
+  };
+  void confirmWorkspaceGitIntegration();
+
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(async (event) => {
       if (!event.affectsConfiguration("ibmi-member-workspace.gitIntegration")) {
         return;
       }
       service.resetGitSetupState();
-      if (vscode.workspace.getConfiguration("ibmi-member-workspace").get("gitIntegration", false)) {
+      if (service.gitIntegrationOn()) {
         const result = await service.ensureGitReady();
         if (result.status !== "success" && result.message) {
           vscode.window.showWarningMessage(result.message);
         }
+      } else {
+        void confirmWorkspaceGitIntegration();
       }
       await refreshGitStatusBar();
     })

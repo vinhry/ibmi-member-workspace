@@ -49,6 +49,10 @@ import {
 } from "./gitService";
 import { RepositoryTrust } from "./repositoryTrust";
 import { assertNoLinkBelow } from "./localPath";
+import { GitIntegrationState, gitIntegrationState } from "./workspaceSettings";
+
+/** workspaceState key: the user turned on Local Change History in this workspace. */
+const GIT_INTEGRATION_CONFIRMED = "gitIntegrationConfirmed";
 
 /** "uploaded-altered": uploaded, but the IBM i stored content that differs from the local copy. */
 export type UploadResult = "uploaded" | "uploaded-altered" | "failed" | "remote-changed";
@@ -141,10 +145,7 @@ export class CheckoutService implements vscode.Disposable {
    * Shows a one-time warning notification if the setting is on but git is not found.
    */
   async isGitEnabled(): Promise<boolean> {
-    const enabled = vscode.workspace
-      .getConfiguration("ibmi-member-workspace")
-      .get<boolean>("gitIntegration", false);
-    if (!enabled) {
+    if (!this.gitIntegrationOn()) {
       return false;
     }
     const problem = this.gitService
@@ -168,6 +169,23 @@ export class CheckoutService implements vscode.Disposable {
 
   getActiveWorkItem(system = getSystemName()): string {
     return system ? this.ensureSystemState(system).activeWorkItem : DEFAULT_WORK_ITEM;
+  }
+
+  /** Local Change History's setting for this workspace; see {@link gitIntegrationState}. */
+  gitIntegrationState(): GitIntegrationState {
+    return gitIntegrationState(
+      vscode.workspace.getConfiguration("ibmi-member-workspace").inspect<boolean>("gitIntegration"),
+      this.context.workspaceState.get<boolean>(GIT_INTEGRATION_CONFIRMED, false)
+    );
+  }
+
+  gitIntegrationOn(): boolean {
+    return this.gitIntegrationState() === "on";
+  }
+
+  /** Records that the user turned on Local Change History in this workspace. */
+  async confirmGitIntegration(): Promise<void> {
+    await this.context.workspaceState.update(GIT_INTEGRATION_CONFIRMED, true);
   }
 
   /** Whether a checkout, upload, or other operation that records history is running. */
@@ -370,10 +388,7 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   private async prepareGitRepository(system: string): Promise<GitOperationResult> {
-    const enabled = vscode.workspace
-      .getConfiguration("ibmi-member-workspace")
-      .get<boolean>("gitIntegration", false);
-    if (!enabled || !this.gitService) {
+    if (!this.gitIntegrationOn() || !this.gitService) {
       return {
         status: "setupRequired",
         message: "Enable Local Change History before saving checkpoints.",
@@ -486,9 +501,9 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   /**
-   * Once per workspace, trusts the system repositories Local Change History was already using
-   * before repositories had to be trusted, so upgrading doesn't ask about them. A workspace opened
-   * for the first time has no checkout folder yet, so it trusts nothing here.
+   * Once per workspace, keeps Local Change History as it was before a workspace setting needed
+   * confirming and repositories needed trusting, so upgrading doesn't ask about either. A workspace
+   * opened for the first time has no checkout folder yet, so it confirms and trusts nothing here.
    */
   private async trustRepositoriesInUse(): Promise<void> {
     const migrated = "repositoryTrustMigrated";
@@ -502,6 +517,7 @@ export class CheckoutService implements vscode.Disposable {
     if (!enabled || !this.gitService || !this.getCheckoutRoot()) {
       return;
     }
+    await this.confirmGitIntegration();
     for (const state of Object.values(this.index.systems)) {
       const root = this.getGitRoot(state.system);
       if (root && await this.gitService.isExactRepository(root.fsPath)) {
@@ -1465,10 +1481,7 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   private async assertEntryInActiveWorkItem(entry: CheckedOutMember): Promise<void> {
-    const enabled = vscode.workspace
-      .getConfiguration("ibmi-member-workspace")
-      .get<boolean>("gitIntegration", false);
-    if (!enabled) {
+    if (!this.gitIntegrationOn()) {
       return;
     }
     const ready = await this.ensureGitReady(entry.system);
