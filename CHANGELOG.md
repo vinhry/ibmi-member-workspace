@@ -1,5 +1,22 @@
 # Change Log
 
+## 1.5.2 - 2026-09-27
+
+Security fixes from a review of the extension. The ones you may notice are marked **Changed**.
+
+- Fix: Git run by Local Change History could run programs from the checkout folder: a folder laid out as a bare repository (for example inside a cloned project) was used as the system repository and its `core.fsmonitor` command ran, and repository hooks such as `post-commit` ran despite checkpoints skipping hooks. The extension's Git commands now never run hooks or fsmonitor and never use a bare repository found there. **Changed:** hooks you installed in a checkout repository no longer run for the extension's commits.
+- **Changed:** before its first Git write to a repository in a system folder that it didn't create, Local Change History asks whether to use it. Repositories you already use are kept without asking.
+- **Changed:** a workspace's `.vscode/settings.json` turns Local Change History on only after you agree once for that workspace. **Set Up Local Change History** and user settings work as before, and workspaces already using it are not asked.
+- **Changed:** `autoUploadOnSave` is read from user settings only, so a workspace can't turn on uploads. A value in workspace settings is ignored; set it in your user settings instead.
+- Fix: a checkout could write outside the checkout folder when a library, file, member or source type held "..", "/" or "\". **Changed:** checking out a member whose names aren't valid IBM i system names now fails with a message instead.
+- Fix: commands acted on the checkout details passed to them, so a `command:` link could upload or delete an arbitrary local file. They now act only on stored checkouts.
+- Fix: checkouts, uploads, Merge Back, moves and discards followed symbolic links inside the checkout folder, so a planted link could redirect them to a file outside it. **Changed:** a member path through a link or junction below the checkout folder is refused; the checkout folder itself may still be a link.
+- Fix: the dependency scan could freeze the extension host for minutes on a DDS line of repeated `REF(` or on a long run of CL continuation lines.
+- The message for a checkout folder that Git says another account owns recommends a folder you own, and warns before suggesting `safe.directory`.
+- Internal handoff notes (`HANDOFF.md`), included by mistake in the 1.4.0 to 1.5.1 packages, are no longer packaged.
+- The generated `.gitignore` is never written through a link, and work-item names and start points can't be read as Git options.
+- The extension declares that it doesn't run in untrusted workspaces (unchanged behavior). CI uses a read-only token and actions pinned to commits.
+
 ## 1.5.1 - 2026-09-27
 
 - README: a ready-made `dependencies.crossReferences` entry for **Abstract R11** (`ABSTRACT` library). It finds copybooks from `CPYXRF` (with their exact source location), files and programs from `PGMREF`, and calls from `OBJREF`, and is skipped on systems without Abstract.
