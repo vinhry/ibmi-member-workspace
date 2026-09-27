@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type * as vscode from "vscode";
 import { DEFAULT_WORK_ITEM } from "./types";
@@ -50,6 +51,17 @@ const MIN_GIT_VERSION: readonly [number, number] = [2, 25];
 
 /** Large repositories list many paths; the 1 MB default would make inspection fail. */
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Config that stops a repository from running programs through our commands: its hooks, an
+ * fsmonitor command, or a bare repository planted in a cloned folder (Git would otherwise load
+ * that folder's config as its own). The checkout folder may hold files the user didn't create.
+ */
+const SAFE_CONFIG: readonly string[] = [
+  "-c", "safe.bareRepository=explicit",
+  "-c", "core.fsmonitor=",
+  "-c", `core.hooksPath=${os.devNull}`,
+];
 
 /** Major and minor version from `git --version` output, e.g. "git version 2.45.1.windows.1". */
 export function parseGitVersion(output: string): [number, number] | undefined {
@@ -128,7 +140,7 @@ export class GitService {
     { logFailure = true, trimOutput = true, input }: RunOptions = {}
   ): Promise<CommandResult> {
     try {
-      const pending = pExecFile("git", ["-C", folder, ...args], {
+      const pending = pExecFile("git", [...SAFE_CONFIG, "-C", folder, ...args], {
         maxBuffer: MAX_OUTPUT_BYTES,
         // Never wait for credentials or other terminal input from a background command.
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
@@ -643,8 +655,8 @@ export class GitService {
       return { status: "noChanges", message: "No changes since the last checkpoint." };
     }
 
-    // Automatic checkpoints must not block on a signing passphrase prompt or be rejected by hooks
-    // inherited from the user's global Git config.
+    // Automatic checkpoints must not block on a signing passphrase prompt. Hooks are off for every
+    // command (SAFE_CONFIG); --no-verify stays as a second guard.
     const commit = await this.run(
       folder,
       ["--literal-pathspecs", "-c", "commit.gpgsign=false", "commit", "--only", "--no-verify", "-m", message, ...fromStdin],

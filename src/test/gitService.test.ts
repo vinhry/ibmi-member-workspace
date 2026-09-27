@@ -12,12 +12,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { GitService, gitVersionProblem } from "../gitService";
+import { GitService, gitVersionProblem, parseGitVersion } from "../gitService";
 
 // Isolate Git from the host's system and global config: CI runner images trust every folder
 // (safe.directory=*), and Git for Windows turns on core.autocrlf system-wide.
 process.env.GIT_CONFIG_NOSYSTEM = "1";
 process.env.GIT_CONFIG_GLOBAL = join(mkdtempSync(join(tmpdir(), "ibmi-member-workspace-gitconfig-")), "config");
+
+/** A path for a shell command Git runs; Git for Windows' sh accepts forward slashes. */
+function shellPath(value: string): string {
+  return value.replace(/\\/g, "/");
+}
 
 function git(folder: string, ...args: string[]): string {
   return execFileSync("git", ["-C", folder, ...args], { encoding: "utf-8" }).trim();
@@ -400,6 +405,59 @@ describe("GitService", () => {
       execFileSync("git", ["config", "--global", "--unset", "gpg.program"]);
       execFileSync("git", ["config", "--global", "--unset", "core.hooksPath"]);
       rmSync(hooks, { recursive: true, force: true });
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("never runs a bare repository planted in the system folder", async (t) => {
+    const [major, minor] = parseGitVersion(execFileSync("git", ["--version"], { encoding: "utf-8" })) ?? [0, 0];
+    if (major < 2 || (major === 2 && minor < 38)) {
+      t.skip("safe.bareRepository needs Git 2.38");
+      return;
+    }
+    const parent = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-bare-"));
+    try {
+      // A cloned project can carry a folder laid out as a bare repository, whose config Git loads.
+      const folder = join(parent, "PROD400");
+      const ran = join(parent, "fsmonitor-ran");
+      execFileSync("git", ["init", "--bare", "--quiet", folder]);
+      git(folder, "config", "core.bare", "false");
+      git(folder, "config", "core.worktree", ".");
+      git(folder, "config", "core.fsmonitor", `touch '${shellPath(ran)}'; false`);
+      const service = new GitService({ appendLine: () => undefined });
+
+      assert.ok(["success", "setupRequired"].includes((await service.prepareRepository(folder)).status));
+      assert.ok(existsSync(join(folder, ".git")), "a repository of our own is created instead");
+      assert.equal(
+        (await service.configureLocalIdentity(folder, "Test User", "test@example.com")).status,
+        "success"
+      );
+      const member = join(folder, "MEMBER.RPGLE");
+      writeFileSync(member, "source\n");
+      assert.equal((await service.saveCheckpoint(folder, [member], "checkout")).status, "success");
+      assert.equal(existsSync(ran), false);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("never runs the repository's own hooks or fsmonitor command", async () => {
+    const { folder, service } = await readyRepository();
+    const ran = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-ran-"));
+    try {
+      const hook = join(folder, ".git", "hooks", "post-commit");
+      writeFileSync(hook, `#!/bin/sh\ntouch '${shellPath(join(ran, "hook"))}'\n`);
+      chmodSync(hook, 0o755);
+      git(folder, "config", "core.fsmonitor", `touch '${shellPath(join(ran, "fsmonitor"))}'; false`);
+
+      const member = join(folder, "MEMBER.RPGLE");
+      writeFileSync(member, "source\n");
+      assert.equal((await service.saveCheckpoint(folder, [member], "checkout")).status, "success");
+      assert.equal(await service.getWorkingTreeState(folder).then((state) => state.status), "success");
+      assert.equal(existsSync(join(ran, "hook")), false);
+      assert.equal(existsSync(join(ran, "fsmonitor")), false);
+    } finally {
+      rmSync(ran, { recursive: true, force: true });
       rmSync(folder, { recursive: true, force: true });
     }
   });
