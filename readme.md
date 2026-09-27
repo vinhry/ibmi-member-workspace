@@ -121,6 +121,31 @@ Find Dependencies asks up to three kinds of sources. Every IBM i is different, s
   - Optionally return `LIBRARY` and `SOURCE_FILE` (where the **source** member is) for an exact match, and `LINE` and `TEXT` to show where it's used.
 - **Across systems:** `requiresLibrary` skips the query where that library doesn't exist, and `systems` limits it to named hosts. One settings file therefore works across systems with and without the tool. A query that fails because its files are missing or not authorized isn't tried again until you reconnect.
 
+##### Example: Abstract R11
+
+Abstract (Fortra) keeps its cross-reference in the `ABSTRACT` library. Three of its files cover all three kinds of dependencies:
+
+| File | Gives | Matched on |
+|---|---|---|
+| `CPYXRF` | Copybooks, with their exact source library, file, and member (`CPYSRL`, `CPYSRF`, `CPYSRM`) | The program's source member (`PRGSRM`) |
+| `PGMREF` | Files (`WHOBJT = 'F'`) and programs (`WHOBJT = 'P'`) each program object uses | The program name (`WHPNAM`) |
+| `OBJREF` | Programs called from the source (`CALLP`), with the command used (`CTYPE`) | The calling program (`PARNT`) |
+
+```jsonc
+"ibmi-member-workspace.dependencies.crossReferences": [
+  {
+    "name": "Abstract",
+    "requiresLibrary": "ABSTRACT",
+    "query": "SELECT 'copybook' AS KIND, CPYSRL AS LIBRARY, CPYSRF AS SOURCE_FILE, CPYSRM AS MEMBER, '/COPY ' || TRIM(CPYSRF) || ',' || TRIM(CPYSRM) AS TEXT FROM ABSTRACT.CPYXRF WHERE PRGSRM = {member} UNION SELECT CASE WHOBJT WHEN 'F' THEN 'file' ELSE 'program' END, CAST(NULL AS CHAR(10)), CAST(NULL AS CHAR(10)), WHFNAM, 'Abstract PGMREF of ' || TRIM(WHLIB) || '/' || TRIM(WHPNAM) FROM ABSTRACT.PGMREF WHERE WHPNAM = {object} AND WHOBJT IN ('F', 'P') AND WHFNAM NOT LIKE 'Q%' UNION SELECT 'program', CAST(NULL AS CHAR(10)), CAST(NULL AS CHAR(10)), CALLP, TRIM(CTYPE) || ' ' || TRIM(CALLP) || ' in ' || TRIM(PARNT) FROM ABSTRACT.OBJREF WHERE PARNT = {object} AND CALLP NOT LIKE 'Q%'"
+  }
+]
+```
+
+- **Copybooks** come with their exact location, so that member is checked out. **Files and programs** come by name only, because `PGMREF` and `OBJREF` record *object* libraries, not source libraries. Their source is found through `dependencies.searchLibraries`.
+- `NOT LIKE 'Q%'` leaves out IBM system objects such as `QSQLOPEN`, which have no source. Remove it if your own objects start with Q.
+- The same object used by a program in two libraries is listed once.
+- Before adding it, check that the library name matches your installation: `DSPOBJD OBJ(QSYS/ABSTRACT) OBJTYPE(*LIB)` should show "ABSTRACT R11". To try the query, run it in Code for IBM i's SQL editor with `{member}` and `{object}` replaced by a quoted program name.
+
 #### Finding the source
 
 Each dependency is looked up on the IBM i in the libraries listed in `ibmi-member-workspace.dependencies.searchLibraries`, in order, or in the connection's library list when that setting is empty. List both your object and source libraries, since DSPPGMREF looks for compiled programs there too. A library or source file named in the source is matched exactly. A copybook named without a source file is looked for in `QRPGLESRC` first. Only source members that can build a program are offered for a `CALL`, and only file source for a `REF`.
