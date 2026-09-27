@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.5.3 - 2026-09-27
+
+- Fix: on Windows, the generated `.gitignore` of a new system repository could still be written through a link to a missing file (1.5.2 fixed this on macOS and Linux only).
+
 ## 1.5.2 - 2026-09-27
 
 Security fixes from a review of the extension. The ones you may notice are marked **Changed**.
