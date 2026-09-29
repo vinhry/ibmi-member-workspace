@@ -1,4 +1,3 @@
-import * as fs from "node:fs";
 import * as vscode from "vscode";
 import {
   connectionLibraryList,
@@ -27,6 +26,7 @@ import {
   summarizeRun,
 } from "../dependencySources";
 import { errorMessage } from "../errors";
+import { readCheckoutText } from "../localPath";
 import { MemberInfo } from "../memberInfo";
 import { resolveMember } from "../prompts";
 import { CheckedOutMember, TreeItemType, formatMemberPath, systemKey } from "../types";
@@ -108,7 +108,7 @@ export async function suggestDependencies(ctx: CommandContext, entry: CheckedOut
   }
   let refs: RawReference[];
   try {
-    refs = scanReferences(fs.readFileSync(entry.localPath, "utf-8"), entry.extension);
+    refs = scanReferences(readCheckoutText(ctx.service.getCheckoutRoot()?.fsPath, entry.localPath), entry.extension);
   } catch {
     return;
   }
@@ -230,7 +230,7 @@ function activeProviders(ctx: CommandContext, system: string): DependencyProvide
       .filter((group): group is ProviderGroup => (PROVIDER_GROUPS as readonly string[]).includes(group))
   );
   const providers: DependencyProvider[] = [
-    createSourceScanProvider((entry) => fs.readFileSync(entry.localPath, "utf-8")),
+    createSourceScanProvider((entry) => readCheckoutText(ctx.service.getCheckoutRoot()?.fsPath, entry.localPath)),
     createProgramReferencesProvider({ sqlServicesAvailable, findCompiledObject, programReferences, objectSources }),
     ...configs.map((xref) => createCrossReferenceProvider(xref, {
       libraryExists,

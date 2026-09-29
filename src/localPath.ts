@@ -30,3 +30,16 @@ export function assertNoLinkBelow(root: string, target: string): void {
     }
   }
 }
+
+/**
+ * Reads a checkout's text without following a link below the checkout folder (see
+ * {@link assertNoLinkBelow}), so a link planted at a checkout path can't hand its target's text
+ * to Find Dependencies or Bob's research tools.
+ */
+export function readCheckoutText(root: string | undefined, localPath: string): string {
+  if (!root) {
+    throw new Error("No checkout folder is set for this workspace.");
+  }
+  assertNoLinkBelow(root, localPath);
+  return fs.readFileSync(localPath, "utf-8");
+}

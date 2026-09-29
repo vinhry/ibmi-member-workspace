@@ -1,5 +1,4 @@
 import * as crypto from "node:crypto";
-import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import {
@@ -24,7 +23,7 @@ import {
 } from "../codeForIBMi";
 import { BobPromptKind, PromptMember, buildBobPrompt } from "../bobPrompts";
 import { errorMessage } from "../errors";
-import { assertNoLinkBelow } from "../localPath";
+import { readCheckoutText } from "../localPath";
 import type { BrowserNode } from "../memberInfo";
 import { resolveMemberSelections } from "../prompts";
 import { CheckedOutMember, TreeItemType, isReferenceCopy } from "../types";
@@ -417,14 +416,7 @@ function createTools(ctx: CommandContext): McpTool[] {
     bringReferenceCopies: (system, members, signal) => serially(() => bringReferenceCopiesFor(ctx, system, members, signal)),
     // Research tools are always allowed in Bob, so a link planted at a checkout path must not
     // turn them into a way to read any file on this computer.
-    readLocal: (localPath) => {
-      const root = service.getCheckoutRoot();
-      if (!root) {
-        throw new Error("No checkout folder is set for this workspace.");
-      }
-      assertNoLinkBelow(root.fsPath, localPath);
-      return fs.readFileSync(localPath, "utf-8");
-    },
+    readLocal: (localPath) => readCheckoutText(service.getCheckoutRoot()?.fsPath, localPath),
     lookupDependencies: (system, entry) => lookupDependencies(ctx, system, entry),
     searchLibraries,
     whereUsedLibraryLimit: () =>

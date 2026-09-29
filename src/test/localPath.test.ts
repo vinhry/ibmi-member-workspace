@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { assertNoLinkBelow } from "../localPath";
+import { assertNoLinkBelow, readCheckoutText } from "../localPath";
 
 /** A checkout folder and a folder outside it, removed afterwards. */
 function folders(): { root: string; outside: string; cleanup: () => void } {
@@ -85,6 +85,35 @@ describe("assertNoLinkBelow", () => {
       assert.throws(() => assertNoLinkBelow(root, join(root, "..", "X.RPGLE")), /outside/);
       assert.throws(() => assertNoLinkBelow(root, join(root, "PUB400", "..", "..", "X.RPGLE")), /outside/);
       assert.throws(() => assertNoLinkBelow(root, root), /outside/);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("readCheckoutText", () => {
+  it("reads a checkout below the checkout folder", () => {
+    const { root, cleanup } = folders();
+    try {
+      mkdirSync(join(root, "PUB400", "MYLIB", "QRPGLESRC"), { recursive: true });
+      const member = join(root, "PUB400", "MYLIB", "QRPGLESRC", "PAYROLL.RPGLE");
+      writeFileSync(member, "**free\n");
+      assert.equal(readCheckoutText(root, member), "**free\n");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("refuses to read through a linked folder, or without a checkout folder", () => {
+    const { root, outside, cleanup } = folders();
+    try {
+      mkdirSync(join(outside, "QRPGLESRC"));
+      writeFileSync(join(outside, "QRPGLESRC", "PAYROLL.RPGLE"), "secret\n");
+      mkdirSync(join(root, "PUB400"));
+      linkDirectory(outside, join(root, "PUB400", "MYLIB"));
+      const member = join(root, "PUB400", "MYLIB", "QRPGLESRC", "PAYROLL.RPGLE");
+      assert.throws(() => readCheckoutText(root, member), /is a link/);
+      assert.throws(() => readCheckoutText(undefined, member), /No checkout folder/);
     } finally {
       cleanup();
     }
