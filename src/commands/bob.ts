@@ -4,11 +4,14 @@ import * as vscode from "vscode";
 import {
   MCP_SERVER_NAME,
   GENERATED_RULES_MARKER,
+  bobFocusCandidates,
   configuredEntry,
   excludeFromGit,
   mcpServerEntry,
   mergeMcpConfig,
+  pickBobFocusCommand,
   readFileBelow,
+  refreshedAlwaysAllow,
   shouldRewriteRules,
   writeFileBelow,
 } from "../bobIde";
@@ -48,6 +51,8 @@ const PORT_KEY = "bob.mcpPort";
  * to date: a `.bob/mcp.json` that came with a cloned project is never given this user's token.
  */
 const CONNECTED_KEY = "bob.connectedFolders";
+/** globalState key of the tool names the last start offered, to tell which tools a new version added. */
+const OFFERED_TOOLS_KEY = "bob.offeredTools";
 
 const MCP_CONFIG = path.join(".bob", "mcp.json");
 const RULES_FILE = path.join(".bob", "rules", "ibmi-member-workspace.md");
@@ -150,7 +155,9 @@ export function registerBobCommands(ctx: CommandContext): void {
     port = listening;
     await context.workspaceState.update(PORT_KEY, port);
     log.appendLine(`[bob] Research tools listening on 127.0.0.1:${port}`);
-    refreshConfiguredEntries(port, token, tools, connectedFolders(), log);
+    const offeredBefore = context.globalState.get<string[]>(OFFERED_TOOLS_KEY);
+    refreshConfiguredEntries(port, token, tools, offeredBefore, connectedFolders(), log);
+    await context.globalState.update(OFFERED_TOOLS_KEY, toolNames(tools));
   };
 
   const stop = () => {
@@ -316,7 +323,8 @@ function registerInvestigateCommands(ctx: CommandContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("ibmi-member-workspace.bob.analyzeRelationships", investigate("relationships")),
-    vscode.commands.registerCommand("ibmi-member-workspace.bob.explainProgram", investigate("explain"))
+    vscode.commands.registerCommand("ibmi-member-workspace.bob.explainProgram", investigate("explain")),
+    vscode.commands.registerCommand("ibmi-member-workspace.bob.deepDive", investigate("deepDive"))
   );
 }
 
@@ -352,7 +360,9 @@ function membersOf(ctx: CommandContext, arg: unknown, all?: unknown[]): { member
       }
       // A member already checked out is named with its local copy.
       const entry = system ? service.findEntry(system, info.library, info.sourceFile, info.memberName) : undefined;
-      return [entry ? fromEntry(entry) : { library: info.library, sourceFile: info.sourceFile, member: info.memberName }];
+      return [entry
+        ? fromEntry(entry)
+        : { library: info.library, sourceFile: info.sourceFile, member: info.memberName, sourceType: info.extension }];
     }),
     notCheckedOut: 0,
   };
@@ -365,8 +375,14 @@ function fromEntry(entry: CheckedOutMember): PromptMember {
     member: entry.memberName,
     localPath: entry.localPath,
     readOnly: isReferenceCopy(entry),
+    sourceType: entry.extension,
   };
 }
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Whether the Bob commands that may focus its chat were written to the log yet. */
+let focusCandidatesLogged = false;
 
 /**
  * Puts `prompt` in Bob's chat box without sending it. Bob documents no command that fills the box,
@@ -376,15 +392,51 @@ function fromEntry(entry: CheckedOutMember): PromptMember {
 async function sendToBobChat(prompt: string, log: vscode.OutputChannel): Promise<void> {
   await vscode.env.clipboard.writeText(prompt);
   const commands = await vscode.commands.getCommands(true);
-  const focus = commands.find((command) => command.toLowerCase() === "bob.focus") ??
-    commands.find((command) => /^bob\b.*\.focus$/i.test(command));
+  if (!focusCandidatesLogged) {
+    focusCandidatesLogged = true;
+    log.appendLine(`[bob] Bob commands that may focus its chat: ${bobFocusCandidates(commands).join(", ") || "none"}`);
+  }
+  const focus = pickBobFocusCommand(commands);
   if (!focus) {
     log.appendLine("[bob] No Bob focus command found; the prompt was only copied to the clipboard.");
     vscode.window.showInformationMessage("The prompt is on the clipboard. Open Bob's chat, paste it, review it, and press Enter.");
     return;
   }
-  // If Bob's chat doesn't take the focus, the paste lands in whatever had it, possibly a source
-  // file. Watch for that and take it back out.
+  // No extension can tell whether Bob's chat is open, so it is opened and given time to load. A
+  // hidden chat can take longer than that; a paste that lands in an editor is undone and tried
+  // once more with a longer wait.
+  let missed: vscode.TextDocument | undefined;
+  for (const loadWaitMs of [600, 1500]) {
+    try {
+      missed = await pasteIntoBob(focus, prompt, loadWaitMs);
+    } catch (err) {
+      log.appendLine(`[bob] Could not paste the prompt into Bob's chat (${focus}): ${errorMessage(err)}`);
+      vscode.window.showInformationMessage("The prompt is on the clipboard. Open Bob's chat, paste it, review it, and press Enter.");
+      return;
+    }
+    if (!missed) {
+      log.appendLine(`[bob] Prompt pasted into Bob's chat (${focus}).`);
+      vscode.window.showInformationMessage(
+        "The prompt is in Bob's chat: review it and press Enter. If the chat box is empty, paste it (it's on the clipboard)."
+      );
+      return;
+    }
+    await vscode.window.showTextDocument(missed);
+    await vscode.commands.executeCommand("undo");
+    log.appendLine(`[bob] The prompt was pasted into ${missed.uri.fsPath} instead of Bob's chat (after ${loadWaitMs} ms); undone.`);
+  }
+  vscode.window.showWarningMessage(
+    `Bob's chat didn't take the focus, so the prompt went into ${path.basename(missed!.uri.fsPath)}; that was undone. ` +
+    "The prompt is on the clipboard: paste it into Bob's chat and press Enter."
+  );
+}
+
+/**
+ * Focuses Bob's chat and pastes the clipboard into it. The focus command runs twice, `loadWaitMs`
+ * apart: the first opens a hidden chat, and the second puts the focus in its input box once it has
+ * loaded. Returns the document the paste landed in instead, if any.
+ */
+async function pasteIntoBob(focus: string, prompt: string, loadWaitMs: number): Promise<vscode.TextDocument | undefined> {
   const firstLine = prompt.split("\n")[0];
   let pastedInto: vscode.TextDocument | undefined;
   const watch = vscode.workspace.onDidChangeTextDocument((event) => {
@@ -393,30 +445,19 @@ async function sendToBobChat(prompt: string, log: vscode.OutputChannel): Promise
     }
   });
   try {
+    // A paste that misses Bob's chat must land where it is seen and undone: in an editor, never in
+    // the terminal, where a multi-line prompt could run as shell commands.
+    await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
     await vscode.commands.executeCommand(focus);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await delay(loadWaitMs);
+    await vscode.commands.executeCommand(focus);
+    await delay(150);
     await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  } catch (err) {
-    log.appendLine(`[bob] Could not paste the prompt into Bob's chat (${focus}): ${errorMessage(err)}`);
+    await delay(150);
   } finally {
     watch.dispose();
   }
-  if (pastedInto) {
-    const document = pastedInto;
-    await vscode.window.showTextDocument(document);
-    await vscode.commands.executeCommand("undo");
-    log.appendLine(`[bob] The prompt was pasted into ${document.uri.fsPath} instead of Bob's chat; undone.`);
-    vscode.window.showWarningMessage(
-      `Bob's chat didn't take the focus, so the prompt went into ${path.basename(document.uri.fsPath)}; that was undone. ` +
-      "The prompt is on the clipboard: paste it into Bob's chat and press Enter."
-    );
-    return;
-  }
-  log.appendLine(`[bob] Prompt pasted into Bob's chat (${focus}).`);
-  vscode.window.showInformationMessage(
-    "The prompt is in Bob's chat: review it and press Enter. If the chat box is empty, paste it (it's on the clipboard)."
-  );
+  return pastedInto;
 }
 
 let referenceQueue: Promise<unknown> = Promise.resolve();
@@ -474,10 +515,10 @@ function refreshConfiguredEntries(
   port: number,
   token: string,
   tools: readonly McpTool[],
+  offeredBefore: readonly string[] | undefined,
   connected: readonly string[],
   log: vscode.OutputChannel
 ): void {
-  const entry = mcpServerEntry(port, token, toolNames(tools));
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     const root = folder.uri.fsPath;
     const target = path.join(root, MCP_CONFIG);
@@ -495,6 +536,8 @@ function refreshConfiguredEntries(
         continue;
       }
       refreshRulesFile(root, log);
+      // Only Connect approves every tool; a refresh keeps the user's choices and adds new tools.
+      const entry = mcpServerEntry(port, token, refreshedAlwaysAllow(current.alwaysAllow, toolNames(tools), offeredBefore));
       const headers = current.headers as Record<string, unknown> | undefined;
       const allowed = current.alwaysAllow;
       const sameTools = Array.isArray(allowed) && allowed.length === entry.alwaysAllow.length &&

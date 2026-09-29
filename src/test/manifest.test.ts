@@ -109,7 +109,11 @@ describe("extension manifest", () => {
     const { menus } = manifest.contributes;
     const investigateMenu = "ibmi-member-workspace.bobInvestigate";
     const investigate = (menus[investigateMenu] ?? []).map((item) => item.command);
-    assert.deepEqual(investigate, ["ibmi-member-workspace.bob.analyzeRelationships", "ibmi-member-workspace.bob.explainProgram"]);
+    assert.deepEqual(investigate, [
+      "ibmi-member-workspace.bob.analyzeRelationships",
+      "ibmi-member-workspace.bob.explainProgram",
+      "ibmi-member-workspace.bob.deepDive",
+    ]);
     const bobCommands = manifest.contributes.commands
       .map(({ command }) => command)
       .filter((command) => command.startsWith("ibmi-member-workspace.bob."));

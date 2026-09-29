@@ -11,7 +11,9 @@ import {
   isBobProduct,
   mcpServerEntry,
   mergeMcpConfig,
+  pickBobFocusCommand,
   readFileBelow,
+  refreshedAlwaysAllow,
   shouldRewriteRules,
   writeFileBelow,
 } from "../bobIde";
@@ -105,6 +107,39 @@ describe("mergeMcpConfig", () => {
     assert.equal(configuredEntry(undefined), undefined);
     assert.equal(configuredEntry("{ broken"), undefined);
     assert.equal(configuredEntry(mergeMcpConfig(undefined, entry))?.url, "http://127.0.0.1:4321/mcp");
+  });
+});
+
+describe("refreshedAlwaysAllow", () => {
+  const tools = ["list_checkouts", "read_member_source", "find_where_used"];
+
+  it("keeps tools the user took out of alwaysAllow out", () => {
+    assert.deepEqual(refreshedAlwaysAllow(["list_checkouts"], tools, tools), ["list_checkouts"]);
+    assert.deepEqual(refreshedAlwaysAllow(undefined, tools, tools), []);
+  });
+
+  it("adds only tools a new version brought, and drops tools that are gone", () => {
+    assert.deepEqual(
+      refreshedAlwaysAllow(["list_checkouts", "old_tool"], tools, ["list_checkouts", "read_member_source"]),
+      ["list_checkouts", "find_where_used"]
+    );
+  });
+
+  it("adds nothing when the previous tools are unknown", () => {
+    assert.deepEqual(refreshedAlwaysAllow(["read_member_source"], tools, undefined), ["read_member_source"]);
+  });
+});
+
+describe("pickBobFocusCommand", () => {
+  it("prefers the chat input, then bob.focus, then another Bob view", () => {
+    assert.equal(pickBobFocusCommand(["bob.focus", "bob.chatView.focusInput", "bob.other.focus"]), "bob.chatView.focusInput");
+    assert.equal(pickBobFocusCommand(["bob.other.focus", "bob.focus"]), "bob.focus");
+    assert.equal(pickBobFocusCommand(["editor.focus", "bob.other.focus"]), "bob.other.focus");
+  });
+
+  it("ignores commands of other extensions", () => {
+    assert.equal(pickBobFocusCommand(["bobcat.focus", "foo.bob.focus", "bobcat.focusInput"]), undefined);
+    assert.equal(pickBobFocusCommand([]), undefined);
   });
 });
 

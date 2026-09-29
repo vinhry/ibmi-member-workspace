@@ -276,6 +276,11 @@
         "command": "ibmi-member-workspace.bob.explainProgram",
         "title": "Explain Program",
         "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.bob.deepDive",
+        "title": "Deep Dive",
+        "category": "IBM i Member Workspace"
       }
     ],
     "menus": {
@@ -286,6 +291,10 @@
         },
         {
           "command": "ibmi-member-workspace.bob.explainProgram",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.bob.deepDive",
           "when": "false"
         },
         {
@@ -534,6 +543,11 @@
           "command": "ibmi-member-workspace.bob.explainProgram",
           "when": "ibmi-member-workspace:isBobIde",
           "group": "bob@2"
+        },
+        {
+          "command": "ibmi-member-workspace.bob.deepDive",
+          "when": "ibmi-member-workspace:isBobIde",
+          "group": "bob@3"
         }
       ],
       "ibmi-member-workspace.compareWith": [

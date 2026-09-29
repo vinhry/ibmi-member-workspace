@@ -12,6 +12,21 @@ export function isBobProduct(appName: string, uriScheme: string): boolean {
   return /\bbob\b/i.test(appName) || /^(?:ibm-?)?bob(?:-|$)/i.test(uriScheme);
 }
 
+/**
+ * The command that best focuses Bob's chat: one that focuses its input box, then `bob.focus`, then
+ * any other Bob view's focus command. Bob documents none of them, so they are found by name.
+ */
+export function pickBobFocusCommand(commands: readonly string[]): string | undefined {
+  return commands.find((command) => /^bob\b.*\.focusInput$/i.test(command)) ??
+    commands.find((command) => command.toLowerCase() === "bob.focus") ??
+    commands.find((command) => /^bob\b.*\.focus$/i.test(command));
+}
+
+/** Bob commands that may focus its chat, listed in the log so the right one can be told apart. */
+export function bobFocusCandidates(commands: readonly string[]): string[] {
+  return commands.filter((command) => /^bob\b.*(focus|chat|input)/i.test(command));
+}
+
 /** The name of this extension's entry under `mcpServers`. */
 export const MCP_SERVER_NAME = "ibmi-member-workspace";
 
@@ -27,6 +42,20 @@ export function mcpServerEntry(port: number, token: string, tools: readonly stri
     headers: { Authorization: `Bearer ${token}` },
     alwaysAllow: [...tools],
   };
+}
+
+/**
+ * The tools a refreshed entry lets Bob run without asking. Tools the user took out of `alwaysAllow`
+ * stay out; only tools new since `offeredBefore` (the tools the previous start offered) are added.
+ * Without `offeredBefore`, none are added. Tools that no longer exist are dropped.
+ */
+export function refreshedAlwaysAllow(
+  existing: unknown,
+  tools: readonly string[],
+  offeredBefore: readonly string[] | undefined
+): string[] {
+  const kept = Array.isArray(existing) ? existing.filter((tool): tool is string => typeof tool === "string") : [];
+  return tools.filter((tool) => kept.includes(tool) || (offeredBefore !== undefined && !offeredBefore.includes(tool)));
 }
 
 /** Options of this extension's `.bob/mcp.json` entry that belong to the user and are kept. */

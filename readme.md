@@ -184,10 +184,11 @@ To skip typing the request, right-click one or more members and choose **Bob, In
 
 - **Analyze Relationships**: what each member uses, which programs call it, and how the selected members relate to each other.
 - **Explain Program**: what each member does, its inputs and outputs, main steps, business rules, and error handling.
+- **Deep Dive**: both of the above in one walkthrough for a developer new to old code: callers and what it calls, inputs and outputs, the main logic with line numbers, business rules, error handling, the non-obvious parts, and what to retest after a change. For a file: its layout, keys, logical files and views, and which programs read or change it. Bob writes the result to `docs/` in the workspace: `DEEP_DIVE_<MEMBER>.md` for one member, or a name Bob picks from what several members do together, such as `DEEP_DIVE_ORDER_ENTRY.md`. It never overwrites an existing document.
 
 The menu is on checkouts in **Checked Out Members**, on source members in the Code for IBM i **Object Browser** (no checkout needed), and on checked-out files in the **Explorer**. The prompt appears in Bob's chat without being sent: review it, change it if you like, and press **Enter**. It names up to 25 members. A checked-out file inside the workspace is added as an `@/` mention, so Bob reads it straight away.
 
-The prompt is also left on the clipboard. If Bob's chat box stays empty, paste it there. If Bob's chat doesn't take the focus and the prompt lands in an editor instead, it is undone right away, and you're told to paste it yourself.
+The prompt is also left on the clipboard. If Bob's chat box stays empty, paste it there. Bob's chat is opened first and given time to load. If the prompt still lands in an editor, it is undone right away and pasted again after a longer wait. If that misses too, you're told to paste it yourself.
 
 **Everything Bob looks at is a read-only reference copy.** These are often production sources, so no tool changes the IBM i, and no tool can check a member out for change. A member Bob reads or finds as a dependency is brought into your checkout folder as a read-only reference copy, exactly like **Bring for Reference**: its file is read-only, and Upload, Merge Back and upload on save refuse it. A member you already checked out for change is used as it is and never overwritten. Every copy Bob brings is listed in the output panel and in Checked Out Members. When Local Change History is on and no work item is chosen yet, you're asked which work item the copies belong to.
 
