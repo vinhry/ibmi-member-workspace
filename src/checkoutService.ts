@@ -54,6 +54,9 @@ import { GitIntegrationState, gitIntegrationState } from "./workspaceSettings";
 /** workspaceState key: the user turned on Local Change History in this workspace. */
 const GIT_INTEGRATION_CONFIRMED = "gitIntegrationConfirmed";
 
+/** How often listeners hear about changes while a batch is running; see `persist`. */
+const BATCH_CHANGE_INTERVAL_MS = 250;
+
 /** "uploaded-altered": uploaded, but the IBM i stored content that differs from the local copy. */
 export type UploadResult = "uploaded" | "uploaded-altered" | "failed" | "remote-changed";
 
@@ -88,6 +91,8 @@ export class CheckoutService implements vscode.Disposable {
 
   private batchDepth = 0;
   private dirty = false;
+  /** A change made during the running batch that listeners haven't been told about yet. */
+  private changeTimer: NodeJS.Timeout | undefined;
   private saveQueue: Promise<void> = Promise.resolve();
   private gitWarningShown = false;
   private readonly gitSetupDeclinedSystems = new Set<string>();
@@ -137,6 +142,7 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   dispose(): void {
+    clearTimeout(this.changeTimer);
     this._onDidChange.dispose();
   }
 
@@ -779,6 +785,11 @@ export class CheckoutService implements vscode.Disposable {
       this.batchDepth--;
       if (this.batchDepth === 0) {
         this.batchGitReady.clear();
+        if (this.changeTimer) {
+          clearTimeout(this.changeTimer);
+          this.changeTimer = undefined;
+          this._onDidChange.fire();
+        }
       }
       if (this.batchDepth === 0 && this.dirty) {
         try {
@@ -1348,7 +1359,11 @@ export class CheckoutService implements vscode.Disposable {
 
   findEntryByLocalPath(localPath: string): CheckedOutMember | undefined {
     const target = vscode.Uri.file(localPath).fsPath;
-    return this.entries.find((e) => vscode.Uri.file(e.localPath).fsPath === target);
+    // Stored paths are already fsPaths, so an exact match needs no Uri per entry. This runs on every
+    // save and every file event in the checkout folder.
+    const entries = this.entries;
+    return entries.find((e) => e.localPath === target) ??
+      entries.find((e) => vscode.Uri.file(e.localPath).fsPath === target);
   }
 
   /** Updates a checkout's status after its local file is written, without contacting the IBM i. */
@@ -1602,13 +1617,22 @@ export class CheckoutService implements vscode.Disposable {
     this._onDidChange.fire();
   }
 
-  /** Notifies listeners and saves the index, or defers the save while a batch is running. */
+  /**
+   * Notifies listeners and saves the index. While a batch is running, the save waits for its end
+   * and listeners are told at most every {@link BATCH_CHANGE_INTERVAL_MS}: each notification redraws
+   * the views and asks Git for the work item, so one per member would start thousands of Git
+   * processes for a large checkout.
+   */
   private async persist(): Promise<void> {
-    this._onDidChange.fire();
     if (this.batchDepth > 0) {
       this.dirty = true;
+      this.changeTimer ??= setTimeout(() => {
+        this.changeTimer = undefined;
+        this._onDidChange.fire();
+      }, BATCH_CHANGE_INTERVAL_MS);
       return;
     }
+    this._onDidChange.fire();
     await this.saveIndex();
   }
 

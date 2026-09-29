@@ -46,4 +46,40 @@ describe("SnapshotStore", () => {
     store.clear();
     assert.equal(store.size, 0);
   });
+
+  it("doesn't count a snapshot as fresh while it is being taken again", () => {
+    const store = new SnapshotStore(10, 60_000);
+    const file = store.fileFor("A");
+    store.record("A", { file, takenAt: 0 });
+    // A refresh starts replacing the file's contents, then fails before recording.
+    assert.equal(store.fileFor("A"), file);
+    assert.equal(store.fresh("A", 1), undefined);
+    // The next take reuses the same file.
+    assert.equal(store.fileFor("A"), file);
+  });
+
+  it("never makes more files than the limit, even when takes fail", () => {
+    const store = new SnapshotStore(3, 60_000);
+    for (const lib of ["A", "B", "C"]) {
+      store.record(lib, { file: store.fileFor(lib), takenAt: 0 });
+    }
+    const made = new Set<string>();
+    for (const lib of ["D", "E", "F", "G", "H"]) {
+      made.add(store.fileFor(lib)); // Each take fails: nothing is recorded.
+      assert.ok(store.files <= 3, `${store.files} files`);
+    }
+    assert.equal(made.size, 1);
+    store.record("I", { file: store.fileFor("I"), takenAt: 1 });
+    assert.equal(store.files, 3);
+    assert.equal(store.size, 3);
+  });
+
+  it("reuses a forgotten snapshot's file", () => {
+    const store = new SnapshotStore(3, 60_000);
+    const file = store.fileFor("A");
+    store.record("A", { file, takenAt: 0 });
+    store.forget("A");
+    assert.equal(store.fileFor("A"), file);
+    assert.equal(store.files, 1);
+  });
 });

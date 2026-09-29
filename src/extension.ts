@@ -63,7 +63,29 @@ export async function activate(
   gitBranchStatusBar.command = "ibmi-member-workspace.selectGitBranch";
   context.subscriptions.push(gitBranchStatusBar);
 
-  const refreshGitStatusBar = async () => {
+  // One refresh at a time: each asks Git twice, and overlapping ones could finish out of order.
+  // A request made while one runs is folded into a single rerun after it.
+  let statusBarRefresh: Promise<void> | undefined;
+  let statusBarRerun = false;
+  const refreshGitStatusBar = (): Promise<void> => {
+    if (statusBarRefresh) {
+      statusBarRerun = true;
+      return statusBarRefresh;
+    }
+    statusBarRefresh = (async () => {
+      try {
+        do {
+          statusBarRerun = false;
+          await updateGitStatusBar();
+        } while (statusBarRerun);
+      } finally {
+        statusBarRefresh = undefined;
+      }
+    })();
+    return statusBarRefresh;
+  };
+
+  const updateGitStatusBar = async () => {
     const system = getSystemName();
     const root = system ? service.getGitRoot(system) : undefined;
     // Until the system directory is its own repository, Git would report an enclosing repository's branch.

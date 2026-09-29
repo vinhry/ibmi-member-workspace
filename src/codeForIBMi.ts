@@ -286,28 +286,54 @@ export async function programReferences(object: CompiledObject): Promise<Array<R
   });
 }
 
-/** The source member each object was created from, when the object records one. */
+/** Objects asked about per statement in `objectSources`. */
+const OBJECTS_PER_SOURCE_LOOKUP = 25;
+
+/**
+ * The source member each object was created from, when the object records one. Objects are asked
+ * about in groups, one statement per group; a group whose statement fails (for example, one
+ * library is missing or not authorized) is asked about one object at a time.
+ */
 export async function objectSources(objects: ReferencedObject[]): Promise<Map<string, SourceLocation>> {
   const connection = requireConnection();
   const sources = new Map<string, SourceLocation>();
-  for (const object of objects) {
-    if (!object.library) {
-      continue;
+  const select = (index: number) =>
+    `SELECT ${index} AS IDX, SOURCE_LIBRARY, SOURCE_FILE, SOURCE_MEMBER ` +
+    "FROM TABLE(QSYS2.OBJECT_STATISTICS(?, ?, OBJECT_NAME => ?)) X";
+  const keep = (object: ReferencedObject, row: Record<string, unknown> | undefined) => {
+    if (row?.SOURCE_LIBRARY && row.SOURCE_FILE && row.SOURCE_MEMBER && !sources.has(objectKey(object))) {
+      sources.set(objectKey(object), {
+        library: String(row.SOURCE_LIBRARY).trim(),
+        sourceFile: String(row.SOURCE_FILE).trim(),
+        member: String(row.SOURCE_MEMBER).trim(),
+      });
     }
+  };
+  const withLibrary = objects.filter((object) => object.library);
+  for (let start = 0; start < withLibrary.length; start += OBJECTS_PER_SOURCE_LOOKUP) {
+    const group = withLibrary.slice(start, start + OBJECTS_PER_SOURCE_LOOKUP);
     try {
-      const [row] = await connection.runSQL(
-        "SELECT SOURCE_LIBRARY, SOURCE_FILE, SOURCE_MEMBER FROM TABLE(QSYS2.OBJECT_STATISTICS(?, ?, OBJECT_NAME => ?)) X",
-        { bindings: [object.library, object.type, object.name] }
+      const rows = await connection.runSQL(
+        group.map((_object, index) => select(index)).join(" UNION ALL "),
+        { bindings: group.flatMap((object) => [object.library!, object.type, object.name]) }
       );
-      if (row?.SOURCE_LIBRARY && row.SOURCE_FILE && row.SOURCE_MEMBER) {
-        sources.set(objectKey(object), {
-          library: String(row.SOURCE_LIBRARY).trim(),
-          sourceFile: String(row.SOURCE_FILE).trim(),
-          member: String(row.SOURCE_MEMBER).trim(),
-        });
+      for (const row of rows) {
+        const object = group[Number(row.IDX)];
+        if (object) {
+          keep(object, row);
+        }
       }
+      continue;
     } catch {
-      // No source information: the reference is matched by name instead.
+      // Asked one at a time below, so one bad object doesn't cost the others their source.
+    }
+    for (const object of group) {
+      try {
+        const [row] = await connection.runSQL(select(0), { bindings: [object.library!, object.type, object.name] });
+        keep(object, row);
+      } catch {
+        // No source information: the reference is matched by name instead.
+      }
     }
   }
   return sources;

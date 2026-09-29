@@ -22,6 +22,11 @@ export interface Snapshot {
 export class SnapshotStore {
   /** In least-recently-used order: the first entry is the next to give up its file. */
   private readonly snapshots = new Map<string, Snapshot>();
+  /**
+   * Files created but holding no recorded snapshot: one being taken, or one whose take failed.
+   * They are reused before a new file is made, so failures never add files beyond the limit.
+   */
+  private readonly spare: string[] = [];
   private created = 0;
 
   constructor(private readonly limit = MAX_WHERE_USED_SNAPSHOTS, private readonly maxAgeMs = WHERE_USED_SNAPSHOT_MINUTES * 60_000) {}
@@ -38,37 +43,61 @@ export class SnapshotStore {
   }
 
   /**
-   * The QTEMP file to take `key`'s snapshot into: its own file again, a new one while fewer than
-   * the limit exist, or else the file of the least recently used snapshot, which is forgotten.
+   * The QTEMP file to take `key`'s snapshot into: its own file again, a spare one, a new one while
+   * fewer than the limit exist, or else the file of the least recently used snapshot, which is
+   * forgotten. `key`'s own snapshot is forgotten too until {@link record}: the take replaces the
+   * file's contents, and a take that fails partway must not leave it looking fresh.
    * File names are at most 10 characters, so they are valid system names.
    */
   fileFor(key: string): string {
     const own = this.snapshots.get(key);
     if (own) {
+      this.snapshots.delete(key);
+      this.spare.unshift(own.file);
       return own.file;
+    }
+    if (this.spare.length > 0) {
+      return this.spare[0];
     }
     if (this.snapshots.size >= this.limit) {
       const [oldestKey, oldest] = this.snapshots.entries().next().value as [string, Snapshot];
       this.snapshots.delete(oldestKey);
+      this.spare.push(oldest.file);
       return oldest.file;
     }
-    return `IMWWU${(++this.created).toString(36).toUpperCase().padStart(5, "0")}`;
+    const file = `IMWWU${(++this.created).toString(36).toUpperCase().padStart(5, "0")}`;
+    this.spare.push(file);
+    return file;
   }
 
   record(key: string, snapshot: Snapshot): void {
+    const spare = this.spare.indexOf(snapshot.file);
+    if (spare >= 0) {
+      this.spare.splice(spare, 1);
+    }
     this.snapshots.delete(key);
     this.snapshots.set(key, snapshot);
   }
 
   forget(key: string): void {
-    this.snapshots.delete(key);
+    const snapshot = this.snapshots.get(key);
+    if (snapshot) {
+      this.snapshots.delete(key);
+      this.spare.push(snapshot.file);
+    }
   }
 
   clear(): void {
     this.snapshots.clear();
+    this.spare.length = 0;
   }
 
   get size(): number {
     return this.snapshots.size;
+  }
+
+  /** QTEMP files in use: recorded snapshots and spare files. */
+  get files(): number {
+    return this.snapshots.size + this.spare.length;
   }
 }
