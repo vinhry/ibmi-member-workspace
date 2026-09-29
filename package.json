@@ -46,6 +46,10 @@
       {
         "id": "ibmi-member-workspace.compareWith",
         "label": "Compare With"
+      },
+      {
+        "id": "ibmi-member-workspace.bobInvestigate",
+        "label": "Bob, Investigate"
       }
     ],
     "viewsContainers": {
@@ -262,10 +266,28 @@
         "command": "ibmi-member-workspace.bob.disconnectResearchTools",
         "title": "Disconnect Bob from IBM i Research Tools",
         "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.bob.analyzeRelationships",
+        "title": "Analyze Relationships",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.bob.explainProgram",
+        "title": "Explain Program",
+        "category": "IBM i Member Workspace"
       }
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "ibmi-member-workspace.bob.analyzeRelationships",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.bob.explainProgram",
+          "when": "false"
+        },
         {
           "command": "ibmi-member-workspace.bob.connectResearchTools",
           "when": "ibmi-member-workspace:isBobIde"
@@ -385,6 +407,16 @@
       ],
       "view/item/context": [
         {
+          "submenu": "ibmi-member-workspace.bobInvestigate",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && ibmi-member-workspace:isBobIde",
+          "group": "0_bob@1"
+        },
+        {
+          "submenu": "ibmi-member-workspace.bobInvestigate",
+          "when": "view == objectBrowser && viewItem =~ /^member/ && ibmi-member-workspace:isBobIde",
+          "group": "ibmiCheckout@2"
+        },
+        {
           "command": "ibmi-member-workspace.checkoutMember",
           "when": "view == objectBrowser && (viewItem == member || (viewItem == member_readonly && config.ibmi-member-workspace.allowCheckoutFromProtectedFilter))",
           "group": "ibmiCheckout@1"
@@ -483,6 +515,25 @@
           "command": "ibmi-member-workspace.refreshSourceFileRemote",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem == sourceFileGroup",
           "group": "1_status@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "submenu": "ibmi-member-workspace.bobInvestigate",
+          "when": "ibmi-member-workspace:isBobIde && resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "0_bob@1"
+        }
+      ],
+      "ibmi-member-workspace.bobInvestigate": [
+        {
+          "command": "ibmi-member-workspace.bob.analyzeRelationships",
+          "when": "ibmi-member-workspace:isBobIde",
+          "group": "bob@1"
+        },
+        {
+          "command": "ibmi-member-workspace.bob.explainProgram",
+          "when": "ibmi-member-workspace:isBobIde",
+          "group": "bob@2"
         }
       ],
       "ibmi-member-workspace.compareWith": [

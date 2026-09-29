@@ -178,6 +178,17 @@ In [IBM Bob](https://bob.ibm.com), Bob's agent can use the extension to research
 | `bring_reference_copies` | Brings members to read |
 | `list_checkouts` | What's in the checkout folder, and which files are reference copies |
 
+#### Bob, Investigate (right-click)
+
+To skip typing the request, right-click one or more members and choose **Bob, Investigate**:
+
+- **Analyze Relationships**: what each member uses, which programs call it, and how the selected members relate to each other.
+- **Explain Program**: what each member does, its inputs and outputs, main steps, business rules, and error handling.
+
+The menu is on checkouts in **Checked Out Members**, on source members in the Code for IBM i **Object Browser** (no checkout needed), and on checked-out files in the **Explorer**. The prompt appears in Bob's chat without being sent: review it, change it if you like, and press **Enter**. It names up to 25 members. A checked-out file inside the workspace is added as an `@/` mention, so Bob reads it straight away.
+
+The prompt is also left on the clipboard. If Bob's chat box stays empty, paste it there.
+
 **Everything Bob looks at is a read-only reference copy.** These are often production sources, so no tool changes the IBM i, and no tool can check a member out for change. A member Bob reads or finds as a dependency is brought into your checkout folder as a read-only reference copy, exactly like **Bring for Reference**: its file is read-only, and Upload, Merge Back and upload on save refuse it. A member you already checked out for change is used as it is and never overwritten. Every copy Bob brings is listed in the output panel and in Checked Out Members. When Local Change History is on and no work item is chosen yet, you're asked which work item the copies belong to.
 
 Security:

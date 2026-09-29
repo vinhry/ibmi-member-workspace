@@ -101,20 +101,35 @@ describe("extension manifest", () => {
 
   it("shows the Bob commands only in IBM Bob", () => {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
-      contributes: { commands: Array<{ command: string }>; menus: Record<string, Array<{ command: string; when?: string }>> };
+      contributes: {
+        commands: Array<{ command: string }>;
+        menus: Record<string, Array<{ command?: string; submenu?: string; when?: string }>>;
+      };
     };
+    const { menus } = manifest.contributes;
+    const investigateMenu = "ibmi-member-workspace.bobInvestigate";
+    const investigate = (menus[investigateMenu] ?? []).map((item) => item.command);
+    assert.deepEqual(investigate, ["ibmi-member-workspace.bob.analyzeRelationships", "ibmi-member-workspace.bob.explainProgram"]);
     const bobCommands = manifest.contributes.commands
       .map(({ command }) => command)
       .filter((command) => command.startsWith("ibmi-member-workspace.bob."));
-    assert.ok(bobCommands.length > 0);
     for (const command of bobCommands) {
-      const palette = manifest.contributes.menus.commandPalette.find((item) => item.command === command);
-      assert.equal(palette?.when, "ibmi-member-workspace:isBobIde", command);
-      for (const [menu, items] of Object.entries(manifest.contributes.menus)) {
-        if (menu !== "commandPalette") {
+      const palette = menus.commandPalette.find((item) => item.command === command);
+      // Right-click prompts need a selection, so they are never in the palette.
+      assert.equal(palette?.when, investigate.includes(command) ? "false" : "ibmi-member-workspace:isBobIde", command);
+      for (const [menu, items] of Object.entries(menus)) {
+        if (menu !== "commandPalette" && menu !== investigateMenu) {
           assert.ok(!items.some((item) => item.command === command), `${command} in ${menu}`);
         }
       }
+    }
+    // The submenu, and everything in it, shows only in Bob.
+    const placements = Object.entries(menus).flatMap(([menu, items]) =>
+      items.filter((item) => item.submenu === investigateMenu).map((item) => ({ menu, ...item }))
+    );
+    assert.deepEqual(placements.map((item) => item.menu).sort(), ["explorer/context", "view/item/context", "view/item/context"]);
+    for (const item of [...placements, ...menus[investigateMenu]]) {
+      assert.match(item.when ?? "", /(^|&& )ibmi-member-workspace:isBobIde( &&|$)/, JSON.stringify(item));
     }
     const properties = manifest.contributes as unknown as {
       configuration: { properties: Record<string, { default?: unknown; minimum?: unknown; maximum?: unknown }> };

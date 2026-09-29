@@ -17,12 +17,17 @@ import {
   describeFile,
   findSourceMembers,
   getSystemName,
+  onConnectionChange,
   searchSourceMembers,
   serviceProgramExports,
   whereUsed,
 } from "../codeForIBMi";
+import { BobPromptKind, PromptMember, buildBobPrompt } from "../bobPrompts";
 import { errorMessage } from "../errors";
-import { bringReferenceCopiesFor } from "./checkout";
+import type { BrowserNode } from "../memberInfo";
+import { resolveMemberSelections } from "../prompts";
+import { CheckedOutMember, TreeItemType, isReferenceCopy } from "../types";
+import { bringReferenceCopiesFor, memberInfoOf } from "./checkout";
 import { CommandContext } from "./context";
 import { lookupDependencies, searchLibraries } from "./dependencies";
 
@@ -58,6 +63,7 @@ export function registerBobCommands(ctx: CommandContext): void {
   let token: string | undefined;
 
   const tools = createTools(ctx);
+  registerInvestigateCommands(ctx);
 
   const enabled = () =>
     vscode.workspace.getConfiguration("ibmi-member-workspace").get<boolean>("bob.researchTools", true);
@@ -181,6 +187,125 @@ export function registerBobCommands(ctx: CommandContext): void {
         vscode.window.showErrorMessage(`Could not update .bob/mcp.json: ${errorMessage(err)}`);
       }
     })
+  );
+}
+
+/**
+ * "Bob, Investigate": right-click prompts that put a ready-made request into Bob's chat. The
+ * prompt is not sent; the user reviews it and presses Enter.
+ */
+function registerInvestigateCommands(ctx: CommandContext): void {
+  const { context, service, log } = ctx;
+
+  // The Explorer menu shows only on checked-out files.
+  const updateCheckoutPaths = () => {
+    const system = getSystemName();
+    const paths = system ? service.getEntriesForSystem(system).map((entry) => vscode.Uri.file(entry.localPath).fsPath) : [];
+    void vscode.commands.executeCommand("setContext", "ibmi-member-workspace:checkoutPaths", paths);
+  };
+  updateCheckoutPaths();
+  context.subscriptions.push(service.onDidChange(updateCheckoutPaths));
+  onConnectionChange(context, updateCheckoutPaths);
+
+  const investigate = (kind: BobPromptKind) => async (arg: unknown, all?: unknown[]) => {
+    const { members, notCheckedOut } = membersOf(ctx, arg, all);
+    if (members.length === 0) {
+      vscode.window.showWarningMessage(
+        notCheckedOut > 0 ? "Bob, Investigate works on checked-out members; none of the selected files is one." : "No member selected."
+      );
+      return;
+    }
+    const roots = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
+    const { text, skipped } = buildBobPrompt(kind, members, roots);
+    await sendToBobChat(text, log);
+    const leftOut = [
+      ...(skipped.length > 0 ? [`${skipped.length} member(s) over the limit of 25 were left out`] : []),
+      ...(notCheckedOut > 0 ? [`${notCheckedOut} selected file(s) that aren't checkouts were left out`] : []),
+    ];
+    if (leftOut.length > 0) {
+      void vscode.window.showWarningMessage(`${leftOut.join("; ")}.`);
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("ibmi-member-workspace.bob.analyzeRelationships", investigate("relationships")),
+    vscode.commands.registerCommand("ibmi-member-workspace.bob.explainProgram", investigate("explain"))
+  );
+}
+
+/** The members a right-click stands for: Explorer files, Checked Out Members items, or Object Browser nodes. */
+function membersOf(ctx: CommandContext, arg: unknown, all?: unknown[]): { members: PromptMember[]; notCheckedOut: number } {
+  const { service } = ctx;
+  const selections = all && all.length > 1 ? all : [arg];
+  if (arg instanceof vscode.Uri) {
+    const members: PromptMember[] = [];
+    let notCheckedOut = 0;
+    for (const uri of selections) {
+      const entry = uri instanceof vscode.Uri ? service.findEntryByLocalPath(uri.fsPath) : undefined;
+      if (entry) {
+        members.push(fromEntry(entry));
+      } else {
+        notCheckedOut++;
+      }
+    }
+    return { members, notCheckedOut };
+  }
+  if ((arg as { kind?: unknown } | undefined)?.kind === "member") {
+    return {
+      members: resolveMemberSelections(service, arg as TreeItemType, selections as TreeItemType[]).map(({ entry }) => fromEntry(entry)),
+      notCheckedOut: 0,
+    };
+  }
+  const system = getSystemName();
+  return {
+    members: selections.flatMap((node) => {
+      const info = memberInfoOf(node as BrowserNode);
+      if (!info) {
+        return [];
+      }
+      // A member already checked out is named with its local copy.
+      const entry = system ? service.findEntry(system, info.library, info.sourceFile, info.memberName) : undefined;
+      return [entry ? fromEntry(entry) : { library: info.library, sourceFile: info.sourceFile, member: info.memberName }];
+    }),
+    notCheckedOut: 0,
+  };
+}
+
+function fromEntry(entry: CheckedOutMember): PromptMember {
+  return {
+    library: entry.library,
+    sourceFile: entry.sourceFile,
+    member: entry.memberName,
+    localPath: entry.localPath,
+    readOnly: isReferenceCopy(entry),
+  };
+}
+
+/**
+ * Puts `prompt` in Bob's chat box without sending it. Bob documents no command that fills the box,
+ * so the prompt goes through the clipboard: focus Bob's input, then paste. It stays on the
+ * clipboard, so the user can paste it themselves if that didn't land.
+ */
+async function sendToBobChat(prompt: string, log: vscode.OutputChannel): Promise<void> {
+  await vscode.env.clipboard.writeText(prompt);
+  const commands = await vscode.commands.getCommands(true);
+  const focus = commands.find((command) => command.toLowerCase() === "bob.focus") ??
+    commands.find((command) => /^bob\b.*\.focus$/i.test(command));
+  if (!focus) {
+    log.appendLine("[bob] No Bob focus command found; the prompt was only copied to the clipboard.");
+    vscode.window.showInformationMessage("The prompt is on the clipboard. Open Bob's chat, paste it, review it, and press Enter.");
+    return;
+  }
+  try {
+    await vscode.commands.executeCommand(focus);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+    log.appendLine(`[bob] Prompt pasted into Bob's chat (${focus}).`);
+  } catch (err) {
+    log.appendLine(`[bob] Could not paste the prompt into Bob's chat (${focus}): ${errorMessage(err)}`);
+  }
+  vscode.window.showInformationMessage(
+    "The prompt is in Bob's chat: review it and press Enter. If the chat box is empty, paste it (it's on the clipboard)."
   );
 }
 

@@ -352,6 +352,7 @@ function sourceFileInfoOf(node: BrowserNode | undefined): SourceFileInfo | undef
   return extractSourceFileInfo(node, resourceUriOf(node));
 }
 
-function memberInfoOf(node: BrowserNode | undefined): MemberInfo | undefined {
+/** The member an Object Browser node stands for. */
+export function memberInfoOf(node: BrowserNode | undefined): MemberInfo | undefined {
   return extractMemberInfo(node, resourceUriOf(node));
 }
