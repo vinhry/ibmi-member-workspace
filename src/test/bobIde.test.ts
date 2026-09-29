@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   GENERATED_RULES_MARKER,
   MCP_SERVER_NAME,
+  bobPasteSteps,
   configuredEntry,
   excludeFromGit,
   isBobProduct,
@@ -140,6 +141,30 @@ describe("pickBobFocusCommand", () => {
   it("ignores commands of other extensions", () => {
     assert.equal(pickBobFocusCommand(["bobcat.focus", "foo.bob.focus", "bobcat.focusInput"]), undefined);
     assert.equal(pickBobFocusCommand([]), undefined);
+  });
+});
+
+describe("bobPasteSteps", () => {
+  const commands = (steps: ReturnType<typeof bobPasteSteps>) =>
+    steps.flatMap((step) => ("command" in step ? [step.command] : []));
+
+  it("focuses the editor before every run of the focus command, so a toggling command never hides a focused chat", () => {
+    const list = commands(bobPasteSteps("bob.focusInput", 600));
+    const runs = list.flatMap((command, index) => (command === "bob.focusInput" ? [index] : []));
+    assert.equal(runs.length, 2);
+    for (const index of runs) {
+      assert.equal(list[index - 1], "workbench.action.focusActiveEditorGroup");
+    }
+  });
+
+  it("waits for the chat to load after opening it, and pastes last", () => {
+    const steps = bobPasteSteps("bob.focus", 1500);
+    assert.deepEqual(steps.slice(0, 3), [
+      { command: "workbench.action.focusActiveEditorGroup" },
+      { command: "bob.focus" },
+      { waitMs: 1500 },
+    ]);
+    assert.equal(commands(steps).at(-1), "editor.action.clipboardPasteAction");
   });
 });
 

@@ -5,6 +5,7 @@ import {
   MCP_SERVER_NAME,
   GENERATED_RULES_MARKER,
   bobFocusCandidates,
+  bobPasteSteps,
   configuredEntry,
   excludeFromGit,
   mcpServerEntry,
@@ -432,9 +433,8 @@ async function sendToBobChat(prompt: string, log: vscode.OutputChannel): Promise
 }
 
 /**
- * Focuses Bob's chat and pastes the clipboard into it. The focus command runs twice, `loadWaitMs`
- * apart: the first opens a hidden chat, and the second puts the focus in its input box once it has
- * loaded. Returns the document the paste landed in instead, if any.
+ * Focuses Bob's chat and pastes the clipboard into it (see {@link bobPasteSteps}). Returns the
+ * document the paste landed in instead, if any.
  */
 async function pasteIntoBob(focus: string, prompt: string, loadWaitMs: number): Promise<vscode.TextDocument | undefined> {
   const firstLine = prompt.split("\n")[0];
@@ -445,15 +445,13 @@ async function pasteIntoBob(focus: string, prompt: string, loadWaitMs: number): 
     }
   });
   try {
-    // A paste that misses Bob's chat must land where it is seen and undone: in an editor, never in
-    // the terminal, where a multi-line prompt could run as shell commands.
-    await vscode.commands.executeCommand("workbench.action.focusActiveEditorGroup");
-    await vscode.commands.executeCommand(focus);
-    await delay(loadWaitMs);
-    await vscode.commands.executeCommand(focus);
-    await delay(150);
-    await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
-    await delay(150);
+    for (const step of bobPasteSteps(focus, loadWaitMs)) {
+      if ("command" in step) {
+        await vscode.commands.executeCommand(step.command);
+      } else {
+        await delay(step.waitMs);
+      }
+    }
   } finally {
     watch.dispose();
   }

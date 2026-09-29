@@ -22,6 +22,28 @@ export function pickBobFocusCommand(commands: readonly string[]): string | undef
     commands.find((command) => /^bob\b.*\.focus$/i.test(command));
 }
 
+export type BobPasteStep = { command: string } | { waitMs: number };
+
+/**
+ * The commands and waits that put the clipboard into Bob's chat. `focus` runs twice, `loadWaitMs`
+ * apart: the first opens a hidden chat, and the second puts the focus in its input box once it has
+ * loaded. The editor is focused before each run: a focus command that toggles would otherwise hide a
+ * chat that already has the focus. A paste that misses Bob's chat then lands in the editor, where it
+ * is seen and undone, never in the terminal, where a multi-line prompt could run as shell commands.
+ */
+export function bobPasteSteps(focus: string, loadWaitMs: number): BobPasteStep[] {
+  return [
+    { command: "workbench.action.focusActiveEditorGroup" },
+    { command: focus },
+    { waitMs: loadWaitMs },
+    { command: "workbench.action.focusActiveEditorGroup" },
+    { command: focus },
+    { waitMs: 150 },
+    { command: "editor.action.clipboardPasteAction" },
+    { waitMs: 150 },
+  ];
+}
+
 /** Bob commands that may focus its chat, listed in the log so the right one can be told apart. */
 export function bobFocusCandidates(commands: readonly string[]): string[] {
   return commands.filter((command) => /^bob\b.*(focus|chat|input)/i.test(command));
