@@ -284,6 +284,245 @@ export async function runCrossReferenceQuery(sql: string, bindings: string[]): P
   return requireConnection().runSQL(sql, { bindings });
 }
 
+/** Checks that `name` is a system object name, safe to put in a CL command. */
+function objectName(name: string, what: string): string {
+  const upper = name.trim().toUpperCase();
+  if (!OBJECT_NAME.test(upper)) {
+    throw new Error(`Not a valid ${what} name: ${name}`);
+  }
+  return upper;
+}
+
+export interface SourceMemberMatch extends SourceMemberRow {
+  text: string;
+  lastChanged: string;
+}
+
+/**
+ * Source members whose name matches `pattern` ("*" and "%" are wildcards) in `libraries`,
+ * optionally only of one source type or with text containing `text`.
+ */
+export async function searchSourceMembers(
+  pattern: string,
+  libraries: string[],
+  options: { sourceType?: string; sourceFile?: string; text?: string; limit: number }
+): Promise<SourceMemberMatch[]> {
+  if (libraries.length === 0) {
+    return [];
+  }
+  const bindings = [...libraries, pattern.trim().toUpperCase().replace(/\*/g, "%")];
+  let filters = "";
+  if (options.sourceType) {
+    filters += " AND UPPER(SOURCE_TYPE) = ?";
+    bindings.push(options.sourceType.trim().toUpperCase());
+  }
+  if (options.sourceFile) {
+    filters += " AND SYSTEM_TABLE_NAME = ?";
+    bindings.push(options.sourceFile.trim().toUpperCase());
+  }
+  if (options.text) {
+    filters += " AND UPPER(PARTITION_TEXT) LIKE ?";
+    bindings.push(`%${options.text.trim().toUpperCase()}%`);
+  }
+  const rows = await requireConnection().runSQL(
+    "SELECT RTRIM(SYSTEM_TABLE_SCHEMA) AS LIBRARY, RTRIM(SYSTEM_TABLE_NAME) AS SOURCE_FILE, " +
+    "RTRIM(SYSTEM_TABLE_MEMBER) AS MEMBER, COALESCE(RTRIM(CAST(SOURCE_TYPE AS VARCHAR(10))), '') AS SOURCE_TYPE, " +
+    "COALESCE(RTRIM(CAST(PARTITION_TEXT AS VARCHAR(50))), '') AS TEXT, " +
+    "COALESCE(VARCHAR_FORMAT(LAST_SOURCE_UPDATE_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'), '') AS LAST_CHANGED " +
+    "FROM QSYS2.SYSPARTITIONSTAT WHERE SOURCE_TYPE IS NOT NULL " +
+    `AND SYSTEM_TABLE_SCHEMA IN (${libraries.map(() => "?").join(", ")}) ` +
+    `AND SYSTEM_TABLE_MEMBER LIKE ?${filters} ` +
+    `ORDER BY SYSTEM_TABLE_MEMBER, SYSTEM_TABLE_SCHEMA FETCH FIRST ${Math.max(1, Math.floor(options.limit))} ROWS ONLY`,
+    { bindings }
+  );
+  return rows.map((row) => ({
+    library: String(row.LIBRARY),
+    sourceFile: String(row.SOURCE_FILE),
+    member: String(row.MEMBER),
+    sourceType: String(row.SOURCE_TYPE ?? ""),
+    text: String(row.TEXT ?? ""),
+    lastChanged: String(row.LAST_CHANGED ?? ""),
+  }));
+}
+
+export interface WhereUsedRow {
+  library: string;
+  program: string;
+  text: string;
+  /** The library the program names for the object, or "*LIBL". */
+  objectLibrary: string;
+  objectType: string;
+  /** For files: how the program uses it (DSPPGMREF's usage code, e.g. 1 input, 2 output, 4 update). */
+  usage?: string;
+}
+
+/**
+ * Programs and service programs in `library` that refer to object `name`, from DSPPGMREF of
+ * every program in the library. This reads all of them, so it can take a while on a big library.
+ */
+export async function whereUsed(name: string, library: string, objectType?: string): Promise<WhereUsedRow[]> {
+  const lib = objectName(library, "library");
+  const object = objectName(name, "object");
+  const connection = requireConnection();
+  await connection.runSQL(
+    `@QSYS/DSPPGMREF PGM(${lib}/*ALL) OUTPUT(*OUTFILE) OBJTYPE(*PGM *SRVPGM) ` +
+    "OUTFILE(QTEMP/IMWWHERE) OUTMBR(*FIRST *REPLACE)"
+  );
+  const bindings = [object];
+  let typeFilter = "";
+  if (objectType) {
+    typeFilter = " AND UPPER(WHOTYP) = ?";
+    bindings.push(objectType.trim().toUpperCase());
+  }
+  const rows = await connection.runSQL(
+    "SELECT WHLIB, WHPNAM, WHTEXT, WHLNAM, WHOTYP, WHFUSG FROM QTEMP.IMWWHERE " +
+    `WHERE UPPER(WHFNAM) = ?${typeFilter}`,
+    { bindings }
+  );
+  const found = new Map<string, WhereUsedRow>();
+  for (const row of rows) {
+    const usage = String(row.WHFUSG ?? "").trim();
+    const entry: WhereUsedRow = {
+      library: String(row.WHLIB ?? "").trim(),
+      program: String(row.WHPNAM ?? "").trim(),
+      text: String(row.WHTEXT ?? "").trim(),
+      objectLibrary: String(row.WHLNAM ?? "").trim() || "*LIBL",
+      objectType: String(row.WHOTYP ?? "").trim(),
+      ...(usage && usage !== "0" ? { usage } : {}),
+    };
+    found.set(`${entry.library}/${entry.program}/${entry.objectType}`, entry);
+  }
+  return [...found.values()];
+}
+
+export interface FileDescription {
+  library: string;
+  systemName: string;
+  sqlName: string;
+  /** SYSTABLES TABLE_TYPE: T table, P physical file, L logical file, V view, A alias, M materialized query table. */
+  type: string;
+  text: string;
+  columns: Array<{
+    name: string;
+    systemName: string;
+    type: string;
+    length: number;
+    scale?: number;
+    nullable: boolean;
+    text: string;
+  }>;
+  /** Logical files, views and indexes built over the file (DSPDBR); absent when that could not be read. */
+  dependents?: Array<{ library: string; name: string; type: string }>;
+  notes: string[];
+}
+
+/** A file, table or view: its columns and what depends on it. The first match in `libraries` wins. */
+export async function describeFile(name: string, libraries: string[]): Promise<FileDescription | undefined> {
+  const connection = requireConnection();
+  const upper = name.trim().toUpperCase();
+  if (libraries.length === 0) {
+    return undefined;
+  }
+  const tables = await connection.runSQL(
+    "SELECT RTRIM(SYSTEM_TABLE_SCHEMA) AS LIBRARY, RTRIM(SYSTEM_TABLE_NAME) AS SYSTEM_NAME, TABLE_NAME, " +
+    "TABLE_TYPE, COALESCE(TABLE_TEXT, '') AS TEXT FROM QSYS2.SYSTABLES " +
+    `WHERE SYSTEM_TABLE_SCHEMA IN (${libraries.map(() => "?").join(", ")}) ` +
+    "AND (SYSTEM_TABLE_NAME = ? OR TABLE_NAME = ?) AND FILE_TYPE = 'D'",
+    { bindings: [...libraries, upper, upper] }
+  );
+  const order = libraries.map((library) => library.toUpperCase());
+  const [table] = tables.sort((a, b) =>
+    order.indexOf(String(a.LIBRARY).toUpperCase()) - order.indexOf(String(b.LIBRARY).toUpperCase())
+  );
+  if (!table) {
+    return undefined;
+  }
+  const library = String(table.LIBRARY);
+  const systemName = String(table.SYSTEM_NAME);
+  const columns = await connection.runSQL(
+    "SELECT COLUMN_NAME, RTRIM(SYSTEM_COLUMN_NAME) AS SYSTEM_COLUMN_NAME, DATA_TYPE, LENGTH, NUMERIC_SCALE, " +
+    "IS_NULLABLE, COALESCE(COLUMN_TEXT, '') AS TEXT FROM QSYS2.SYSCOLUMNS " +
+    "WHERE SYSTEM_TABLE_SCHEMA = ? AND SYSTEM_TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+    { bindings: [library, systemName] }
+  );
+  const description: FileDescription = {
+    library,
+    systemName,
+    sqlName: String(table.TABLE_NAME ?? "").trim(),
+    type: String(table.TABLE_TYPE ?? "").trim(),
+    text: String(table.TEXT ?? "").trim(),
+    columns: columns.map((column) => {
+      const scale = column.NUMERIC_SCALE;
+      return {
+        name: String(column.COLUMN_NAME ?? "").trim(),
+        systemName: String(column.SYSTEM_COLUMN_NAME ?? "").trim(),
+        type: String(column.DATA_TYPE ?? "").trim(),
+        length: Number(column.LENGTH ?? 0),
+        ...(scale !== null && scale !== undefined ? { scale: Number(scale) } : {}),
+        nullable: String(column.IS_NULLABLE ?? "").trim() === "Y",
+        text: String(column.TEXT ?? "").trim(),
+      };
+    }),
+    notes: [],
+  };
+  try {
+    await connection.runSQL(
+      `@QSYS/DSPDBR FILE(${objectName(library, "library")}/${objectName(systemName, "file")}) ` +
+      "OUTPUT(*OUTFILE) OUTFILE(QTEMP/IMWDBR) OUTMBR(*FIRST *REPLACE)"
+    );
+    // Column names vary a little between releases, so they are looked up rather than selected by name.
+    const rows = await connection.runSQL("SELECT * FROM QTEMP.IMWDBR");
+    const column = (row: Record<string, unknown>, ...names: string[]) => {
+      const key = Object.keys(row).find((candidate) => names.includes(candidate.toUpperCase()));
+      return key === undefined ? "" : String(row[key] ?? "").trim();
+    };
+    if (rows.length > 0 && !Object.keys(rows[0]).some((key) => key.toUpperCase() === "WHREFI")) {
+      description.notes.push(`Dependent files could not be read: unexpected DSPDBR columns ${Object.keys(rows[0]).join(", ")}`);
+    }
+    description.dependents = rows.flatMap((row) => {
+      const dependent = column(row, "WHREFI");
+      return dependent
+        ? [{ library: column(row, "WHRELI"), name: dependent, type: column(row, "WHTYPE") }]
+        : [];
+    });
+  } catch (err) {
+    description.notes.push(`Dependent files could not be read: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return description;
+}
+
+export interface ServiceProgramExport {
+  symbol: string;
+  usage: string;
+}
+
+/** The procedures and data a service program exports; the first match in `libraries` wins. */
+export async function serviceProgramExports(
+  name: string,
+  libraries: string[]
+): Promise<{ library: string; name: string; exports: ServiceProgramExport[] } | undefined> {
+  const program = objectName(name, "service program");
+  if (libraries.length === 0) {
+    return undefined;
+  }
+  const rows = await requireConnection().runSQL(
+    "SELECT PROGRAM_LIBRARY, PROGRAM_NAME, CAST(SYMBOL_NAME AS VARCHAR(1024)) AS SYMBOL, SYMBOL_USAGE " +
+    "FROM QSYS2.PROGRAM_EXPORT_IMPORT_INFO WHERE OBJECT_TYPE = '*SRVPGM' AND PROGRAM_NAME = ? " +
+    `AND PROGRAM_LIBRARY IN (${libraries.map(() => "?").join(", ")})`,
+    { bindings: [program, ...libraries] }
+  );
+  const order = libraries.map((library) => library.toUpperCase());
+  const byLibrary = new Map<string, ServiceProgramExport[]>();
+  for (const row of rows) {
+    const library = String(row.PROGRAM_LIBRARY ?? "").trim().toUpperCase();
+    const list = byLibrary.get(library) ?? [];
+    list.push({ symbol: String(row.SYMBOL ?? "").trim(), usage: String(row.SYMBOL_USAGE ?? "").trim() });
+    byLibrary.set(library, list);
+  }
+  const library = order.find((candidate) => byLibrary.has(candidate));
+  return library ? { library, name: program, exports: byLibrary.get(library)! } : undefined;
+}
+
 export async function listSourceFileMembers(
   library: string,
   sourceFile: string

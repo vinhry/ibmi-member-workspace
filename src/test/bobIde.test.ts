@@ -1,0 +1,158 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  MCP_SERVER_NAME,
+  configuredEntry,
+  excludeFromGit,
+  isBobProduct,
+  mcpServerEntry,
+  mergeMcpConfig,
+  readFileBelow,
+  writeFileBelow,
+} from "../bobIde";
+
+function tempFolder(t: { after: (fn: () => void) => void }): string {
+  const folder = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-bob-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  return folder;
+}
+
+/** Creates a link, or skips the test where links need Developer Mode (Windows). */
+function linkOrSkip(t: { skip: (message: string) => void }, target: string, link: string, type: "file" | "dir"): boolean {
+  try {
+    symlinkSync(target, link, type === "dir" ? "junction" : "file");
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EPERM") {
+      t.skip("creating links needs Developer Mode on Windows");
+      return false;
+    }
+    throw err;
+  }
+}
+
+describe("isBobProduct", () => {
+  it("recognizes IBM Bob and nothing else", () => {
+    assert.equal(isBobProduct("IBM Bob", "bob"), true);
+    assert.equal(isBobProduct("Bob", "vscode"), true);
+    assert.equal(isBobProduct("Bob - Insiders", "bob-insiders"), true);
+    assert.equal(isBobProduct("Something", "ibm-bob"), true);
+    assert.equal(isBobProduct("Visual Studio Code", "vscode"), false);
+    assert.equal(isBobProduct("Visual Studio Code - Insiders", "vscode-insiders"), false);
+    assert.equal(isBobProduct("Cursor", "cursor"), false);
+    assert.equal(isBobProduct("VSCodium", "vscodium"), false);
+    assert.equal(isBobProduct("Bobcat Editor", "bobcat"), false);
+  });
+});
+
+describe("mergeMcpConfig", () => {
+  const entry = mcpServerEntry(4321, "secret", ["list_checkouts"]);
+
+  it("creates the file when there is none", () => {
+    assert.deepEqual(JSON.parse(mergeMcpConfig(undefined, entry)), {
+      mcpServers: {
+        [MCP_SERVER_NAME]: {
+          url: "http://127.0.0.1:4321/mcp",
+          headers: { Authorization: "Bearer secret" },
+          alwaysAllow: ["list_checkouts"],
+        },
+      },
+    });
+  });
+
+  it("keeps other servers, other settings, and the user's own options for the entry", () => {
+    const existing = JSON.stringify({
+      other: true,
+      mcpServers: {
+        instana: { command: "npx", args: ["instana-mcp"] },
+        [MCP_SERVER_NAME]: { url: "http://127.0.0.1:1/mcp", disabled: true },
+      },
+    });
+    const merged = JSON.parse(mergeMcpConfig(existing, entry));
+    assert.equal(merged.other, true);
+    assert.deepEqual(merged.mcpServers.instana, { command: "npx", args: ["instana-mcp"] });
+    assert.equal(merged.mcpServers[MCP_SERVER_NAME].disabled, true);
+    assert.equal(merged.mcpServers[MCP_SERVER_NAME].url, "http://127.0.0.1:4321/mcp");
+  });
+
+  it("removes only this extension's entry", () => {
+    const existing = mergeMcpConfig(JSON.stringify({ mcpServers: { instana: { url: "x" } } }), entry);
+    assert.deepEqual(JSON.parse(mergeMcpConfig(existing, undefined)), { mcpServers: { instana: { url: "x" } } });
+  });
+
+  it("refuses a file it can't merge instead of replacing it", () => {
+    assert.throws(() => mergeMcpConfig("[]", entry), /JSON object/);
+    assert.throws(() => mergeMcpConfig(JSON.stringify({ mcpServers: [] }), entry), /not an object/);
+    assert.throws(() => mergeMcpConfig("{ not json", entry));
+  });
+
+  it("finds the configured entry", () => {
+    assert.equal(configuredEntry(undefined), undefined);
+    assert.equal(configuredEntry("{ broken"), undefined);
+    assert.equal(configuredEntry(mergeMcpConfig(undefined, entry))?.url, "http://127.0.0.1:4321/mcp");
+  });
+});
+
+describe("writeFileBelow", () => {
+  it("creates folders and replaces the file", (t) => {
+    const root = tempFolder(t);
+    const target = join(root, ".bob", "mcp.json");
+    writeFileBelow(root, target, "one");
+    writeFileBelow(root, target, "two");
+    assert.equal(readFileSync(target, "utf-8"), "two");
+    assert.equal(readFileBelow(root, target), "two");
+    if (process.platform !== "win32") {
+      assert.equal(statSync(target).mode & 0o777, 0o600);
+    }
+  });
+
+  it("never writes through a linked folder", (t) => {
+    const root = tempFolder(t);
+    const outside = tempFolder(t);
+    if (!linkOrSkip(t, outside, join(root, ".bob"), "dir")) {
+      return;
+    }
+    assert.throws(() => writeFileBelow(root, join(root, ".bob", "mcp.json"), "x"), /link/);
+    assert.equal(existsSync(join(outside, "mcp.json")), false);
+  });
+
+  it("never reads or writes through a linked file", (t) => {
+    const root = tempFolder(t);
+    const outside = join(tempFolder(t), "target.json");
+    writeFileSync(outside, "{}");
+    mkdirSync(join(root, ".bob"));
+    if (!linkOrSkip(t, outside, join(root, ".bob", "mcp.json"), "file")) {
+      return;
+    }
+    assert.throws(() => readFileBelow(root, join(root, ".bob", "mcp.json")), /link/);
+    assert.throws(() => writeFileBelow(root, join(root, ".bob", "mcp.json"), "x"), /link/);
+    assert.equal(readFileSync(outside, "utf-8"), "{}");
+  });
+
+  it("refuses a path outside the root", (t) => {
+    const root = tempFolder(t);
+    assert.throws(() => writeFileBelow(root, join(root, "..", "elsewhere.json"), "x"), /outside/);
+  });
+});
+
+describe("excludeFromGit", () => {
+  it("adds the pattern to .git/info/exclude once, leaving .gitignore alone", (t) => {
+    const root = tempFolder(t);
+    mkdirSync(join(root, ".git", "info"), { recursive: true });
+    writeFileSync(join(root, ".git", "info", "exclude"), "# existing");
+    assert.equal(excludeFromGit(root, "/.bob/mcp.json"), true);
+    assert.equal(excludeFromGit(root, "/.bob/mcp.json"), true);
+    assert.equal(readFileSync(join(root, ".git", "info", "exclude"), "utf-8"), "# existing\n/.bob/mcp.json\n");
+    assert.equal(existsSync(join(root, ".gitignore")), false);
+  });
+
+  it("does nothing outside a repository or in a worktree", (t) => {
+    const root = tempFolder(t);
+    assert.equal(excludeFromGit(root, "/.bob/mcp.json"), false);
+    writeFileSync(join(root, ".git"), "gitdir: /elsewhere");
+    assert.equal(excludeFromGit(root, "/.bob/mcp.json"), false);
+  });
+});

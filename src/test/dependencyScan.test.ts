@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { RawReference, scanReferences } from "../dependencyScan";
+import { RawReference, scanDefinedProcedures, scanReferences } from "../dependencyScan";
 
 /** The parts of a reference that matter to resolution. */
 function brief(refs: RawReference[]) {
@@ -130,6 +130,150 @@ describe("scanReferences: RPG file declarations", () => {
   });
 });
 
+/**
+ * A fixed-form D- or P-spec: the name in columns 7-21, the type (PR, or B/E for a procedure)
+ * from column 24, and keywords from column 44. A name starting with "*" makes a comment line.
+ */
+function spec(form: "D" | "P", name: string, type: string, keywords: string): string {
+  return `     ${form}${name.padEnd(15)}  ${type.padEnd(2)}${" ".repeat(18)}${keywords}`;
+}
+
+describe("scanReferences: RPG prototypes", () => {
+  it("reads EXTPGM as a called program and EXTPROC as a bound procedure", () => {
+    const source = [
+      "**FREE",
+      "dcl-pr qcmdexc extpgm('QCMDEXC');",
+      "  cmd char(3000) const;",
+      "end-pr;",
+      "dcl-pr getCust extproc('CUST_get');",
+      "dcl-pr ordTotal extproc(*dclcase);",
+      "dcl-pr ORDENT extpgm;",
+      "dcl-pr dateUtil;",
+      "dcl-pr strlen extproc(*cwiden : 'strlen');",
+      "dcl-pr dynamic extpgm(pgmName);",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "sqlrpgle")), [
+      "program|||QCMDEXC|",
+      "procedure|||CUST_get|",
+      "procedure|||ordTotal|",
+      "program|||ORDENT|",
+      "procedure|||DATEUTIL|",
+      "procedure|||strlen|",
+    ]);
+  });
+
+  it("reads fixed-form PR specs, with long names and keyword continuation lines", () => {
+    const source = [
+      spec("D", "Cmd", "PR", "ExtPgm('QCMDEXC')"),
+      spec("D", "command", "", "const"),
+      "     DgetCustomerName...",
+      spec("D", "", "PR", ""),
+      spec("D", "", "", "ExtProc('CUST_name')"),
+      spec("D", "*Old", "PR", "ExtPgm('OLDPGM')"),
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "rpgle")), [
+      "program|||QCMDEXC|",
+      "procedure|||CUST_name|",
+    ]);
+  });
+
+  it("leaves out prototypes of procedures the member defines", () => {
+    const source = [
+      "**FREE",
+      "dcl-pr localProc;",
+      "end-pr;",
+      "dcl-pr external extproc('EXT');",
+      "dcl-proc localProc;",
+      "end-proc;",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "rpgle")), ["procedure|||EXT|"]);
+  });
+});
+
+describe("scanDefinedProcedures", () => {
+  it("lists free and fixed-form procedures with their EXPORT flag", () => {
+    const source = [
+      spec("P", "getName", "B", "Export"),
+      spec("P", "getName", "E", ""),
+      "     PveryLongProcedureName...",
+      spec("P", "", "B", ""),
+      spec("P", "", "E", ""),
+      "       dcl-proc calcTotal export;",
+      "       end-proc;",
+      "       dcl-proc helper;",
+      "       end-proc;",
+    ].join("\n");
+    assert.deepEqual(scanDefinedProcedures(source, "rpgle"), [
+      { name: "GETNAME", exported: true, line: 1 },
+      { name: "VERYLONGPROCEDURENAME", exported: false, line: 4 },
+      { name: "CALCTOTAL", exported: true, line: 6 },
+      { name: "HELPER", exported: false, line: 8 },
+    ]);
+  });
+
+  it("finds nothing in other source types", () => {
+    assert.deepEqual(scanDefinedProcedures("dcl-proc x;", "clle"), []);
+  });
+});
+
+describe("scanReferences: embedded SQL", () => {
+  it("reads the tables a free-form statement uses, over several lines", () => {
+    const source = [
+      "**FREE",
+      "exec sql select c.name, o.total into :name, :total",
+      "  from prodlib.custmast c",
+      "  join orders o on o.cust = c.cust -- comment with FROM x",
+      "  where c.cust = :cust;",
+      "exec sql insert into audit_log values(:msg);",
+      "exec sql update prodlib/ordhdr set status = 'FROM Y' where id = :id;",
+      "exec sql delete from session.work;",
+      "exec sql call prodlib.post_order(:id);",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "sqlrpgle")), [
+      "table|PRODLIB||CUSTMAST|",
+      "table|||ORDERS|",
+      "table|||AUDIT_LOG|",
+      "table|PRODLIB||ORDHDR|",
+      "procedure|PRODLIB||POST_ORDER|",
+    ]);
+  });
+
+  it("reads comma-separated FROM lists and skips CTE names and table functions", () => {
+    const source = [
+      "**FREE",
+      "exec sql declare c1 cursor for",
+      "  with recent (id) as (select id from orders where dt > current date - 7 days),",
+      "       big as (select id from recent)",
+      "  select * from big, custmast as c, itemmast i, table(qsys2.object_statistics('X', '*PGM')) x",
+      "  for read only;",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "sqlrpgle")), [
+      "table|||ORDERS|",
+      "table|||CUSTMAST|",
+      "table|||ITEMMAST|",
+    ]);
+  });
+
+  it("reads fixed-form C/EXEC SQL blocks and skips INCLUDE", () => {
+    const source = [
+      "     C/EXEC SQL",
+      "     C+ SELECT COUNT(*) INTO :CNT",
+      "     C*  FROM COMMENTED",
+      "     C+   FROM ORDDTL",
+      "     C/END-EXEC",
+      "     C/EXEC SQL INCLUDE SQLCA",
+      "     C/END-EXEC",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "sqlrpgle")), ["table|||ORDDTL|"]);
+  });
+
+  it("scans a long run of unterminated statements quickly", () => {
+    const started = Date.now();
+    scanReferences(["**FREE", ...Array(50000).fill("exec sql select a from t,")].join("\n"), "sqlrpgle");
+    assert.ok(Date.now() - started < 2000);
+  });
+});
+
 describe("scanReferences: CL", () => {
   it("takes the program name, never the library", () => {
     const source = [
@@ -150,15 +294,28 @@ describe("scanReferences: CL", () => {
     ]);
   });
 
-  it("skips dynamic calls, CALLPRC, comments, and quoted text", () => {
+  it("skips dynamic calls, comments, and quoted text", () => {
     const source = [
       "  CALL PGM(&PGMNAME)",
       "  CALL &PGM",
-      "  CALLPRC PRC(MYPROC)",
+      "  CALLPRC PRC(&PROC)",
       "  /* CALL PGM(OLDPGM) */",
       "  SNDPGMMSG MSG('CALL failed')",
     ].join("\n");
     assert.deepEqual(scanReferences(source, "clp"), []);
+  });
+
+  it("reads CALLPRC as a bound procedure, keeping a quoted name's case", () => {
+    const source = [
+      "  CALLPRC PRC(MYPROC)",
+      "  CALLPRC PRC('getCustomer') PARM(&CUST)",
+      "  CALLPRC 'Other'",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "clle")), [
+      "procedure|||MYPROC|",
+      "procedure|||getCustomer|",
+      "procedure|||Other|",
+    ]);
   });
 
   it("follows continuation lines and calls inside SBMJOB", () => {

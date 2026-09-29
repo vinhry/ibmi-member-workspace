@@ -38,7 +38,44 @@ const KINDS: ReadonlyArray<{ kind: ReferenceKind; group: string; singular: strin
   { kind: "copybook", group: "Copybooks", singular: "copybook", plural: "copybooks" },
   { kind: "program", group: "Called programs", singular: "called program", plural: "called programs" },
   { kind: "file", group: "Referenced files", singular: "referenced file", plural: "referenced files" },
+  { kind: "table", group: "SQL tables and views", singular: "SQL table", plural: "SQL tables" },
+  // Procedures are counted but never offered: they have no member of their own.
+  { kind: "procedure", group: "Bound procedures", singular: "bound procedure", plural: "bound procedures" },
 ];
+
+export interface DependencyLookup {
+  references: RawReference[];
+  outcomes: ProviderOutcome[];
+  /** Resolution of every reference except procedures, which are never members. */
+  resolution: Resolution;
+  /** Bound procedures the member calls, by name. */
+  procedures: RawReference[];
+  /** The libraries searched, in order. */
+  libraries: string[];
+}
+
+/** Asks every dependency provider available on `system` what the checked-out `entry` uses. */
+export async function lookupDependencies(
+  ctx: CommandContext,
+  system: string,
+  entry: CheckedOutMember
+): Promise<DependencyLookup> {
+  const libraries = searchLibraries();
+  const run = await runProviders(
+    activeProviders(ctx, system),
+    entry,
+    { system, libraries },
+    ctx.dependencyAvailability
+  );
+  const procedures = run.references.filter((ref) => ref.kind === "procedure");
+  const members = run.references.filter((ref) => ref.kind !== "procedure");
+  const lookup = members.filter((ref) => !ref.unresolvable && MEMBER_NAME.test(ref.member));
+  const rows = await findSourceMembers(
+    [...new Set(lookup.map((ref) => ref.member))],
+    librariesToSearch(lookup, libraries)
+  );
+  return { ...run, procedures, resolution: resolveReferences(members, rows, libraries), libraries };
+}
 
 /** A valid member name; anything else (e.g. an IFS path) can't be looked up. */
 const MEMBER_NAME = /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/;
@@ -111,27 +148,13 @@ export async function reviewDependencies(ctx: CommandContext, entry: CheckedOutM
     return;
   }
 
-  const libraryOrder = searchLibraries();
   let references: RawReference[];
   let outcomes: ProviderOutcome[];
   let resolution: Resolution;
   try {
     ({ references, outcomes, resolution } = await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: `Looking up the dependencies of ${memberPath}...` },
-      async () => {
-        const run = await runProviders(
-          activeProviders(ctx, system),
-          entry,
-          { system, libraries: libraryOrder },
-          ctx.dependencyAvailability
-        );
-        const lookup = run.references.filter((ref) => !ref.unresolvable && MEMBER_NAME.test(ref.member));
-        const rows = await findSourceMembers(
-          [...new Set(lookup.map((ref) => ref.member))],
-          librariesToSearch(lookup, libraryOrder)
-        );
-        return { ...run, resolution: resolveReferences(run.references, rows, libraryOrder) };
-      }
+      () => lookupDependencies(ctx, system, entry)
     ));
   } catch (err) {
     log.appendLine(`[dependencies] Lookup failed for ${memberPath}: ${errorMessage(err)}`);
@@ -154,6 +177,9 @@ export async function reviewDependencies(ctx: CommandContext, entry: CheckedOutM
 
   const items = buildItems(ctx, system, resolution);
   if (items.length === 0) {
+    if (resolution.unresolved.length === 0) {
+      vscode.window.showInformationMessage(`${memberPath} uses ${describeCounts(references)}, with no source members to bring.`);
+    }
     reportUnresolved(ctx, memberPath, resolution.unresolved);
     return;
   }
@@ -227,7 +253,7 @@ function logOutcomes(ctx: CommandContext, memberPath: string, outcomes: Provider
 }
 
 /** The configured libraries, or the connection's library list. */
-function searchLibraries(): string[] {
+export function searchLibraries(): string[] {
   const configured = vscode.workspace
     .getConfiguration("ibmi-member-workspace")
     .get<string[]>("dependencies.searchLibraries", [])

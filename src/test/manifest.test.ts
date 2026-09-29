@@ -94,9 +94,32 @@ describe("extension manifest", () => {
   it("reads settings that send code to the IBM i or run queries from user settings only", () => {
     const properties = readManifest().contributes.configuration.properties as Record<string, { scope?: string }>;
 
-    for (const setting of ["autoUploadOnSave", "dependencies.crossReferences"]) {
+    for (const setting of ["autoUploadOnSave", "dependencies.crossReferences", "bob.researchTools"]) {
       assert.equal(properties[`ibmi-member-workspace.${setting}`].scope, "application", setting);
     }
+  });
+
+  it("shows the Bob commands only in IBM Bob", () => {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      contributes: { commands: Array<{ command: string }>; menus: Record<string, Array<{ command: string; when?: string }>> };
+    };
+    const bobCommands = manifest.contributes.commands
+      .map(({ command }) => command)
+      .filter((command) => command.startsWith("ibmi-member-workspace.bob."));
+    assert.ok(bobCommands.length > 0);
+    for (const command of bobCommands) {
+      const palette = manifest.contributes.menus.commandPalette.find((item) => item.command === command);
+      assert.equal(palette?.when, "ibmi-member-workspace:isBobIde", command);
+      for (const [menu, items] of Object.entries(manifest.contributes.menus)) {
+        if (menu !== "commandPalette") {
+          assert.ok(!items.some((item) => item.command === command), `${command} in ${menu}`);
+        }
+      }
+    }
+    // The server and its commands are only set up behind the Bob check.
+    const extension = readFileSync(join(srcPath, "extension.ts"), "utf8");
+    assert.match(extension, /if \(inBob\) \{[\s\S]{0,200}?registerBobCommands\(ctx\);/);
+    assert.equal(extension.match(/registerBobCommands\(/g)?.length, 1);
   });
 
   it("packages only the files the extension needs", async () => {

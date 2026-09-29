@@ -370,8 +370,14 @@ export function crossReferenceKind(value: unknown): ReferenceKind | undefined {
   if (["PROGRAM", "PGM", "SRVPGM", "SERVICE PROGRAM"].includes(kind)) {
     return "program";
   }
-  if (["FILE", "TABLE", "VIEW", "PF", "LF", "DSPF", "PRTF"].includes(kind)) {
+  if (["FILE", "PF", "LF", "DSPF", "PRTF"].includes(kind)) {
     return "file";
+  }
+  if (["TABLE", "VIEW", "INDEX"].includes(kind)) {
+    return "table";
+  }
+  if (["PROCEDURE", "PROC", "FUNCTION", "FUNC", "UDF", "UDTF"].includes(kind)) {
+    return "procedure";
   }
   return undefined;
 }

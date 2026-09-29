@@ -3,6 +3,7 @@ import { CheckoutService } from "./checkoutService";
 import { CheckoutTreeProvider } from "./checkoutTreeProvider";
 import { MergeHandler, mergeDocumentKey } from "./mergeHandler";
 import { GitService } from "./gitService";
+import { isBobProduct } from "./bobIde";
 import { getSystemName, onConnectionChange } from "./codeForIBMi";
 import { errorMessage } from "./errors";
 import { ProviderAvailabilityCache } from "./dependencySources";
@@ -20,6 +21,7 @@ import { registerCompareCommands } from "./commands/compare";
 import { registerDependencyCommands } from "./commands/dependencies";
 import { offerLegacyRepositoryRepair, registerGitCommands } from "./commands/git";
 import { registerAutoUpload } from "./commands/autoUpload";
+import { registerBobCommands } from "./commands/bob";
 import { registerSyncCommands } from "./commands/sync";
 import { registerViewCommands } from "./commands/view";
 
@@ -219,6 +221,14 @@ export async function activate(
   registerDependencyCommands(ctx);
   registerViewCommands(ctx);
   registerGitCommands(ctx);
+
+  // Bob's agent is the only user of the research tools; VS Code gets neither the server nor its commands.
+  const inBob = isBobProduct(vscode.env.appName, vscode.env.uriScheme);
+  void vscode.commands.executeCommand("setContext", "ibmi-member-workspace:isBobIde", inBob);
+  if (inBob) {
+    log.appendLine(`[bob] Running in ${vscode.env.appName}`);
+    registerBobCommands(ctx);
+  }
 
   void offerCheckoutFolderSetup(ctx).catch((err) => {
     log.appendLine(`[setup] Could not show checkout folder setup: ${errorMessage(err)}`);

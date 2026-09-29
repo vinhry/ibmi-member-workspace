@@ -94,7 +94,11 @@ function typeMatches(ref: RawReference, sourceType: string): boolean {
     case "program":
       return PROGRAM_SOURCE_TYPES.has(sourceType);
     case "file":
+    case "table":
       return FILE_SOURCE_TYPES.has(sourceType);
+    case "procedure":
+      // A procedure lives inside a module's source, never in a member named after it.
+      return false;
     default:
       return true;
   }

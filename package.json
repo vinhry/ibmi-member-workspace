@@ -252,10 +252,28 @@
         "title": "View Local History",
         "category": "IBM i Member Workspace",
         "icon": "$(history)"
+      },
+      {
+        "command": "ibmi-member-workspace.bob.connectResearchTools",
+        "title": "Connect Bob to IBM i Research Tools",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.bob.disconnectResearchTools",
+        "title": "Disconnect Bob from IBM i Research Tools",
+        "category": "IBM i Member Workspace"
       }
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "ibmi-member-workspace.bob.connectResearchTools",
+          "when": "ibmi-member-workspace:isBobIde"
+        },
+        {
+          "command": "ibmi-member-workspace.bob.disconnectResearchTools",
+          "when": "ibmi-member-workspace:isBobIde"
+        },
         {
           "command": "ibmi-member-workspace.checkoutMember",
           "when": "false"
@@ -577,10 +595,16 @@
           "default": false,
           "description": "Keep local checkpoints organized by work item in one Git repository per IBM i system directory. Does not upload or push changes."
         },
+        "ibmi-member-workspace.bob.researchTools": {
+          "type": "boolean",
+          "scope": "application",
+          "default": true,
+          "markdownDescription": "**IBM Bob only.** Offer IBM i research tools to Bob's agent: what a program uses, what uses it, file layouts and source, through a local MCP server that only this computer can reach. Members Bob looks at are brought as read-only reference copies. Run **Connect Bob to IBM i Research Tools** to add the server to a folder's `.bob/mcp.json`. Has no effect in VS Code. Only user settings are read, so a workspace can't turn it on."
+        },
         "ibmi-member-workspace.dependencies.suggestAfterCheckout": {
           "type": "boolean",
           "default": true,
-          "description": "After checking out a single member, offer to review the copybooks, called programs, and referenced files it uses. Nothing is downloaded until you choose."
+          "description": "After checking out a single member, offer to review the copybooks, called programs, referenced files, and SQL tables it uses. Nothing is downloaded until you choose."
         },
         "ibmi-member-workspace.dependencies.searchLibraries": {
           "type": "array",

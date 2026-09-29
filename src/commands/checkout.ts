@@ -12,7 +12,8 @@ import {
   extractSourceFileInfo,
 } from "../memberInfo";
 import { countLocalChanges, saveDirtyLocalFiles } from "../prompts";
-import { CheckedOutMember } from "../types";
+import { ReferenceCopyResult, bringReferenceCopies } from "../referenceCopies";
+import { CheckedOutMember, systemKey } from "../types";
 import { CommandContext } from "./context";
 import { suggestDependencies } from "./dependencies";
 import { ensureWorkItemForCheckout } from "./git";
@@ -277,6 +278,52 @@ export async function checkoutMembersBatch(
       }
     }
   );
+}
+
+/**
+ * Brings members as read-only reference copies without asking anything per member, for tools
+ * that research source (Bob's agent). Only reference copies are ever created: members already
+ * checked out, for change or for reference, are left as they are. The work-item choice is
+ * still the user's; if they back out, nothing is brought.
+ */
+export async function bringReferenceCopiesFor(
+  ctx: CommandContext,
+  system: string,
+  members: MemberInfo[]
+): Promise<ReferenceCopyResult[]> {
+  const { service, log } = ctx;
+  if (members.length === 0) {
+    return [];
+  }
+  const connected = getSystemName();
+  if (!connected || systemKey(connected) !== systemKey(system)) {
+    throw new Error(`Not connected to ${system}.`);
+  }
+  if (!service.getCheckoutRoot()) {
+    throw new Error("No checkout folder is set for this workspace. Ask the user to run Configure Checkout Folder.");
+  }
+  if (!(await ensureWorkItemForCheckout(ctx, system))) {
+    throw new Error("The user did not choose a work item, so no reference copies were brought.");
+  }
+  const downloaded: string[] = [];
+  return service.runBatch(async () => {
+    const results = await bringReferenceCopies(
+      {
+        findEntry: (library, sourceFile, memberName) => service.findEntry(system, library, sourceFile, memberName),
+        checkoutMember: (library, sourceFile, memberName, extension, options) =>
+          service.checkoutMember(library, sourceFile, memberName, extension, options),
+        log: (message) => log.appendLine(message),
+      },
+      members,
+      downloaded
+    );
+    await service.saveBatchCheckpoint(
+      system,
+      downloaded,
+      `reference: ${describeBatch(members, downloaded.length)} from ${system}`
+    );
+    return results;
+  });
 }
 
 /** "LIB/SRC(MEMBER)", "3 members of LIB/SRC", or "3 members" for a checkpoint message. */

@@ -95,8 +95,8 @@ Find Dependencies asks up to three kinds of sources. Every IBM i is different, s
 
 | Source type | What is found |
 |---|---|
-| RPGLE, SQLRPGLE, RPGLEINC, RPG | `/COPY` and `/INCLUDE` (`LIB/FILE,MEMBER`, `FILE,MEMBER`, or `MEMBER`), `EXEC SQL INCLUDE`, externally described files (F-specs and `dcl-f`, honoring `EXTDESC`), and `EXTNAME` data structures |
-| CLLE, CLP, CL | `CALL` and `TFRCTL` programs, including calls inside `SBMJOB CMD(...)` |
+| RPGLE, SQLRPGLE, RPGLEINC, RPG | `/COPY` and `/INCLUDE` (`LIB/FILE,MEMBER`, `FILE,MEMBER`, or `MEMBER`), `EXEC SQL INCLUDE`, externally described files (F-specs and `dcl-f`, honoring `EXTDESC`), `EXTNAME` data structures, SQL tables and views used by embedded SQL (`FROM`, `JOIN`, `INSERT INTO`, `UPDATE`, `DELETE FROM`, `MERGE INTO`), programs called through `EXTPGM` prototypes, and bound procedures (other prototypes, and SQL `CALL`) |
+| CLLE, CLP, CL | `CALL` and `TFRCTL` programs, including calls inside `SBMJOB CMD(...)`, and `CALLPRC` procedures |
 | PF, LF, DSPF, PRTF | Files named in `REF`, `REFFLD`, `PFILE`, and `JFILE` |
 
 **DSPPGMREF** (program source only) finds the compiled program with the member's name in the search libraries and runs `DSPPGMREF` on it. This finds the files, programs, and service programs the object really uses, including files used only by embedded SQL. Each one points at the source member it was created from when the object records it; otherwise it's matched by name. It can't see copybooks, and it's skipped when the IBM i SQL services it needs aren't available or you aren't authorized.
@@ -117,7 +117,7 @@ Find Dependencies asks up to three kinds of sources. Every IBM i is different, s
 
 - **Placeholders:** `{library}`, `{sourceFile}`, `{member}`, and `{object}` (the member name) are passed as parameters. Only a single `SELECT` (or `WITH … SELECT`) is accepted.
 - **Columns:** return `KIND` and `MEMBER` or `OBJECT`.
-  - `KIND` is `copybook`, `program`, or `file`, or an object type such as `*FILE`, `*PGM`, or `*SRVPGM`. Rows without a known kind are skipped.
+  - `KIND` is `copybook`, `program`, `file`, `table` (also `VIEW`), or `procedure` (also `FUNCTION`), or an object type such as `*FILE`, `*PGM`, or `*SRVPGM`. Rows without a known kind are skipped.
   - Optionally return `LIBRARY` and `SOURCE_FILE` (where the **source** member is) for an exact match, and `LINE` and `TEXT` to show where it's used.
 - **Across systems:** `requiresLibrary` skips the query where that library doesn't exist, and `systems` limits it to named hosts. One settings file therefore works across systems with and without the tool. A query that fails because its files are missing or not authorized isn't tried again until you reconnect.
 
@@ -150,7 +150,7 @@ Abstract (Fortra) keeps its cross-reference in the `ABSTRACT` library. Three of 
 
 Each dependency is looked up on the IBM i in the libraries listed in `ibmi-member-workspace.dependencies.searchLibraries`, in order, or in the connection's library list when that setting is empty. List both your object and source libraries, since DSPPGMREF looks for compiled programs there too. A library or source file named in the source is matched exactly. A copybook named without a source file is looked for in `QRPGLESRC` first. Only source members that can build a program are offered for a `CALL`, and only file source for a `REF`.
 
-A list shows what was found, grouped into copybooks, called programs, and referenced files. Copybooks are preselected, and members you already have checked out are marked. Choose the members you want, then:
+A list shows what was found, grouped into copybooks, called programs, referenced files, and SQL tables and views. Bound procedures are counted but not listed, since a procedure has no member of its own; its module is found through the copybook or service program that declares it. Copybooks are preselected, and members you already have checked out are marked. Choose the members you want, then:
 
 - **Bring for Reference** downloads them as **read-only reference copies**. They show with a lock icon in Checked Out Members, the local file is read-only, and **Upload** and **Merge Back** are not available for them, even with upload on save. **Refresh** offers **Update Reference Copy** when the member changed on the IBM i. A member you already have checked out for change is left as it is.
 - **I Need to Change Some…** explains how to change them instead: check them out through your change-management system (for example, Rocket LMI) so the change is tracked, then check out the copy in your development library here. **Copy Member Paths** puts their `LIBRARY/SOURCEFILE(MEMBER)` paths on the clipboard.
@@ -158,6 +158,36 @@ A list shows what was found, grouped into copybooks, called programs, and refere
 Dependencies whose source can't be found are listed afterwards, and in the output panel with the line that refers to them. Common reasons: the source is in a library that wasn't searched, the name is only known at run time (`CALL PGM(&PGM)`), or the copybook is an IFS file.
 
 Only direct dependencies are found. To go one level deeper, run **Find Dependencies…** on a reference copy. VS Code opens read-only files as read-only when `files.readonlyFromPermissions` is on.
+
+### Using with IBM Bob
+
+In [IBM Bob](https://bob.ibm.com), Bob's agent can use the extension to research IBM i programs: what a program uses, what uses it, file layouts, and the source behind them. This is available **only in IBM Bob**. In VS Code there is no server, no commands, and no `.bob` files.
+
+1. Connect to your IBM i with Code for IBM i, and choose a checkout folder.
+2. Run **IBM i Member Workspace: Connect Bob to IBM i Research Tools** from the Command Palette. It adds an `ibmi-member-workspace` server to the folder's `.bob/mcp.json`, keeping any other servers there. **Connect and Add Bob Rules** also writes `.bob/rules/ibmi-member-workspace.md`, which tells Bob how to treat reference copies.
+3. Ask Bob, for example: *"What files, tables and programs does PRODSRC/QRPGLESRC(ORDENT) use, and which programs in PRODOBJ call ORDENT?"*
+
+| Tool | What Bob gets |
+|---|---|
+| `find_member_dependencies` | Everything Find Dependencies finds for a member (copybooks, called programs, files, SQL tables, bound procedures), where each one's source is, and the procedures the member defines |
+| `find_where_used` | Programs and service programs that use a program, service program or file (DSPPGMREF of every program in the libraries you name; without them only the first 10 search libraries are read, since it can take a while) |
+| `describe_file` | A file's or table's columns, and the logical files, views and indexes over it |
+| `list_service_program_exports` | The procedures a service program exports |
+| `search_source_members` | Members by name pattern, source type, source file or text |
+| `read_member_source` | A member's source |
+| `bring_reference_copies` | Brings members to read |
+| `list_checkouts` | What's in the checkout folder, and which files are reference copies |
+
+**Everything Bob looks at is a read-only reference copy.** These are often production sources, so no tool changes the IBM i, and no tool can check a member out for change. A member Bob reads or finds as a dependency is brought into your checkout folder as a read-only reference copy, exactly like **Bring for Reference**: its file is read-only, and Upload, Merge Back and upload on save refuse it. A member you already checked out for change is used as it is and never overwritten. Every copy Bob brings is listed in the output panel and in Checked Out Members. When Local Change History is on and no work item is chosen yet, you're asked which work item the copies belong to.
+
+Security:
+
+- The server listens on `127.0.0.1` only. It accepts only requests with the token stored in `.bob/mcp.json`, and never requests from a browser page.
+- The token is kept in your editor's secret storage. In a Git repository, `.bob/mcp.json` is added to `.git/info/exclude` so the token isn't committed (`.gitignore` is left alone).
+- `.bob` files are never written through links.
+- Turn the tools off with `ibmi-member-workspace.bob.researchTools` in your user settings. **Disconnect Bob from IBM i Research Tools** removes the server from `.bob/mcp.json`.
+
+The tools are available while the extension is running: once you open the Member Workspace view or run one of its commands.
 
 ### Compare With
 
@@ -188,6 +218,7 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.dependencies.crossReferences` | `[]` | Cross-reference tool queries (Abstract, Pathfinder, MDXREF…). User settings only. See **Dependencies**. |
 | `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. User settings only. See **Upload on Save**. |
 | `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. A workspace setting asks once before it turns this on. |
+| `ibmi-member-workspace.bob.researchTools` | `true` | **IBM Bob only.** Offer the IBM i research tools to Bob's agent. User settings only. See **Using with IBM Bob**. |
 
 ## Local Change History
 

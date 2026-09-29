@@ -163,6 +163,11 @@ describe("xrefRowsToReferences", () => {
     assert.equal(crossReferenceKind("/COPY"), "copybook");
     assert.equal(crossReferenceKind("*SRVPGM"), "program");
     assert.equal(crossReferenceKind("LF"), "file");
+    assert.equal(crossReferenceKind("*FILE"), "file");
+    assert.equal(crossReferenceKind("table"), "table");
+    assert.equal(crossReferenceKind("VIEW"), "table");
+    assert.equal(crossReferenceKind("PROCEDURE"), "procedure");
+    assert.equal(crossReferenceKind("function"), "procedure");
     assert.equal(crossReferenceKind(""), undefined);
   });
 });
