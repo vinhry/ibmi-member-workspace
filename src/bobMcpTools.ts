@@ -29,6 +29,8 @@ export interface ResearchIo {
   readLocal(localPath: string): string;
   lookupDependencies(system: string, entry: CheckedOutMember): Promise<DependencyLookup>;
   searchLibraries(): string[];
+  /** The user's `bob.whereUsedMaxLibraries` setting, read on every call; clamped by the tool. */
+  whereUsedLibraryLimit(): unknown;
   whereUsed(name: string, library: string, objectType?: string): Promise<WhereUsedRow[]>;
   searchSourceMembers(
     pattern: string,
@@ -44,8 +46,22 @@ export interface ResearchIo {
 
 /** Reference copies brought by one call, at most; the rest are listed for a later call. */
 export const MAX_REFERENCE_COPIES = 50;
-/** Libraries `find_where_used` searches when none are given: DSPPGMREF reads every program. */
-export const MAX_WHERE_USED_LIBRARIES = 10;
+/**
+ * Libraries `find_where_used` reads when none are given, unless the user's
+ * `bob.whereUsedMaxLibraries` setting says otherwise. DSPPGMREF reads every program in each one.
+ */
+export const DEFAULT_WHERE_USED_LIBRARIES = 10;
+/** Libraries `find_where_used` reads in one call at most, whatever the setting or the call asks. */
+export const MAX_WHERE_USED_LIBRARIES = 25;
+
+/** The `bob.whereUsedMaxLibraries` setting, kept within 1 to {@link MAX_WHERE_USED_LIBRARIES}. */
+export function clampLibraryLimit(value: unknown): number {
+  const number = Number(value);
+  if (value === undefined || value === null || value === "" || !Number.isFinite(number)) {
+    return DEFAULT_WHERE_USED_LIBRARIES;
+  }
+  return Math.min(MAX_WHERE_USED_LIBRARIES, Math.max(1, Math.floor(number)));
+}
 /** Lines `read_member_source` returns when no range is given. */
 const DEFAULT_LINES = 3000;
 
@@ -69,16 +85,16 @@ function name(args: Record<string, unknown>, key: string, what: string, optional
   return upper;
 }
 
-function libraries(args: Record<string, unknown>, io: ResearchIo, max?: number): { libraries: string[]; capped: boolean } {
+/** The `libraries` argument, or the search libraries when it is left out. */
+function libraries(args: Record<string, unknown>, io: ResearchIo): { libraries: string[]; given: boolean } {
   const given = args.libraries;
   if (given === undefined || given === null) {
-    const all = io.searchLibraries();
-    return max && all.length > max ? { libraries: all.slice(0, max), capped: true } : { libraries: all, capped: false };
+    return { libraries: io.searchLibraries(), given: false };
   }
   if (!Array.isArray(given) || given.length === 0) {
     throw new ToolInputError('"libraries" must be a non-empty array of library names.');
   }
-  return { libraries: given.map((library: unknown) => name({ library }, "library", "library")), capped: false };
+  return { libraries: given.map((library: unknown) => name({ library }, "library", "library")), given: true };
 }
 
 function integer(args: Record<string, unknown>, key: string, fallback: number, min: number, max: number): number {
@@ -375,13 +391,15 @@ export function createResearchTools(io: ResearchIo): McpTool[] {
       title: "Find what uses an object",
       description: "Finds the programs and service programs that refer to an object (a program, service program or file), " +
         "from DSPPGMREF of every program in the libraries searched. This reads every program in each library, so name " +
-        `the libraries where the callers are; without them only the first ${MAX_WHERE_USED_LIBRARIES} search libraries are read.`,
+        `the libraries where the callers are (at most ${MAX_WHERE_USED_LIBRARIES} per call). Without them, the first search ` +
+        `libraries are read: ${DEFAULT_WHERE_USED_LIBRARIES} unless the user's setting ibmi-member-workspace.bob.whereUsedMaxLibraries ` +
+        "says otherwise. The result's note says when libraries were left out.",
       inputSchema: {
         type: "object",
         properties: {
           object: { type: "string", description: "Object name, e.g. ORDENT or CUSTMAST." },
           objectType: { type: "string", enum: ["*PGM", "*SRVPGM", "*FILE"], description: "Only references of this type." },
-          libraries: librariesSchema,
+          libraries: { ...librariesSchema, maxItems: MAX_WHERE_USED_LIBRARIES },
         },
         required: ["object"],
         additionalProperties: false,
@@ -394,7 +412,11 @@ export function createResearchTools(io: ResearchIo): McpTool[] {
         if (type !== undefined && !["*PGM", "*SRVPGM", "*FILE"].includes(type)) {
           throw new ToolInputError('"objectType" must be *PGM, *SRVPGM or *FILE.');
         }
-        const { libraries: searched, capped } = libraries(args, io, MAX_WHERE_USED_LIBRARIES);
+        const { libraries: all, given } = libraries(args, io);
+        const limit = given ? MAX_WHERE_USED_LIBRARIES : clampLibraryLimit(io.whereUsedLibraryLimit());
+        const searched = all.slice(0, limit);
+        const leftOut = all.slice(limit);
+        const started = Date.now();
         const usedBy: WhereUsedRow[] = [];
         const failed: Array<{ library: string; error: string }> = [];
         for (const library of searched) {
@@ -404,12 +426,19 @@ export function createResearchTools(io: ResearchIo): McpTool[] {
             failed.push({ library, error: err instanceof Error ? err.message : String(err) });
           }
         }
+        const note = leftOut.length === 0
+          ? undefined
+          : given
+            ? `At most ${MAX_WHERE_USED_LIBRARIES} libraries are read per call; call again with the libraries left out.`
+            : `Only the first ${limit} search libraries were read (user setting ibmi-member-workspace.bob.whereUsedMaxLibraries, ` +
+              `at most ${MAX_WHERE_USED_LIBRARIES}); pass "libraries" to read the ones left out.`;
         return {
           object,
           librariesSearched: searched,
-          ...(capped ? { note: `Only the first ${MAX_WHERE_USED_LIBRARIES} search libraries were read; pass "libraries" to read others.` } : {}),
+          ...(note ? { note, librariesLeftOut: leftOut } : {}),
           usedBy,
           ...(failed.length > 0 ? { librariesNotRead: failed } : {}),
+          elapsedSeconds: Math.round((Date.now() - started) / 100) / 10,
         };
       },
     },

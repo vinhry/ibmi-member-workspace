@@ -170,7 +170,7 @@ In [IBM Bob](https://bob.ibm.com), Bob's agent can use the extension to research
 | Tool | What Bob gets |
 |---|---|
 | `find_member_dependencies` | Everything Find Dependencies finds for a member (copybooks, called programs, files, SQL tables, bound procedures), where each one's source is, and the procedures the member defines |
-| `find_where_used` | Programs and service programs that use a program, service program or file (DSPPGMREF of every program in the libraries you name; without them only the first 10 search libraries are read, since it can take a while) |
+| `find_where_used` | Programs and service programs that use a program, service program or file (DSPPGMREF of every program in the libraries Bob names, at most 25 per call; without them, the first 10 search libraries, or as many as `ibmi-member-workspace.bob.whereUsedMaxLibraries` says, up to 25) |
 | `describe_file` | A file's or table's columns, and the logical files, views and indexes over it |
 | `list_service_program_exports` | The procedures a service program exports |
 | `search_source_members` | Members by name pattern, source type, source file or text |
@@ -186,6 +186,8 @@ Security:
 - The token is kept in your editor's secret storage. In a Git repository, `.bob/mcp.json` is added to `.git/info/exclude` so the token isn't committed (`.gitignore` is left alone).
 - `.bob` files are never written through links.
 - Turn the tools off with `ibmi-member-workspace.bob.researchTools` in your user settings. **Disconnect Bob from IBM i Research Tools** removes the server from `.bob/mcp.json`.
+
+`find_where_used` reads the libraries one after another, and each one takes as long as `DSPPGMREF` over every program in it. Bob stops waiting for a tool after its MCP network timeout, which is 1 minute by default. If you raise `bob.whereUsedMaxLibraries`, raise that timeout too, in Bob's MCP settings (up to 5 minutes). Each result reports `elapsedSeconds`, so you can see how close a search came.
 
 The tools are available while the extension is running: once you open the Member Workspace view or run one of its commands.
 
@@ -219,6 +221,7 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. User settings only. See **Upload on Save**. |
 | `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. A workspace setting asks once before it turns this on. |
 | `ibmi-member-workspace.bob.researchTools` | `true` | **IBM Bob only.** Offer the IBM i research tools to Bob's agent. User settings only. See **Using with IBM Bob**. |
+| `ibmi-member-workspace.bob.whereUsedMaxLibraries` | `10` | **IBM Bob only.** How many search libraries `find_where_used` reads when Bob names none, from 1 to 25. |
 
 ## Local Change History
 

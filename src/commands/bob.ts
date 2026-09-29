@@ -195,6 +195,8 @@ function createTools(ctx: CommandContext): McpTool[] {
     readLocal: (localPath) => fs.readFileSync(localPath, "utf-8"),
     lookupDependencies: (system, entry) => lookupDependencies(ctx, system, entry),
     searchLibraries,
+    whereUsedLibraryLimit: () =>
+      vscode.workspace.getConfiguration("ibmi-member-workspace").get<number>("bob.whereUsedMaxLibraries"),
     whereUsed,
     searchSourceMembers,
     describeFile,

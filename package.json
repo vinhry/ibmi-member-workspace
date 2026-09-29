@@ -601,6 +601,13 @@
           "default": true,
           "markdownDescription": "**IBM Bob only.** Offer IBM i research tools to Bob's agent: what a program uses, what uses it, file layouts and source, through a local MCP server that only this computer can reach. Members Bob looks at are brought as read-only reference copies. Run **Connect Bob to IBM i Research Tools** to add the server to a folder's `.bob/mcp.json`. Has no effect in VS Code. Only user settings are read, so a workspace can't turn it on."
         },
+        "ibmi-member-workspace.bob.whereUsedMaxLibraries": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 25,
+          "markdownDescription": "**IBM Bob only.** How many search libraries Bob's `find_where_used` tool reads when Bob doesn't name any, from 1 to 25. Each library runs `DSPPGMREF` over every program in it, one library after another, so more libraries take longer. Bob stops waiting for a tool after its MCP network timeout (1 minute by default): raise that in Bob's MCP settings when you use a large value."
+        },
         "ibmi-member-workspace.dependencies.suggestAfterCheckout": {
           "type": "boolean",
           "default": true,

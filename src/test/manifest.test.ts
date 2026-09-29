@@ -116,6 +116,11 @@ describe("extension manifest", () => {
         }
       }
     }
+    const properties = manifest.contributes as unknown as {
+      configuration: { properties: Record<string, { default?: unknown; minimum?: unknown; maximum?: unknown }> };
+    };
+    const limit = properties.configuration.properties["ibmi-member-workspace.bob.whereUsedMaxLibraries"];
+    assert.deepEqual([limit?.default, limit?.minimum, limit?.maximum], [10, 1, 25]);
     // The server and its commands are only set up behind the Bob check.
     const extension = readFileSync(join(srcPath, "extension.ts"), "utf8");
     assert.match(extension, /if \(inBob\) \{[\s\S]{0,200}?registerBobCommands\(ctx\);/);

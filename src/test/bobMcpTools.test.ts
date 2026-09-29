@@ -3,7 +3,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { McpTool } from "../bobMcpServer";
-import { MAX_REFERENCE_COPIES, MAX_WHERE_USED_LIBRARIES, ResearchIo, createResearchTools } from "../bobMcpTools";
+import {
+  DEFAULT_WHERE_USED_LIBRARIES,
+  MAX_REFERENCE_COPIES,
+  MAX_WHERE_USED_LIBRARIES,
+  ResearchIo,
+  clampLibraryLimit,
+  createResearchTools,
+} from "../bobMcpTools";
 import type { MemberInfo } from "../memberInfo";
 import { ReferenceCheckoutOptions, bringReferenceCopies } from "../referenceCopies";
 import type { CheckedOutMember } from "../types";
@@ -99,6 +106,7 @@ function fakeIo(overrides: Partial<ResearchIo> = {}) {
       libraries: ["PRODSRC"],
     }),
     searchLibraries: () => ["PRODSRC"],
+    whereUsedLibraryLimit: () => undefined,
     whereUsed: async () => [],
     searchSourceMembers: async () => [],
     describeFile: async () => undefined,
@@ -226,24 +234,75 @@ describe("research tools", () => {
     await assert.rejects(tool(tools, "find_where_used").call({ object: "X", libraries: ["OK", "NOT OK"] }), /library name/);
   });
 
-  it("limits where-used to the first search libraries and reports libraries it couldn't read", async () => {
-    const libraries = Array.from({ length: MAX_WHERE_USED_LIBRARIES + 2 }, (_, i) => `LIB${i}`);
-    const { io } = fakeIo({
-      searchLibraries: () => libraries,
-      whereUsed: async (_name, library) => {
-        if (library === "LIB1") {
-          throw new Error("CPF3033");
-        }
-        return library === "LIB0" ? [{ library: "LIB0", program: "CALLER", text: "", objectLibrary: "*LIBL", objectType: "*PGM" }] : [];
-      },
-    });
-    const result = await tool(createResearchTools(io), "find_where_used").call({ object: "ORDENT" }) as {
-      librariesSearched: string[]; note?: string; usedBy: Array<{ program: string }>; librariesNotRead: Array<{ library: string }>;
+  describe("find_where_used library limit", () => {
+    const libraryNames = (count: number) => Array.from({ length: count }, (_, i) => `LIB${i}`);
+    type WhereUsedResult = {
+      librariesSearched: string[];
+      librariesLeftOut?: string[];
+      note?: string;
+      usedBy: Array<{ program: string }>;
+      librariesNotRead?: Array<{ library: string }>;
+      elapsedSeconds: number;
     };
-    assert.equal(result.librariesSearched.length, MAX_WHERE_USED_LIBRARIES);
-    assert.ok(result.note);
-    assert.deepEqual(result.usedBy.map((u) => u.program), ["CALLER"]);
-    assert.deepEqual(result.librariesNotRead.map((l) => l.library), ["LIB1"]);
+    const run = async (limit: unknown, args: Record<string, unknown> = {}) => {
+      const read: string[] = [];
+      const { io } = fakeIo({
+        searchLibraries: () => libraryNames(40),
+        whereUsedLibraryLimit: () => limit,
+        whereUsed: async (_name, library) => {
+          read.push(library);
+          if (library === "LIB1") {
+            throw new Error("CPF3033");
+          }
+          return library === "LIB0" ? [{ library: "LIB0", program: "CALLER", text: "", objectLibrary: "*LIBL", objectType: "*PGM" }] : [];
+        },
+      });
+      const result = await tool(createResearchTools(io), "find_where_used").call({ object: "ORDENT", ...args }) as WhereUsedResult;
+      return { result, read };
+    };
+
+    it("reads the first 10 search libraries by default and says which were left out", async () => {
+      const { result, read } = await run(undefined);
+      assert.equal(read.length, DEFAULT_WHERE_USED_LIBRARIES);
+      assert.deepEqual(result.librariesSearched, libraryNames(10));
+      assert.deepEqual(result.librariesLeftOut, libraryNames(40).slice(10));
+      assert.match(result.note ?? "", /bob\.whereUsedMaxLibraries/);
+      assert.deepEqual(result.usedBy.map((u) => u.program), ["CALLER"]);
+      assert.deepEqual(result.librariesNotRead?.map((l) => l.library), ["LIB1"]);
+      assert.equal(typeof result.elapsedSeconds, "number");
+    });
+
+    it("follows the user's setting", async () => {
+      assert.equal((await run(20)).read.length, 20);
+    });
+
+    it("keeps the setting within 1 to 25", async () => {
+      assert.equal((await run(0)).read.length, 1);
+      assert.equal((await run(99)).read.length, MAX_WHERE_USED_LIBRARIES);
+      assert.equal((await run("not a number")).read.length, DEFAULT_WHERE_USED_LIBRARIES);
+    });
+
+    it("reads at most 25 of the libraries a call names, whatever the setting", async () => {
+      const { result, read } = await run(5, { libraries: libraryNames(30) });
+      assert.equal(read.length, MAX_WHERE_USED_LIBRARIES);
+      assert.deepEqual(result.librariesLeftOut, libraryNames(30).slice(25));
+      assert.match(result.note ?? "", /call again/);
+    });
+
+    it("adds no note when every library was read", async () => {
+      const { result } = await run(undefined, { libraries: ["LIB0", "LIB2"] });
+      assert.deepEqual(result.librariesSearched, ["LIB0", "LIB2"]);
+      assert.equal(result.note, undefined);
+      assert.equal(result.librariesLeftOut, undefined);
+    });
+  });
+
+  it("clamps the library limit setting", () => {
+    assert.equal(clampLibraryLimit(undefined), 10);
+    assert.equal(clampLibraryLimit(""), 10);
+    assert.equal(clampLibraryLimit(-3), 1);
+    assert.equal(clampLibraryLimit(12.7), 12);
+    assert.equal(clampLibraryLimit(1000), 25);
   });
 
   it("says so when not connected", async () => {
