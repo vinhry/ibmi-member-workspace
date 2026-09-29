@@ -154,13 +154,16 @@ describe("extension manifest", () => {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
       contributes: {
         commands: Array<{ command: string }>;
-        views: Record<string, Array<{ id: string; when?: string }>>;
+        views: Record<string, Array<{ id: string; when?: string; initialSize?: number }>>;
         viewsWelcome: Array<{ view: string; contents: string; when: string }>;
       };
     };
     const views = manifest.contributes.views["ibmi-member-workspace"].map((view) => view.id);
     assert.deepEqual(views, ["ibmi-member-workspace.bobView", "ibmi-member-workspace.checkoutView"]);
-    assert.equal(manifest.contributes.views["ibmi-member-workspace"][0].when, "ibmi-member-workspace:isBobIde");
+    const [bobView, checkoutView] = manifest.contributes.views["ibmi-member-workspace"];
+    assert.equal(bobView.when, "ibmi-member-workspace:isBobIde");
+    // The status needs a few rows: the Bob section starts at its minimum height, not half the side bar.
+    assert.ok((bobView.initialSize ?? 0) > 0 && (bobView.initialSize ?? 0) < (checkoutView.initialSize ?? 0));
 
     const welcome = manifest.contributes.viewsWelcome.filter((item) => item.view === "ibmi-member-workspace.bobView");
     assert.deepEqual(welcome.map((item) => item.when), [

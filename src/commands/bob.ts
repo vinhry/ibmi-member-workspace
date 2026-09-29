@@ -149,12 +149,14 @@ export function registerBobCommands(ctx: CommandContext): void {
   mcpWatcher.onDidCreate(() => statusView.refresh());
   mcpWatcher.onDidChange(() => statusView.refresh());
   mcpWatcher.onDidDelete(() => statusView.refresh());
+  const statusTree = vscode.window.createTreeView("ibmi-member-workspace.bobView", { treeDataProvider: statusView });
   context.subscriptions.push(
     statusView,
     mcpWatcher,
-    vscode.window.createTreeView("ibmi-member-workspace.bobView", { treeDataProvider: statusView }),
+    statusTree,
     vscode.workspace.onDidChangeWorkspaceFolders(() => statusView.refresh())
   );
+  statusView.attach(statusTree);
   onConnectionChange(context, () => statusView.refresh());
 
   const startNow = async () => {

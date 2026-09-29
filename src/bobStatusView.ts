@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { BobFolderStatus, bobFolderStatus, readFileBelow } from "./bobIde";
+import { BobFolderStatus, bobFolderStatus, bobStatusSummary, readFileBelow } from "./bobIde";
 import { getSystemName } from "./codeForIBMi";
 
 /** What the Bob Research Tools view shows, read from `registerBobCommands` each time it redraws. */
@@ -25,10 +25,12 @@ const REFRESH = "ibmi-member-workspace.bob.refreshStatus";
 /**
  * The Bob Research Tools view above Checked Out Members, so Connect is one click away. It shows no
  * rows until a folder is connected, which leaves room for the Connect button of its welcome content.
+ * Its header sums the status up in one line, which stays visible with the section collapsed.
  */
 export class BobStatusProvider implements vscode.TreeDataProvider<BobStatusRow>, vscode.Disposable {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<BobStatusRow | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  private view: vscode.TreeView<BobStatusRow> | undefined;
 
   constructor(private readonly state: BobStatusState, private readonly mcpConfig: string) {}
 
@@ -36,7 +38,22 @@ export class BobStatusProvider implements vscode.TreeDataProvider<BobStatusRow>,
     this._onDidChangeTreeData.dispose();
   }
 
+  /** Shows the one-line status in `view`'s header from now on. */
+  attach(view: vscode.TreeView<BobStatusRow>): void {
+    this.view = view;
+    this.refresh();
+  }
+
   refresh(): void {
+    if (this.view) {
+      this.view.description = bobStatusSummary({
+        enabled: this.state.enabled(),
+        folders: this.folderRows().map((row) => row.status),
+        port: this.state.port(),
+        startError: this.state.startError(),
+        system: getSystemName(),
+      });
+    }
     this._onDidChangeTreeData.fire();
   }
 
@@ -44,8 +61,16 @@ export class BobStatusProvider implements vscode.TreeDataProvider<BobStatusRow>,
     if (element || !this.state.enabled()) {
       return [];
     }
+    const folders = this.folderRows();
+    if (!folders.some((row) => row.status === "connected" || row.status === "disabled")) {
+      return [];
+    }
+    return [...folders, { kind: "server" }, { kind: "system" }];
+  }
+
+  private folderRows(): Array<Extract<BobStatusRow, { kind: "folder" }>> {
     const connected = this.state.connectedFolders();
-    const folders: BobStatusRow[] = (vscode.workspace.workspaceFolders ?? []).map((folder) => {
+    return (vscode.workspace.workspaceFolders ?? []).map((folder) => {
       const root = folder.uri.fsPath;
       let text: string | undefined;
       try {
@@ -56,10 +81,6 @@ export class BobStatusProvider implements vscode.TreeDataProvider<BobStatusRow>,
       const status = bobFolderStatus(text, connected.includes(folder.uri.toString()));
       return { kind: "folder", folderUri: folder.uri.toString(), name: folder.name, status };
     });
-    if (!folders.some((row) => row.kind === "folder" && (row.status === "connected" || row.status === "disabled"))) {
-      return [];
-    }
-    return [...folders, { kind: "server" }, { kind: "system" }];
   }
 
   getTreeItem(row: BobStatusRow): vscode.TreeItem {

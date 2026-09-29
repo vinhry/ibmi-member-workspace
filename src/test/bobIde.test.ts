@@ -10,6 +10,7 @@ import {
   bobFolderStatus,
   bobFocusInputCommand,
   bobPasteSteps,
+  bobStatusSummary,
   configuredEntry,
   excludeFromGit,
   isBobProduct,
@@ -152,6 +153,35 @@ describe("bobFolderStatus", () => {
     assert.equal(bobFolderStatus(withEntry({ url: "x", disabled: true }), true), "disabled");
     assert.equal(bobFolderStatus(withEntry({ url: "x", disabled: false }), true), "connected");
     assert.equal(bobFolderStatus(withEntry({ url: "x", disabled: true }), false), "notConnectedHere");
+  });
+});
+
+describe("bobStatusSummary", () => {
+  const running = { enabled: true, folders: ["connected"] as const, port: 5000, startError: undefined, system: "PUB400" };
+
+  it("names the IBM i the running tools read", () => {
+    assert.equal(bobStatusSummary(running), "Connected · PUB400");
+    assert.equal(bobStatusSummary({ ...running, system: undefined }), "Connected · no IBM i");
+  });
+
+  it("says when no folder is connected on this computer", () => {
+    assert.equal(bobStatusSummary({ ...running, folders: [] }), "Not connected");
+    assert.equal(bobStatusSummary({ ...running, folders: ["none", "notConnectedHere"] }), "Not connected");
+  });
+
+  it("says Bob turned the server off only when it did in every connected folder", () => {
+    assert.equal(bobStatusSummary({ ...running, folders: ["disabled", "none"] }), "Turned off in Bob");
+    assert.equal(bobStatusSummary({ ...running, folders: ["disabled", "connected"] }), "Connected · PUB400");
+  });
+
+  it("tells a failed start from one still under way", () => {
+    assert.equal(bobStatusSummary({ ...running, port: undefined, startError: "EACCES" }), "Tools not running");
+    assert.equal(bobStatusSummary({ ...running, port: undefined }), "Starting…");
+  });
+
+  it("puts the setting first, then the connection", () => {
+    assert.equal(bobStatusSummary({ ...running, enabled: false, startError: "EACCES" }), "Turned off");
+    assert.equal(bobStatusSummary({ ...running, folders: [], startError: "EACCES" }), "Not connected");
   });
 });
 

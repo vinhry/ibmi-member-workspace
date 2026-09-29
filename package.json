@@ -67,13 +67,15 @@
           "id": "ibmi-member-workspace.bobView",
           "name": "Bob Research Tools",
           "when": "ibmi-member-workspace:isBobIde",
-          "icon": "resources/checkout.svg"
+          "icon": "resources/checkout.svg",
+          "initialSize": 1
         },
         {
           "id": "ibmi-member-workspace.checkoutView",
           "name": "Checked Out Members",
           "when": "code-for-ibmi:connected",
-          "icon": "resources/checkout.svg"
+          "icon": "resources/checkout.svg",
+          "initialSize": 5
         }
       ]
     },

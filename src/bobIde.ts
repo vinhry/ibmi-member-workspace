@@ -183,6 +183,36 @@ export function bobFolderStatus(text: string | undefined, connectedHere: boolean
   return entry.disabled === true ? "disabled" : "connected";
 }
 
+/**
+ * One line for the Bob Research Tools header, which shows even with the section collapsed. The
+ * first state that applies wins.
+ */
+export function bobStatusSummary(state: {
+  enabled: boolean;
+  folders: readonly BobFolderStatus[];
+  port: number | undefined;
+  startError: string | undefined;
+  system: string | undefined;
+}): string {
+  if (!state.enabled) {
+    return "Turned off";
+  }
+  const connected = state.folders.filter((status) => status === "connected" || status === "disabled");
+  if (connected.length === 0) {
+    return "Not connected";
+  }
+  if (connected.every((status) => status === "disabled")) {
+    return "Turned off in Bob";
+  }
+  if (state.startError) {
+    return "Tools not running";
+  }
+  if (state.port === undefined) {
+    return "Starting…";
+  }
+  return `Connected · ${state.system ?? "no IBM i"}`;
+}
+
 /** First line of the Bob rules file this extension writes; while it is there, the file is kept up to date. */
 export const GENERATED_RULES_MARKER = "<!-- Written by IBM i Member Workspace; delete this line to keep your own edits. -->";
 

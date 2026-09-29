@@ -2,7 +2,7 @@
 
 ## 1.7.0 - 2026-09-29
 
-- **Bob Research Tools section.** In IBM Bob, the Member Workspace side bar has a **Bob Research Tools** section above Checked Out Members. Until a folder is connected it shows a **Connect Bob to IBM i Research Tools** button, so you don't need the Command Palette. Once connected, it shows which workspace folders are connected (or turned off in Bob's MCP settings), whether the research tools are running, and which IBM i they read. Click a folder that isn't connected to connect it, and right-click a connected one to disconnect it. With `ibmi-member-workspace.bob.researchTools` off, the section says so and links to the setting. VS Code is unchanged.
+- **Bob Research Tools section.** In IBM Bob, the Member Workspace side bar has a **Bob Research Tools** section above Checked Out Members. Until a folder is connected it shows a **Connect Bob to IBM i Research Tools** button, so you don't need the Command Palette. Once connected, it shows which workspace folders are connected (or turned off in Bob's MCP settings), whether the research tools are running, and which IBM i they read. Click a folder that isn't connected to connect it, and right-click a connected one to disconnect it. With `ibmi-member-workspace.bob.researchTools` off, the section says so and links to the setting. The section opens small, and its header shows the status in one line (for example *Connected · PUB400* or *Not connected*), so you can collapse it to just the header and still see the status; the side bar doesn't let an open section get shorter than about five rows. VS Code is unchanged.
 
 ## 1.6.0 - 2026-09-28
 
