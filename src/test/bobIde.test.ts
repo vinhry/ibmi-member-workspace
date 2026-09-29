@@ -7,6 +7,7 @@ import {
   GENERATED_RULES_MARKER,
   MCP_SERVER_NAME,
   bobChatViews,
+  bobFolderStatus,
   bobFocusInputCommand,
   bobPasteSteps,
   configuredEntry,
@@ -129,6 +130,28 @@ describe("refreshedAlwaysAllow", () => {
 
   it("adds nothing when the previous tools are unknown", () => {
     assert.deepEqual(refreshedAlwaysAllow(["read_member_source"], tools, undefined), ["read_member_source"]);
+  });
+});
+
+describe("bobFolderStatus", () => {
+  const withEntry = (entry: object) => JSON.stringify({ mcpServers: { [MCP_SERVER_NAME]: entry } });
+
+  it("is none without this extension's entry", () => {
+    assert.equal(bobFolderStatus(undefined, true), "none");
+    assert.equal(bobFolderStatus("", true), "none");
+    assert.equal(bobFolderStatus("{ not json", true), "none");
+    assert.equal(bobFolderStatus(JSON.stringify({ mcpServers: { other: { url: "x" } } }), true), "none");
+  });
+
+  it("tells an entry connected on this computer from one that came with the project", () => {
+    assert.equal(bobFolderStatus(withEntry({ url: "http://127.0.0.1:1/mcp" }), true), "connected");
+    assert.equal(bobFolderStatus(withEntry({ url: "http://127.0.0.1:1/mcp" }), false), "notConnectedHere");
+  });
+
+  it("is disabled when Bob's MCP settings turned the server off", () => {
+    assert.equal(bobFolderStatus(withEntry({ url: "x", disabled: true }), true), "disabled");
+    assert.equal(bobFolderStatus(withEntry({ url: "x", disabled: false }), true), "connected");
+    assert.equal(bobFolderStatus(withEntry({ url: "x", disabled: true }), false), "notConnectedHere");
   });
 });
 

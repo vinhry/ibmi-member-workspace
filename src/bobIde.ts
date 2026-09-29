@@ -165,6 +165,24 @@ export function configuredEntry(text: string | undefined): { url?: unknown; head
   }
 }
 
+/**
+ * How a folder's `.bob/mcp.json` stands, for the Bob Research Tools view: connected on this computer
+ * (or connected, but turned off in Bob's MCP settings), holding an entry that wasn't connected here
+ * (one that came with a cloned project), or without this extension's entry.
+ */
+export type BobFolderStatus = "connected" | "disabled" | "notConnectedHere" | "none";
+
+export function bobFolderStatus(text: string | undefined, connectedHere: boolean): BobFolderStatus {
+  const entry = configuredEntry(text) as { disabled?: unknown } | undefined;
+  if (!entry) {
+    return "none";
+  }
+  if (!connectedHere) {
+    return "notConnectedHere";
+  }
+  return entry.disabled === true ? "disabled" : "connected";
+}
+
 /** First line of the Bob rules file this extension writes; while it is there, the file is kept up to date. */
 export const GENERATED_RULES_MARKER = "<!-- Written by IBM i Member Workspace; delete this line to keep your own edits. -->";
 

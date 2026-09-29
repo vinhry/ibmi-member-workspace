@@ -29,6 +29,7 @@ import {
   whereUsed,
 } from "../codeForIBMi";
 import { BobPromptKind, PromptMember, buildBobPrompt } from "../bobPrompts";
+import { BobStatusProvider } from "../bobStatusView";
 import { errorMessage } from "../errors";
 import { readCheckoutText } from "../localPath";
 import type { BrowserNode } from "../memberInfo";
@@ -105,6 +106,8 @@ export function registerBobCommands(ctx: CommandContext): void {
   let generation = 0;
   let port: number | undefined;
   let token: string | undefined;
+  /** Why the last start failed, shown in the Bob Research Tools view until a start succeeds. */
+  let startError: string | undefined;
 
   const tools = createTools(ctx);
   registerInvestigateCommands(ctx);
@@ -132,9 +135,41 @@ export function registerBobCommands(ctx: CommandContext): void {
   const setConnected = async (folder: vscode.WorkspaceFolder, connected: boolean) => {
     const others = connectedFolders().filter((uri) => uri !== folder.uri.toString());
     await context.workspaceState.update(CONNECTED_KEY, connected ? [...others, folder.uri.toString()] : others);
+    statusView.refresh();
   };
 
+  const statusView = new BobStatusProvider({
+    enabled,
+    port: () => port,
+    startError: () => startError,
+    connectedFolders,
+  }, MCP_CONFIG);
+  // Edits by hand, and Bob turning the server off, show without a refresh.
+  const mcpWatcher = vscode.workspace.createFileSystemWatcher("**/.bob/mcp.json");
+  mcpWatcher.onDidCreate(() => statusView.refresh());
+  mcpWatcher.onDidChange(() => statusView.refresh());
+  mcpWatcher.onDidDelete(() => statusView.refresh());
+  context.subscriptions.push(
+    statusView,
+    mcpWatcher,
+    vscode.window.createTreeView("ibmi-member-workspace.bobView", { treeDataProvider: statusView }),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => statusView.refresh())
+  );
+  onConnectionChange(context, () => statusView.refresh());
+
   const startNow = async () => {
+    try {
+      await listen();
+      startError = undefined;
+    } catch (err) {
+      startError = errorMessage(err);
+      throw err;
+    } finally {
+      statusView.refresh();
+    }
+  };
+
+  const listen = async () => {
     const mine = generation;
     await context.secrets.delete(SHARED_TOKEN_KEY);
     token = await context.secrets.get(tokenKey());
@@ -182,11 +217,18 @@ export function registerBobCommands(ctx: CommandContext): void {
         void start().catch((err) => log.appendLine(`[bob] Could not start the research tools: ${errorMessage(err)}`));
       } else {
         stop();
+        startError = undefined;
         log.appendLine("[bob] Research tools stopped.");
       }
+      statusView.refresh();
     }),
 
-    vscode.commands.registerCommand("ibmi-member-workspace.bob.connectResearchTools", async () => {
+    vscode.commands.registerCommand("ibmi-member-workspace.bob.refreshStatus", () => {
+      void start().catch((err) => log.appendLine(`[bob] Could not start the research tools: ${errorMessage(err)}`));
+      statusView.refresh();
+    }),
+
+    vscode.commands.registerCommand("ibmi-member-workspace.bob.connectResearchTools", async (arg?: unknown) => {
       if (!enabled()) {
         const choice = await vscode.window.showWarningMessage(
           "The IBM i research tools for Bob are turned off in your user settings.",
@@ -203,7 +245,7 @@ export function registerBobCommands(ctx: CommandContext): void {
         vscode.window.showErrorMessage(`Could not start the IBM i research tools: ${errorMessage(err)}`);
         return;
       }
-      const folder = await pickFolder();
+      const folder = folderOf(arg) ?? await pickFolder();
       if (!folder || port === undefined || !token) {
         return;
       }
@@ -251,8 +293,8 @@ export function registerBobCommands(ctx: CommandContext): void {
       }
     }),
 
-    vscode.commands.registerCommand("ibmi-member-workspace.bob.disconnectResearchTools", async () => {
-      const folder = await pickFolder();
+    vscode.commands.registerCommand("ibmi-member-workspace.bob.disconnectResearchTools", async (arg?: unknown) => {
+      const folder = folderOf(arg) ?? await pickFolder();
       if (!folder) {
         return;
       }
@@ -499,6 +541,17 @@ function createTools(ctx: CommandContext): McpTool[] {
 
 function toolNames(tools: readonly McpTool[]): string[] {
   return tools.map((tool) => tool.name);
+}
+
+/**
+ * The workspace folder a Bob Research Tools row names (its URI, or the row itself). Only a folder
+ * open in this workspace is used; anything else leaves the choice to the user.
+ */
+function folderOf(arg: unknown): vscode.WorkspaceFolder | undefined {
+  const uri = typeof arg === "string" ? arg : (arg as { kind?: unknown; folderUri?: unknown } | undefined)?.folderUri;
+  return typeof uri === "string"
+    ? vscode.workspace.workspaceFolders?.find((folder) => folder.uri.toString() === uri)
+    : undefined;
 }
 
 async function pickFolder(): Promise<vscode.WorkspaceFolder | undefined> {

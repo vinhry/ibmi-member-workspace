@@ -117,13 +117,17 @@ describe("extension manifest", () => {
     const bobCommands = manifest.contributes.commands
       .map(({ command }) => command)
       .filter((command) => command.startsWith("ibmi-member-workspace.bob."));
+    // Right-click prompts need a selection, and Refresh belongs to the Bob view, so neither is in the palette.
+    const notInPalette = [...investigate, "ibmi-member-workspace.bob.refreshStatus"];
+    const inBobView = /^view == ibmi-member-workspace\.bobView && (.+ && )?ibmi-member-workspace:isBobIde$/;
     for (const command of bobCommands) {
       const palette = menus.commandPalette.find((item) => item.command === command);
-      // Right-click prompts need a selection, so they are never in the palette.
-      assert.equal(palette?.when, investigate.includes(command) ? "false" : "ibmi-member-workspace:isBobIde", command);
+      assert.equal(palette?.when, notInPalette.includes(command) ? "false" : "ibmi-member-workspace:isBobIde", command);
       for (const [menu, items] of Object.entries(menus)) {
         if (menu !== "commandPalette" && menu !== investigateMenu) {
-          assert.ok(!items.some((item) => item.command === command), `${command} in ${menu}`);
+          // Outside the palette and the submenu, only the Bob view's own menus hold Bob commands.
+          const elsewhere = items.filter((item) => item.command === command && !inBobView.test(item.when ?? ""));
+          assert.deepEqual(elsewhere, [], `${command} in ${menu}`);
         }
       }
     }
@@ -144,6 +148,32 @@ describe("extension manifest", () => {
     const extension = readFileSync(join(srcPath, "extension.ts"), "utf8");
     assert.match(extension, /if \(inBob\) \{[\s\S]{0,200}?registerBobCommands\(ctx\);/);
     assert.equal(extension.match(/registerBobCommands\(/g)?.length, 1);
+  });
+
+  it("puts the Bob Research Tools view, shown only in IBM Bob, above Checked Out Members", () => {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      contributes: {
+        commands: Array<{ command: string }>;
+        views: Record<string, Array<{ id: string; when?: string }>>;
+        viewsWelcome: Array<{ view: string; contents: string; when: string }>;
+      };
+    };
+    const views = manifest.contributes.views["ibmi-member-workspace"].map((view) => view.id);
+    assert.deepEqual(views, ["ibmi-member-workspace.bobView", "ibmi-member-workspace.checkoutView"]);
+    assert.equal(manifest.contributes.views["ibmi-member-workspace"][0].when, "ibmi-member-workspace:isBobIde");
+
+    const welcome = manifest.contributes.viewsWelcome.filter((item) => item.view === "ibmi-member-workspace.bobView");
+    assert.deepEqual(welcome.map((item) => item.when), [
+      "ibmi-member-workspace:isBobIde && config.ibmi-member-workspace.bob.researchTools",
+      "ibmi-member-workspace:isBobIde && !config.ibmi-member-workspace.bob.researchTools",
+    ]);
+    assert.match(welcome[0].contents, /\[Connect Bob to IBM i Research Tools\]\(command:ibmi-member-workspace\.bob\.connectResearchTools\)/);
+    const commands = manifest.contributes.commands.map(({ command }) => command);
+    for (const { contents } of welcome) {
+      for (const [, command] of contents.matchAll(/\(command:([^)?]+)/g)) {
+        assert.ok(command.startsWith("workbench.") || commands.includes(command), command);
+      }
+    }
   });
 
   it("packages only the files the extension needs", async () => {

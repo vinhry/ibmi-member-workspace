@@ -64,6 +64,12 @@
     "views": {
       "ibmi-member-workspace": [
         {
+          "id": "ibmi-member-workspace.bobView",
+          "name": "Bob Research Tools",
+          "when": "ibmi-member-workspace:isBobIde",
+          "icon": "resources/checkout.svg"
+        },
+        {
           "id": "ibmi-member-workspace.checkoutView",
           "name": "Checked Out Members",
           "when": "code-for-ibmi:connected",
@@ -72,6 +78,16 @@
       ]
     },
     "viewsWelcome": [
+      {
+        "view": "ibmi-member-workspace.bobView",
+        "contents": "Let Bob's agent research your IBM i programs: what a program uses, what uses it, file layouts and source. The tools only read the IBM i.\n[Connect Bob to IBM i Research Tools](command:ibmi-member-workspace.bob.connectResearchTools)",
+        "when": "ibmi-member-workspace:isBobIde && config.ibmi-member-workspace.bob.researchTools"
+      },
+      {
+        "view": "ibmi-member-workspace.bobView",
+        "contents": "The IBM i research tools for Bob are turned off in your user settings.\n[Open Settings](command:workbench.action.openSettings?%5B%22ibmi-member-workspace.bob.researchTools%22%5D)",
+        "when": "ibmi-member-workspace:isBobIde && !config.ibmi-member-workspace.bob.researchTools"
+      },
       {
         "view": "ibmi-member-workspace.checkoutView",
         "contents": "Choose where checked-out member files will be stored for this workspace.\n[Choose Checkout Folder](command:ibmi-member-workspace.configureCheckoutFolder)",
@@ -268,6 +284,12 @@
         "category": "IBM i Member Workspace"
       },
       {
+        "command": "ibmi-member-workspace.bob.refreshStatus",
+        "title": "Refresh Bob Research Tools Status",
+        "category": "IBM i Member Workspace",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "ibmi-member-workspace.bob.analyzeRelationships",
         "title": "Analyze Relationships",
         "category": "IBM i Member Workspace"
@@ -295,6 +317,10 @@
         },
         {
           "command": "ibmi-member-workspace.bob.deepDive",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.bob.refreshStatus",
           "when": "false"
         },
         {
@@ -415,6 +441,11 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "ibmi-member-workspace.bob.disconnectResearchTools",
+          "when": "view == ibmi-member-workspace.bobView && viewItem == bobFolder-connected && ibmi-member-workspace:isBobIde",
+          "group": "bob@1"
+        },
         {
           "submenu": "ibmi-member-workspace.bobInvestigate",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && ibmi-member-workspace:isBobIde",
@@ -574,6 +605,21 @@
         }
       ],
       "view/title": [
+        {
+          "command": "ibmi-member-workspace.bob.refreshStatus",
+          "when": "view == ibmi-member-workspace.bobView && ibmi-member-workspace:isBobIde",
+          "group": "navigation@0"
+        },
+        {
+          "command": "ibmi-member-workspace.bob.connectResearchTools",
+          "when": "view == ibmi-member-workspace.bobView && ibmi-member-workspace:isBobIde",
+          "group": "bob@1"
+        },
+        {
+          "command": "ibmi-member-workspace.bob.disconnectResearchTools",
+          "when": "view == ibmi-member-workspace.bobView && ibmi-member-workspace:isBobIde",
+          "group": "bob@2"
+        },
         {
           "command": "ibmi-member-workspace.configureCheckoutFolder",
           "when": "view == ibmi-member-workspace.checkoutView",
