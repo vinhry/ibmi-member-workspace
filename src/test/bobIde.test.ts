@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, sym
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  GENERATED_RULES_MARKER,
   MCP_SERVER_NAME,
   configuredEntry,
   excludeFromGit,
@@ -11,6 +12,7 @@ import {
   mcpServerEntry,
   mergeMcpConfig,
   readFileBelow,
+  shouldRewriteRules,
   writeFileBelow,
 } from "../bobIde";
 
@@ -103,6 +105,27 @@ describe("mergeMcpConfig", () => {
     assert.equal(configuredEntry(undefined), undefined);
     assert.equal(configuredEntry("{ broken"), undefined);
     assert.equal(configuredEntry(mergeMcpConfig(undefined, entry))?.url, "http://127.0.0.1:4321/mcp");
+  });
+});
+
+describe("shouldRewriteRules", () => {
+  const current = `${GENERATED_RULES_MARKER}\n# Rules\n- new\n`;
+  const previous = ["# Rules\n- old\n"];
+
+  it("leaves a missing or current file alone", () => {
+    assert.equal(shouldRewriteRules(undefined, current, previous), false);
+    assert.equal(shouldRewriteRules(current, current, previous), false);
+    assert.equal(shouldRewriteRules(current.replace(/\n/g, "\r\n"), current, previous), false);
+  });
+
+  it("updates a file it wrote: with the marker, or exactly an earlier text", () => {
+    assert.equal(shouldRewriteRules(`${GENERATED_RULES_MARKER}\n# Rules\n- old\n`, current, previous), true);
+    assert.equal(shouldRewriteRules("# Rules\r\n- old\r\n", current, previous), true);
+  });
+
+  it("leaves a file the user edited alone", () => {
+    assert.equal(shouldRewriteRules("# Rules\n- old\n- mine\n", current, previous), false);
+    assert.equal(shouldRewriteRules(`# Mine\n${GENERATED_RULES_MARKER}\n`, current, previous), false);
   });
 });
 

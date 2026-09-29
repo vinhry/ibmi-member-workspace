@@ -65,17 +65,36 @@ export function mergeMcpConfig(existing: string | undefined, entry: McpServerEnt
 }
 
 /** This extension's entry in `.bob/mcp.json` text, if any. */
-export function configuredEntry(text: string | undefined): { url?: unknown; headers?: unknown } | undefined {
+export function configuredEntry(text: string | undefined): { url?: unknown; headers?: unknown; alwaysAllow?: unknown } | undefined {
   if (!text?.trim()) {
     return undefined;
   }
   try {
     const parsed = JSON.parse(text) as { mcpServers?: Record<string, unknown> };
     const entry = parsed?.mcpServers?.[MCP_SERVER_NAME];
-    return entry && typeof entry === "object" ? (entry as { url?: unknown; headers?: unknown }) : undefined;
+    return entry && typeof entry === "object" ? (entry as { url?: unknown; headers?: unknown; alwaysAllow?: unknown }) : undefined;
   } catch {
     return undefined;
   }
+}
+
+/** First line of the Bob rules file this extension writes; while it is there, the file is kept up to date. */
+export const GENERATED_RULES_MARKER = "<!-- Written by IBM i Member Workspace; delete this line to keep your own edits. -->";
+
+/**
+ * Whether the rules file holding `existing` should be replaced by `current`: it was written by this
+ * extension (it starts with the marker, or is exactly a text an earlier version wrote) and is out of
+ * date. A missing file or one the user edited is left alone.
+ */
+export function shouldRewriteRules(existing: string | undefined, current: string, previous: readonly string[]): boolean {
+  if (existing === undefined) {
+    return false;
+  }
+  const text = existing.replace(/\r\n/g, "\n");
+  if (text === current) {
+    return false;
+  }
+  return text.startsWith(`${GENERATED_RULES_MARKER}\n`) || previous.includes(text);
 }
 
 /** Throws when `target` or a folder between `root` and it is a link, so a write can't land elsewhere. */
