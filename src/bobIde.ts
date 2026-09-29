@@ -52,18 +52,32 @@ export type BobPasteStep = { command: string } | { waitMs: number };
  * has loaded. The editor is focused first, so a paste that misses Bob's chat lands in the editor,
  * where it is seen and undone, never in the terminal, where a multi-line prompt could run as shell
  * commands.
+ *
+ * Bob focuses its input box itself only when the chat becomes visible, so the view focus of a chat
+ * that is already open focuses the chat but not its input box. Bob's `focusInput` command, when
+ * there is one, then puts the focus in the box. It runs only once the chat is open, and the view is
+ * focused again after it, so the chat ends up focused even if the command toggles.
  */
-export function bobPasteSteps(viewId: string, loadWaitMs: number): BobPasteStep[] {
+export function bobPasteSteps(viewId: string, loadWaitMs: number, focusInput?: string): BobPasteStep[] {
   const focus = `${viewId}.focus`;
   return [
     { command: "workbench.action.focusActiveEditorGroup" },
     { command: focus },
     { waitMs: loadWaitMs },
     { command: focus },
+    ...(focusInput ? [{ command: focusInput }, { waitMs: 150 }, { command: focus }] : []),
     { waitMs: 150 },
     { command: "editor.action.clipboardPasteAction" },
     { waitMs: 150 },
   ];
+}
+
+/**
+ * Bob's command that focuses its chat input box, if any. Only a `focusInput` command: Bob's other
+ * focus commands toggle the chat.
+ */
+export function bobFocusInputCommand(commands: readonly string[]): string | undefined {
+  return commands.find((command) => /^bob\b.*\.focusInput$/i.test(command));
 }
 
 /** Bob commands that may focus its chat, listed in the log so the right one can be told apart. */

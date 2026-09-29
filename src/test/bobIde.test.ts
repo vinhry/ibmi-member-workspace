@@ -7,6 +7,7 @@ import {
   GENERATED_RULES_MARKER,
   MCP_SERVER_NAME,
   bobChatViews,
+  bobFocusInputCommand,
   bobPasteSteps,
   configuredEntry,
   excludeFromGit,
@@ -191,6 +192,35 @@ describe("bobPasteSteps", () => {
       { waitMs: 1500 },
     ]);
     assert.equal(commands(steps).at(-1), "editor.action.clipboardPasteAction");
+  });
+
+  it("focuses Bob's input box once the chat is open, then the view again, before pasting", () => {
+    const steps = bobPasteSteps("bob.SidebarProvider", 600, "bob.focusInput");
+    assert.deepEqual(commands(steps), [
+      "workbench.action.focusActiveEditorGroup",
+      "bob.SidebarProvider.focus",
+      "bob.SidebarProvider.focus",
+      "bob.focusInput",
+      "bob.SidebarProvider.focus",
+      "editor.action.clipboardPasteAction",
+    ]);
+    assert.deepEqual(steps.slice(0, 3), [
+      { command: "workbench.action.focusActiveEditorGroup" },
+      { command: "bob.SidebarProvider.focus" },
+      { waitMs: 600 },
+    ]);
+  });
+});
+
+describe("bobFocusInputCommand", () => {
+  it("picks Bob's focusInput command over its other focus commands", () => {
+    assert.equal(bobFocusInputCommand(["bob.focus", "bob.SidebarProvider.focus", "bob.focusInput"]), "bob.focusInput");
+    assert.equal(bobFocusInputCommand(["bob.focus", "bob.chat.focusInput"]), "bob.chat.focusInput");
+  });
+
+  it("finds none when Bob has only commands that may toggle its chat, or among other extensions", () => {
+    assert.equal(bobFocusInputCommand(["bob.focus", "bob.SidebarProvider.focus"]), undefined);
+    assert.equal(bobFocusInputCommand(["bobcat.focusInput", "other.focusInput"]), undefined);
   });
 });
 

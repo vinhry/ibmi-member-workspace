@@ -6,6 +6,7 @@ import {
   GENERATED_RULES_MARKER,
   bobChatViews,
   bobFocusCandidates,
+  bobFocusInputCommand,
   bobPasteSteps,
   configuredEntry,
   excludeFromGit,
@@ -393,9 +394,10 @@ let bobChatLogged = false;
 async function sendToBobChat(prompt: string, log: vscode.OutputChannel): Promise<void> {
   await vscode.env.clipboard.writeText(prompt);
   const views = bobChatViews(vscode.extensions.all);
+  const commands = await vscode.commands.getCommands(true);
+  const focusInput = bobFocusInputCommand(commands);
   if (!bobChatLogged) {
     bobChatLogged = true;
-    const commands = await vscode.commands.getCommands(true);
     log.appendLine(`[bob] Bob chat views: ${views.join(", ") || "none"}; Bob commands: ${bobFocusCandidates(commands).join(", ") || "none"}`);
   }
   const view = views[0];
@@ -410,14 +412,14 @@ async function sendToBobChat(prompt: string, log: vscode.OutputChannel): Promise
   let missed: vscode.TextDocument | undefined;
   for (const loadWaitMs of [600, 1500]) {
     try {
-      missed = await pasteIntoBob(view, prompt, loadWaitMs);
+      missed = await pasteIntoBob(view, focusInput, prompt, loadWaitMs);
     } catch (err) {
       log.appendLine(`[bob] Could not paste the prompt into Bob's chat (${view}): ${errorMessage(err)}`);
       vscode.window.showInformationMessage("The prompt is on the clipboard. Open Bob's chat, paste it, review it, and press Enter.");
       return;
     }
     if (!missed) {
-      log.appendLine(`[bob] Prompt pasted into Bob's chat (${view}).`);
+      log.appendLine(`[bob] Prompt pasted into Bob's chat (${view}${focusInput ? `, ${focusInput}` : ""}).`);
       vscode.window.showInformationMessage(
         "The prompt is in Bob's chat: review it and press Enter. If the chat box is empty, paste it (it's on the clipboard)."
       );
@@ -437,7 +439,12 @@ async function sendToBobChat(prompt: string, log: vscode.OutputChannel): Promise
  * Focuses Bob's chat and pastes the clipboard into it (see {@link bobPasteSteps}). Returns the
  * document the paste landed in instead, if any.
  */
-async function pasteIntoBob(view: string, prompt: string, loadWaitMs: number): Promise<vscode.TextDocument | undefined> {
+async function pasteIntoBob(
+  view: string,
+  focusInput: string | undefined,
+  prompt: string,
+  loadWaitMs: number
+): Promise<vscode.TextDocument | undefined> {
   const firstLine = prompt.split("\n")[0];
   let pastedInto: vscode.TextDocument | undefined;
   const watch = vscode.workspace.onDidChangeTextDocument((event) => {
@@ -446,7 +453,7 @@ async function pasteIntoBob(view: string, prompt: string, loadWaitMs: number): P
     }
   });
   try {
-    for (const step of bobPasteSteps(view, loadWaitMs)) {
+    for (const step of bobPasteSteps(view, loadWaitMs, focusInput)) {
       if ("command" in step) {
         await vscode.commands.executeCommand(step.command);
       } else {
