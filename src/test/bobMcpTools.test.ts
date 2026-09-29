@@ -69,6 +69,29 @@ describe("bringReferenceCopies", () => {
   });
 });
 
+describe("bringReferenceCopies when abandoned", () => {
+  it("brings nothing more once the signal is aborted", async () => {
+    const abandoned = new AbortController();
+    const brought: string[] = [];
+    const results = await bringReferenceCopies(
+      {
+        findEntry: () => undefined,
+        checkoutMember: async (library, sourceFile, member, extension, options) => {
+          brought.push(member);
+          abandoned.abort();
+          return entry(library, sourceFile, member, extension, options.reference);
+        },
+        log: () => undefined,
+      },
+      ["A", "B", "C"].map((memberName) => ({ library: "L", sourceFile: "F", memberName, extension: "rpgle" })),
+      [],
+      abandoned.signal
+    );
+    assert.deepEqual(brought, ["A"]);
+    assert.deepEqual(results.map((r) => r.status), ["brought", "cancelled", "cancelled"]);
+  });
+});
+
 /** A fake IBM i with one program, its copybook and a file; records every reference copy asked for. */
 function fakeIo(overrides: Partial<ResearchIo> = {}) {
   const checkouts: CheckedOutMember[] = [];
@@ -107,7 +130,7 @@ function fakeIo(overrides: Partial<ResearchIo> = {}) {
     }),
     searchLibraries: () => ["PRODSRC"],
     whereUsedLibraryLimit: () => undefined,
-    whereUsed: async () => [],
+    whereUsed: async () => ({ rows: [], snapshotTakenAt: "2026-01-01T00:00:00.000Z", reusedSnapshot: false }),
     searchSourceMembers: async () => [],
     describeFile: async () => undefined,
     serviceProgramExports: async () => undefined,
@@ -116,10 +139,11 @@ function fakeIo(overrides: Partial<ResearchIo> = {}) {
   return { io, checkouts, brought };
 }
 
-function tool(tools: McpTool[], name: string): McpTool {
+/** A tool, callable without a signal (one that is never aborted) unless the test passes one. */
+function tool(tools: McpTool[], name: string): { call: (args: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown> } {
   const found = tools.find((t) => t.name === name);
   assert.ok(found, name);
-  return found;
+  return { call: (args, signal = new AbortController().signal) => found.call(args, signal) };
 }
 
 describe("research tools", () => {
@@ -244,21 +268,27 @@ describe("research tools", () => {
       librariesNotRead?: Array<{ library: string }>;
       elapsedSeconds: number;
     };
-    const run = async (limit: unknown, args: Record<string, unknown> = {}) => {
+    const run = async (limit: unknown, args: Record<string, unknown> = {}, searchLibraries = libraryNames(40)) => {
       const read: string[] = [];
+      const refreshes: boolean[] = [];
       const { io } = fakeIo({
-        searchLibraries: () => libraryNames(40),
+        searchLibraries: () => searchLibraries,
         whereUsedLibraryLimit: () => limit,
-        whereUsed: async (_name, library) => {
+        whereUsed: async (_name, library, _type, options) => {
           read.push(library);
+          refreshes.push(options.refresh === true);
           if (library === "LIB1") {
             throw new Error("CPF3033");
           }
-          return library === "LIB0" ? [{ library: "LIB0", program: "CALLER", text: "", objectLibrary: "*LIBL", objectType: "*PGM" }] : [];
+          return {
+            rows: library === "LIB0" ? [{ library: "LIB0", program: "CALLER", text: "", objectLibrary: "*LIBL", objectType: "*PGM" }] : [],
+            snapshotTakenAt: "2026-01-01T00:00:00.000Z",
+            reusedSnapshot: false,
+          };
         },
       });
       const result = await tool(createResearchTools(io), "find_where_used").call({ object: "ORDENT", ...args }) as WhereUsedResult;
-      return { result, read };
+      return { result, read, refreshes };
     };
 
     it("reads the first 10 search libraries by default and says which were left out", async () => {
@@ -287,6 +317,34 @@ describe("research tools", () => {
       assert.equal(read.length, MAX_WHERE_USED_LIBRARIES);
       assert.deepEqual(result.librariesLeftOut, libraryNames(30).slice(25));
       assert.match(result.note ?? "", /call again/);
+    });
+
+    it("never reads IBM system libraries", async () => {
+      const { result, read } = await run(undefined, {}, ["QSYS", "PRODOBJ", "QSYS2", "QTEMP"]);
+      assert.deepEqual(read, ["PRODOBJ"]);
+      assert.deepEqual((result as unknown as { systemLibrariesSkipped: string[] }).systemLibrariesSkipped, ["QSYS", "QSYS2", "QTEMP"]);
+      assert.deepEqual((await run(undefined, { libraries: ["QSYS"] })).read, []);
+    });
+
+    it("passes refresh on only when asked", async () => {
+      assert.deepEqual((await run(2)).refreshes, [false, false]);
+      assert.deepEqual((await run(2, { refresh: true })).refreshes, [true, true]);
+    });
+
+    it("stops reading libraries once the client stopped waiting", async () => {
+      const abandoned = new AbortController();
+      const read: string[] = [];
+      const { io } = fakeIo({
+        searchLibraries: () => libraryNames(5),
+        whereUsed: async (_name, library) => {
+          read.push(library);
+          abandoned.abort();
+          return { rows: [], snapshotTakenAt: "2026-01-01T00:00:00.000Z", reusedSnapshot: false };
+        },
+      });
+      const result = await tool(createResearchTools(io), "find_where_used").call({ object: "ORDENT" }, abandoned.signal) as WhereUsedResult;
+      assert.deepEqual(read, ["LIB0"]);
+      assert.deepEqual(result.librariesSearched, ["LIB0"]);
     });
 
     it("adds no note when every library was read", async () => {

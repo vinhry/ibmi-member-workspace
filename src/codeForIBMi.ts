@@ -8,6 +8,7 @@ import {
   objectKey,
 } from "./dependencySources";
 import { CheckedOutMember, buildLocalFileName } from "./types";
+import { WHERE_USED_SNAPSHOT_MINUTES } from "./whereUsedSnapshot";
 
 type IBMi = ReturnType<CodeForIBMi["instance"]["getConnection"]>;
 type IBMiContent = ReturnType<IBMi["getContent"]>;
@@ -239,17 +240,33 @@ export async function findCompiledObject(name: string, libraries: string[]): Pro
   return undefined;
 }
 
+/**
+ * Commands that write a QTEMP outfile and then read it run one at a time. Find Dependencies and
+ * Bob's tools can run together, and one's `*REPLACE` must not land between the other's write
+ * and read.
+ */
+let outfileQueue: Promise<unknown> = Promise.resolve();
+
+function exclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const run = outfileQueue.then(fn, fn);
+  outfileQueue = run.catch(() => undefined);
+  return run;
+}
+
 /** Runs DSPPGMREF into a QTEMP outfile of the SQL job and returns its rows. */
 export async function programReferences(object: CompiledObject): Promise<Array<Record<string, unknown>>> {
   if (!OBJECT_NAME.test(object.library) || !OBJECT_NAME.test(object.name)) {
     throw new Error(`Not a valid object name: ${object.library}/${object.name}`);
   }
-  const connection = requireConnection();
-  await connection.runSQL(
-    `@QSYS/DSPPGMREF PGM(${object.library}/${object.name}) OUTPUT(*OUTFILE) OBJTYPE(${object.type}) ` +
-    "OUTFILE(QTEMP/IMWPGMREF) OUTMBR(*FIRST *REPLACE)"
-  );
-  return connection.runSQL("SELECT WHFNAM, WHLNAM, WHOTYP FROM QTEMP.IMWPGMREF");
+  const type = object.type === "*SRVPGM" ? "*SRVPGM" : "*PGM";
+  return exclusive(async () => {
+    const connection = requireConnection();
+    await connection.runSQL(
+      `@QSYS/DSPPGMREF PGM(${object.library}/${object.name}) OUTPUT(*OUTFILE) OBJTYPE(${type}) ` +
+      "OUTFILE(QTEMP/IMWPGMREF) OUTMBR(*FIRST *REPLACE)"
+    );
+    return connection.runSQL("SELECT WHFNAM, WHLNAM, WHOTYP FROM QTEMP.IMWPGMREF");
+  });
 }
 
 /** The source member each object was created from, when the object records one. */
@@ -357,28 +374,90 @@ export interface WhereUsedRow {
 }
 
 /**
- * Programs and service programs in `library` that refer to object `name`, from DSPPGMREF of
- * every program in the library. This reads all of them, so it can take a while on a big library.
+ * DSPPGMREF of every program in a library, kept in a QTEMP file of the SQL job. Reading a whole
+ * library is the slow part of a where-used search, so each library is read once and then asked
+ * about any number of objects. QTEMP ends with the job, so snapshots are dropped when Code for
+ * IBM i connects or disconnects.
  */
-export async function whereUsed(name: string, library: string, objectType?: string): Promise<WhereUsedRow[]> {
+const snapshots = new Map<string, { file: string; takenAt: number }>();
+let snapshotFiles = 0;
+
+/** Forgets every where-used snapshot, e.g. when the connection changes. */
+export function resetWhereUsedSnapshots(): void {
+  snapshots.clear();
+}
+
+export class OperationCancelledError extends Error {
+  constructor() {
+    super("Cancelled: the request was abandoned.");
+    this.name = "OperationCancelledError";
+  }
+}
+
+/**
+ * Programs and service programs in `library` that refer to object `name`, from DSPPGMREF of
+ * every program in the library. The first search in a library reads all of its programs, which
+ * can take a while; later ones use that snapshot for {@link WHERE_USED_SNAPSHOT_MINUTES} minutes
+ * unless `refresh` asks for a new one.
+ */
+export async function whereUsed(
+  name: string,
+  library: string,
+  objectType?: string,
+  options: { refresh?: boolean; signal?: AbortSignal } = {}
+): Promise<{ rows: WhereUsedRow[]; snapshotTakenAt: string; reusedSnapshot: boolean }> {
   const lib = objectName(library, "library");
   const object = objectName(name, "object");
-  const connection = requireConnection();
-  await connection.runSQL(
-    `@QSYS/DSPPGMREF PGM(${lib}/*ALL) OUTPUT(*OUTFILE) OBJTYPE(*PGM *SRVPGM) ` +
-    "OUTFILE(QTEMP/IMWWHERE) OUTMBR(*FIRST *REPLACE)"
-  );
   const bindings = [object];
   let typeFilter = "";
   if (objectType) {
     typeFilter = " AND UPPER(WHOTYP) = ?";
     bindings.push(objectType.trim().toUpperCase());
   }
-  const rows = await connection.runSQL(
-    "SELECT WHLIB, WHPNAM, WHTEXT, WHLNAM, WHOTYP, WHFUSG FROM QTEMP.IMWWHERE " +
-    `WHERE UPPER(WHFNAM) = ?${typeFilter}`,
-    { bindings }
-  );
+  return exclusive(async () => {
+    if (options.signal?.aborted) {
+      throw new OperationCancelledError();
+    }
+    const connection = requireConnection();
+    const key = `${(getSystemName() ?? "").toUpperCase()}|${lib}`;
+    const take = async () => {
+      const file = snapshots.get(key)?.file ?? `IMWWU${(++snapshotFiles).toString(36).toUpperCase().padStart(5, "0")}`;
+      await connection.runSQL(
+        `@QSYS/DSPPGMREF PGM(${lib}/*ALL) OUTPUT(*OUTFILE) OBJTYPE(*PGM *SRVPGM) ` +
+        `OUTFILE(QTEMP/${file}) OUTMBR(*FIRST *REPLACE)`
+      );
+      const snapshot = { file, takenAt: Date.now() };
+      snapshots.set(key, snapshot);
+      return snapshot;
+    };
+    const read = (file: string) => connection.runSQL(
+      `SELECT WHLIB, WHPNAM, WHTEXT, WHLNAM, WHOTYP, WHFUSG FROM QTEMP.${file} WHERE UPPER(WHFNAM) = ?${typeFilter}`,
+      { bindings }
+    );
+    const existing = snapshots.get(key);
+    const reusable = existing && !options.refresh &&
+      Date.now() - existing.takenAt < WHERE_USED_SNAPSHOT_MINUTES * 60_000;
+    let snapshot = reusable ? existing : await take();
+    let rows: Array<Record<string, unknown>>;
+    try {
+      rows = await read(snapshot.file);
+    } catch (err) {
+      if (!reusable) {
+        throw err;
+      }
+      // The job may have ended (and QTEMP with it) without a disconnect event: take it again.
+      snapshot = await take();
+      rows = await read(snapshot.file);
+    }
+    return {
+      rows: toWhereUsedRows(rows),
+      snapshotTakenAt: new Date(snapshot.takenAt).toISOString(),
+      reusedSnapshot: Boolean(reusable) && snapshot === existing,
+    };
+  });
+}
+
+function toWhereUsedRows(rows: ReadonlyArray<Record<string, unknown>>): WhereUsedRow[] {
   const found = new Map<string, WhereUsedRow>();
   for (const row of rows) {
     const usage = String(row.WHFUSG ?? "").trim();
@@ -466,12 +545,14 @@ export async function describeFile(name: string, libraries: string[]): Promise<F
     notes: [],
   };
   try {
-    await connection.runSQL(
-      `@QSYS/DSPDBR FILE(${objectName(library, "library")}/${objectName(systemName, "file")}) ` +
-      "OUTPUT(*OUTFILE) OUTFILE(QTEMP/IMWDBR) OUTMBR(*FIRST *REPLACE)"
-    );
-    // Column names vary a little between releases, so they are looked up rather than selected by name.
-    const rows = await connection.runSQL("SELECT * FROM QTEMP.IMWDBR");
+    const file = `${objectName(library, "library")}/${objectName(systemName, "file")}`;
+    const rows = await exclusive(async () => {
+      await connection.runSQL(
+        `@QSYS/DSPDBR FILE(${file}) OUTPUT(*OUTFILE) OUTFILE(QTEMP/IMWDBR) OUTMBR(*FIRST *REPLACE)`
+      );
+      // Column names vary a little between releases, so they are looked up rather than selected by name.
+      return connection.runSQL("SELECT * FROM QTEMP.IMWDBR");
+    });
     const column = (row: Record<string, unknown>, ...names: string[]) => {
       const key = Object.keys(row).find((candidate) => names.includes(candidate.toUpperCase()));
       return key === undefined ? "" : String(row[key] ?? "").trim();

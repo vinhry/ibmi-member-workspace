@@ -15,11 +15,17 @@ export interface McpTool {
   inputSchema: Record<string, unknown>;
   /** True for tools that never write anything, not even a local reference copy. */
   readOnly: boolean;
-  call(args: Record<string, unknown>): Promise<unknown>;
+  /** `signal` is aborted when the client stops waiting (it disconnected or timed out). */
+  call(args: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
 }
 
 /** A tool input the agent got wrong; reported to the agent as a tool error it can correct. */
 export class ToolInputError extends Error {}
+
+/** Tool calls running at once, at most; more are turned away so abandoned retries can't pile up. */
+export const MAX_CONCURRENT_CALLS = 4;
+/** Messages in one JSON-RPC batch, at most. */
+const MAX_BATCH = 20;
 
 export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
@@ -50,7 +56,8 @@ function isRequest(message: unknown): message is JsonRpcRequest {
 export async function handleMessage(
   message: unknown,
   tools: readonly McpTool[],
-  info: ServerInfo
+  info: ServerInfo,
+  signal: AbortSignal = new AbortController().signal
 ): Promise<JsonRpcResponse | undefined> {
   if (!isRequest(message)) {
     return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } };
@@ -103,10 +110,11 @@ export async function handleMessage(
         return fail(-32602, "Tool arguments must be an object");
       }
       try {
-        const result = await tool.call((args ?? {}) as Record<string, unknown>);
+        const result = await tool.call((args ?? {}) as Record<string, unknown>, signal);
         const structured = result && typeof result === "object" && !Array.isArray(result) ? result : { result };
+        // Compact JSON: the text goes into the model's context, where whitespace costs tokens.
         return reply({
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          content: [{ type: "text", text: JSON.stringify(result) }],
           structuredContent: structured,
         });
       } catch (err) {
@@ -151,6 +159,7 @@ const MAX_BODY = 1024 * 1024;
 export class BobMcpServer {
   private server: http.Server | undefined;
   private port = 0;
+  private running = 0;
 
   constructor(
     private readonly tools: readonly McpTool[],
@@ -222,14 +231,48 @@ export class BobMcpServer {
       return;
     }
     const messages = Array.isArray(message) ? message : [message];
+    if (messages.length > MAX_BATCH) {
+      send(400, { jsonrpc: "2.0", id: null, error: { code: -32600, message: `At most ${MAX_BATCH} messages per batch` } });
+      return;
+    }
+    // Stop long work (e.g. DSPPGMREF over more libraries) once nobody is waiting for the answer.
+    const abandoned = new AbortController();
+    res.on("close", () => {
+      if (!res.writableFinished) {
+        abandoned.abort();
+      }
+    });
     const responses: JsonRpcResponse[] = [];
     for (const item of messages) {
-      if (isRequest(item) && item.method === "tools/call") {
-        this.log(`[bob] ${String(item.params?.name)} ${JSON.stringify(item.params?.arguments ?? {})}`);
+      const call = isRequest(item) && item.method === "tools/call" ? item : undefined;
+      if (call && call.id !== undefined && this.running >= MAX_CONCURRENT_CALLS) {
+        responses.push({
+          jsonrpc: "2.0",
+          id: call.id,
+          result: {
+            content: [{ type: "text", text: `Busy with ${this.running} other requests to the IBM i; try again when they finish.` }],
+            isError: true,
+          },
+        });
+        continue;
       }
-      const response = await handleMessage(item, this.tools, this.info);
-      if (response) {
-        responses.push(response);
+      if (call) {
+        this.log(`[bob] ${String(call.params?.name)} ${JSON.stringify(call.params?.arguments ?? {})}`);
+        this.running++;
+      }
+      try {
+        const response = await handleMessage(item, this.tools, this.info, abandoned.signal);
+        if (response) {
+          responses.push(response);
+        }
+      } finally {
+        if (call) {
+          this.running--;
+        }
+      }
+      if (abandoned.signal.aborted) {
+        this.log(`[bob] The client stopped waiting${call ? ` for ${String(call.params?.name)}` : ""}; the rest of the work was skipped.`);
+        return;
       }
     }
     if (responses.length === 0) {

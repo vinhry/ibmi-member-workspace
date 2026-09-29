@@ -36,6 +36,8 @@ export type ReferenceCopyStatus =
   | "alreadyReference"
   /** Checked out for change before; left untouched and still editable by the user. */
   | "checkedOutForChange"
+  /** Not brought: the request was abandoned first. */
+  | "cancelled"
   | "failed";
 
 export interface ReferenceCopyResult {
@@ -50,11 +52,16 @@ export interface ReferenceCopyResult {
 export async function bringReferenceCopies(
   io: ReferenceCopyIo,
   members: readonly MemberInfo[],
-  checkpointPaths: string[]
+  checkpointPaths: string[],
+  signal?: AbortSignal
 ): Promise<ReferenceCopyResult[]> {
   const results: ReferenceCopyResult[] = [];
   for (const m of members) {
     const member = `${m.library}/${m.sourceFile}(${m.memberName})`.toUpperCase();
+    if (signal?.aborted) {
+      results.push({ member, status: "cancelled" });
+      continue;
+    }
     const existing = io.findEntry(m.library, m.sourceFile, m.memberName);
     if (existing) {
       const reference = isReferenceCopy(existing);

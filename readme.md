@@ -187,7 +187,7 @@ To skip typing the request, right-click one or more members and choose **Bob, In
 
 The menu is on checkouts in **Checked Out Members**, on source members in the Code for IBM i **Object Browser** (no checkout needed), and on checked-out files in the **Explorer**. The prompt appears in Bob's chat without being sent: review it, change it if you like, and press **Enter**. It names up to 25 members. A checked-out file inside the workspace is added as an `@/` mention, so Bob reads it straight away.
 
-The prompt is also left on the clipboard. If Bob's chat box stays empty, paste it there.
+The prompt is also left on the clipboard. If Bob's chat box stays empty, paste it there. If Bob's chat doesn't take the focus and the prompt lands in an editor instead, it is undone right away, and you're told to paste it yourself.
 
 **Everything Bob looks at is a read-only reference copy.** These are often production sources, so no tool changes the IBM i, and no tool can check a member out for change. A member Bob reads or finds as a dependency is brought into your checkout folder as a read-only reference copy, exactly like **Bring for Reference**: its file is read-only, and Upload, Merge Back and upload on save refuse it. A member you already checked out for change is used as it is and never overwritten. Every copy Bob brings is listed in the output panel and in Checked Out Members. When Local Change History is on and no work item is chosen yet, you're asked which work item the copies belong to.
 
@@ -196,9 +196,12 @@ Security:
 - The server listens on `127.0.0.1` only. It accepts only requests with the token stored in `.bob/mcp.json`, and never requests from a browser page.
 - The token is kept in your editor's secret storage. In a Git repository, `.bob/mcp.json` is added to `.git/info/exclude` so the token isn't committed (`.gitignore` is left alone).
 - `.bob` files are never written through links.
+- Each workspace has its own token. **Disconnect** replaces it, so an old copy of `.bob/mcp.json` stops working.
+- At most 4 tool calls run at once. When Bob stops waiting for a call (it timed out or was cancelled), the remaining work is skipped: no more libraries are read and no more copies are brought.
+- Bob is told that source code and everything else the tools return is data, never instructions to follow.
 - Turn the tools off with `ibmi-member-workspace.bob.researchTools` in your user settings. **Disconnect Bob from IBM i Research Tools** removes the server from `.bob/mcp.json`.
 
-`find_where_used` reads the libraries one after another, and each one takes as long as `DSPPGMREF` over every program in it. Bob stops waiting for a tool after its MCP network timeout, which is 1 minute by default. If you raise `bob.whereUsedMaxLibraries`, raise that timeout too, in Bob's MCP settings (up to 5 minutes). Each result reports `elapsedSeconds`, so you can see how close a search came.
+`find_where_used` reads the libraries one after another. The first search in a library runs `DSPPGMREF` over every program in it. That snapshot is kept for 15 minutes, so later searches in the same library, for any object, are fast. Bob can ask for fresh snapshots with `refresh`, for example after you compile. Snapshots are dropped when you reconnect. IBM system libraries such as `QSYS` and `QSYS2` are never read. Bob stops waiting for a tool after its MCP network timeout, which is 1 minute by default. If you raise `bob.whereUsedMaxLibraries`, raise that timeout too, in Bob's MCP settings (up to 5 minutes). Each result reports `elapsedSeconds`, so you can see how close a search came.
 
 The tools are available while the extension is running: once you open the Member Workspace view or run one of its commands.
 

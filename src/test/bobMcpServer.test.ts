@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as http from "node:http";
-import { BobMcpServer, McpTool, handleMessage, refusal } from "../bobMcpServer";
+import { BobMcpServer, MAX_CONCURRENT_CALLS, McpTool, handleMessage, refusal } from "../bobMcpServer";
 
 const info = { name: "test", version: "1.0.0", instructions: "Read only." };
 
@@ -133,6 +133,66 @@ describe("BobMcpServer", () => {
     const notification = JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" });
     assert.equal((await post(port, notification, { Authorization: "Bearer token" })).status, 202);
     assert.equal((await post(port, "{ nope", { Authorization: "Bearer token" })).status, 400);
+  });
+
+  it(`runs at most ${MAX_CONCURRENT_CALLS} tool calls at once`, async (t) => {
+    const release: Array<() => void> = [];
+    const slow: McpTool = { ...echo, name: "slow", call: () => new Promise((resolve) => release.push(() => resolve({ done: true }))) };
+    const server = new BobMcpServer([slow], "token", info, () => undefined);
+    const port = await server.start(undefined);
+    t.after(() => server.dispose());
+    const call = (id: number) =>
+      post(port, JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "slow" } }), { Authorization: "Bearer token" });
+
+    const running = Array.from({ length: MAX_CONCURRENT_CALLS }, (_, i) => call(i));
+    while (release.length < MAX_CONCURRENT_CALLS) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const refused = JSON.parse((await call(99)).body);
+    assert.equal(refused.result.isError, true);
+    assert.match(refused.result.content[0].text, /Busy/);
+
+    release.forEach((done) => done());
+    for (const response of await Promise.all(running)) {
+      assert.deepEqual(JSON.parse(response.body).result.structuredContent, { done: true });
+    }
+  });
+
+  it("tells a tool when the client stops waiting", async (t) => {
+    let aborted: Promise<void> | undefined;
+    const waiting: McpTool = {
+      ...echo,
+      name: "waiting",
+      call: (_args, signal) => {
+        aborted = new Promise((resolve) => signal.addEventListener("abort", () => resolve()));
+        return new Promise(() => undefined);
+      },
+    };
+    const server = new BobMcpServer([waiting], "token", info, () => undefined);
+    const port = await server.start(undefined);
+    t.after(() => server.dispose());
+    const req = http.request({
+      host: "127.0.0.1",
+      port,
+      path: "/mcp",
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer token" },
+    });
+    req.on("error", () => undefined);
+    req.end(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "waiting" } }));
+    while (!aborted) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    req.destroy();
+    await aborted;
+  });
+
+  it("refuses oversized batches", async (t) => {
+    const server = new BobMcpServer([echo], "token", info, () => undefined);
+    const port = await server.start(undefined);
+    t.after(() => server.dispose());
+    const batch = JSON.stringify(Array.from({ length: 21 }, (_, id) => ({ jsonrpc: "2.0", id, method: "ping" })));
+    assert.equal((await post(port, batch, { Authorization: "Bearer token" })).status, 400);
   });
 
   it("uses another port when the saved one is taken", async (t) => {

@@ -4,7 +4,7 @@ import { CheckoutTreeProvider } from "./checkoutTreeProvider";
 import { MergeHandler, mergeDocumentKey } from "./mergeHandler";
 import { GitService } from "./gitService";
 import { isBobProduct } from "./bobIde";
-import { getSystemName, onConnectionChange } from "./codeForIBMi";
+import { getSystemName, onConnectionChange, resetWhereUsedSnapshots } from "./codeForIBMi";
 import { errorMessage } from "./errors";
 import { ProviderAvailabilityCache } from "./dependencySources";
 import { LocalFileWatcher } from "./localFileWatcher";
@@ -95,8 +95,9 @@ export async function activate(
 
   const dependencyAvailability = new ProviderAvailabilityCache();
   onConnectionChange(context, () => {
-    // A reconnect may reach a different system, or one whose tools changed.
+    // A reconnect may reach a different system, or one whose tools changed; QTEMP starts empty.
     dependencyAvailability.reset();
+    resetWhereUsedSnapshots();
     treeProvider.refresh();
     const system = getSystemName();
     if (system && service.gitIntegrationOn()) {

@@ -289,7 +289,8 @@ export async function checkoutMembersBatch(
 export async function bringReferenceCopiesFor(
   ctx: CommandContext,
   system: string,
-  members: MemberInfo[]
+  members: MemberInfo[],
+  signal?: AbortSignal
 ): Promise<ReferenceCopyResult[]> {
   const { service, log } = ctx;
   if (members.length === 0) {
@@ -315,7 +316,8 @@ export async function bringReferenceCopiesFor(
         log: (message) => log.appendLine(message),
       },
       members,
-      downloaded
+      downloaded,
+      signal
     );
     await service.saveBatchCheckpoint(
       system,
