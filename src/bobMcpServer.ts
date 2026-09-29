@@ -171,7 +171,18 @@ export class BobMcpServer {
   /** Listens on 127.0.0.1, on `preferredPort` when it is free, otherwise on any free port. */
   async start(preferredPort: number | undefined): Promise<number> {
     const listen = (port: number) => new Promise<http.Server>((resolve, reject) => {
-      const server = http.createServer((req, res) => void this.handle(req, res));
+      const server = http.createServer((req, res) => {
+        this.handle(req, res).catch((err) => {
+          this.log(`[bob] Request failed: ${err instanceof Error ? err.message : String(err)}`);
+          // Never leave a client waiting for an answer that won't come.
+          if (!res.headersSent) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "Internal error" } }));
+          } else if (!res.writableEnded) {
+            res.end();
+          }
+        });
+      });
       server.once("error", reject);
       server.listen(port, "127.0.0.1", () => {
         server.off("error", reject);
@@ -191,15 +202,22 @@ export class BobMcpServer {
     return this.port;
   }
 
+  /**
+   * Stops listening and closes every open connection too: `close()` alone leaves keep-alive
+   * connections open, and a client on one could go on using a token that was just replaced.
+   */
   dispose(): void {
     this.server?.close();
+    this.server?.closeAllConnections();
     this.server = undefined;
   }
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const send = (status: number, body?: unknown) => {
-      res.writeHead(status, body === undefined ? {} : { "Content-Type": "application/json" });
-      res.end(body === undefined ? undefined : JSON.stringify(body));
+      // Serialize first: a body that can't be serialized must not leave a 200 status already sent.
+      const text = body === undefined ? undefined : JSON.stringify(body);
+      res.writeHead(status, text === undefined ? {} : { "Content-Type": "application/json" });
+      res.end(text);
     };
     const refused = refusal(req.headers, this.token, this.port);
     if (refused) {

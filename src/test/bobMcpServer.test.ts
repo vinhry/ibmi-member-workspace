@@ -187,6 +187,58 @@ describe("BobMcpServer", () => {
     await aborted;
   });
 
+  it("closes open keep-alive connections when disposed, so an old token can't go on working", async () => {
+    const server = new BobMcpServer([echo], "token", info, () => undefined);
+    const port = await server.start(undefined);
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    const ping = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
+    const request = () => new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        { host: "127.0.0.1", port, path: "/mcp", method: "POST", agent, headers: { Authorization: "Bearer token" } },
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode ?? 0));
+        }
+      );
+      req.on("error", reject);
+      req.end(ping);
+    });
+    try {
+      assert.equal(await request(), 200);
+      server.dispose();
+      await assert.rejects(request());
+    } finally {
+      agent.destroy();
+      server.dispose();
+    }
+  });
+
+  it("answers 500 instead of leaving the client waiting when handling fails", async (t) => {
+    let serialized = 0;
+    // Serializes once for the text content, then fails when the response is written.
+    const brittle: McpTool = {
+      ...echo,
+      name: "brittle",
+      call: async () => ({
+        toJSON: () => {
+          if (++serialized > 1) {
+            throw new Error("cannot serialize");
+          }
+          return { ok: true };
+        },
+      }),
+    };
+    const server = new BobMcpServer([brittle], "token", info, () => undefined);
+    const port = await server.start(undefined);
+    t.after(() => server.dispose());
+    const response = await post(
+      port,
+      JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "brittle" } }),
+      { Authorization: "Bearer token" }
+    );
+    assert.equal(response.status, 500);
+  });
+
   it("refuses oversized batches", async (t) => {
     const server = new BobMcpServer([echo], "token", info, () => undefined);
     const port = await server.start(undefined);

@@ -349,6 +349,9 @@ const SQL_CLAUSE = new Set([
   "FETCH", "FOR", "UNION", "EXCEPT", "INTERSECT", "WITH", "LIMIT", "OFFSET", "ON", "USING", "SET", "OPTIMIZE",
 ]);
 
+/** Tokens of one SQL statement that are looked at; the rest of a longer one is ignored. */
+const MAX_SQL_TOKENS = 5000;
+
 /** Tables and views embedded SQL reads or changes, and the procedures it CALLs. */
 function scanEmbeddedSql(lines: string[], type: string): RawReference[] {
   if (!RPG_TYPES.has(type)) {
@@ -357,15 +360,21 @@ function scanEmbeddedSql(lines: string[], type: string): RawReference[] {
   const refs: RawReference[] = [];
   for (const { line, text, sql } of sqlStatements(lines)) {
     const upper = sql.replace(/"([^"]*)"/g, (_match, name: string) => name).toUpperCase();
-    const tokens: string[] = upper.match(/[:A-Z0-9_$#@][A-Z0-9_$#@./]*|[(),]/g) ?? [];
+    // A statement is at most 200 lines; the token cap bounds even one made of nothing but punctuation.
+    const tokens: string[] = (upper.match(/[:A-Z0-9_$#@][A-Z0-9_$#@./]*|[(),]/g) ?? []).slice(0, MAX_SQL_TOKENS);
     if (tokens[0] === "INCLUDE") {
       continue;
+    }
+    // The next ")" at or after each position, found in one pass rather than a search per token.
+    const nextClose = new Array<number>(tokens.length + 1).fill(-1);
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      nextClose[i] = tokens[i] === ")" ? i : nextClose[i + 1];
     }
     // Common table expression names (WITH x AS (…), y (a, b) AS (…)) are local to the statement.
     const local = new Set<string>();
     tokens.forEach((token, i) => {
       if ((token === "WITH" || token === ",") && isSqlName(tokens[i + 1])) {
-        const as = tokens[i + 2] === "(" ? tokens.indexOf(")", i + 2) + 1 : i + 2;
+        const as = tokens[i + 2] === "(" ? (nextClose[i + 2] ?? -1) + 1 : i + 2;
         if (as > 0 && tokens[as] === "AS" && tokens[as + 1] === "(") {
           local.add(tokens[i + 1]);
         }

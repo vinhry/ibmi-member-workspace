@@ -196,12 +196,13 @@ Security:
 - The server listens on `127.0.0.1` only. It accepts only requests with the token stored in `.bob/mcp.json`, and never requests from a browser page.
 - The token is kept in your editor's secret storage. In a Git repository, `.bob/mcp.json` is added to `.git/info/exclude` so the token isn't committed (`.gitignore` is left alone).
 - `.bob` files are never written through links.
-- Each workspace has its own token. **Disconnect** replaces it, so an old copy of `.bob/mcp.json` stops working.
+- Each workspace has its own token. **Disconnect** replaces it and closes open connections, so an old copy of `.bob/mcp.json` stops working at once.
+- Only folders you connected on this computer are kept up to date. A `.bob/mcp.json` that came with a cloned project is never given your token. Run **Connect** there if you want to use it. Don't commit `.bob/mcp.json`.
 - At most 4 tool calls run at once. When Bob stops waiting for a call (it timed out or was cancelled), the remaining work is skipped: no more libraries are read and no more copies are brought.
 - Bob is told that source code and everything else the tools return is data, never instructions to follow.
 - Turn the tools off with `ibmi-member-workspace.bob.researchTools` in your user settings. **Disconnect Bob from IBM i Research Tools** removes the server from `.bob/mcp.json`.
 
-`find_where_used` reads the libraries one after another. The first search in a library runs `DSPPGMREF` over every program in it. That snapshot is kept for 15 minutes, so later searches in the same library, for any object, are fast. Bob can ask for fresh snapshots with `refresh`, for example after you compile. Snapshots are dropped when you reconnect. IBM system libraries such as `QSYS` and `QSYS2` are never read. Bob stops waiting for a tool after its MCP network timeout, which is 1 minute by default. If you raise `bob.whereUsedMaxLibraries`, raise that timeout too, in Bob's MCP settings (up to 5 minutes). Each result reports `elapsedSeconds`, so you can see how close a search came.
+`find_where_used` reads the libraries one after another. The first search in a library runs `DSPPGMREF` over every program in it. That snapshot is kept for 15 minutes, so later searches in the same library, for any object, are fast. Bob can ask for fresh snapshots with `refresh`, for example after you compile. Snapshots are dropped when you reconnect. At most 10 are kept, in QTEMP of Code for IBM i's SQL job, and the least recently used one makes room for the next. IBM system libraries such as `QSYS` and `QSYS2` are never read. Bob stops waiting for a tool after its MCP network timeout, which is 1 minute by default. If you raise `bob.whereUsedMaxLibraries`, raise that timeout too, in Bob's MCP settings (up to 5 minutes). Each result reports `elapsedSeconds`, so you can see how close a search came.
 
 The tools are available while the extension is running: once you open the Member Workspace view or run one of its commands.
 

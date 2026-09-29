@@ -267,6 +267,14 @@ describe("scanReferences: embedded SQL", () => {
     assert.deepEqual(brief(scanReferences(source, "sqlrpgle")), ["table|||ORDDTL|"]);
   });
 
+  it("scans statements full of ', name (' quickly", () => {
+    const statement = ["exec sql select 1 from t", ...Array(199).fill(",a(".repeat(26))];
+    const source = ["**FREE", ...Array(100).fill(statement).flat()].join("\n");
+    const started = Date.now();
+    scanReferences(source, "sqlrpgle");
+    assert.ok(Date.now() - started < 2000);
+  });
+
   it("scans a long run of unterminated statements quickly", () => {
     const started = Date.now();
     scanReferences(["**FREE", ...Array(50000).fill("exec sql select a from t,")].join("\n"), "sqlrpgle");

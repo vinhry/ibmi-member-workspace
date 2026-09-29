@@ -8,7 +8,7 @@ import {
   objectKey,
 } from "./dependencySources";
 import { CheckedOutMember, buildLocalFileName } from "./types";
-import { WHERE_USED_SNAPSHOT_MINUTES } from "./whereUsedSnapshot";
+import { Snapshot, SnapshotStore } from "./whereUsedSnapshot";
 
 type IBMi = ReturnType<CodeForIBMi["instance"]["getConnection"]>;
 type IBMiContent = ReturnType<IBMi["getContent"]>;
@@ -247,10 +247,27 @@ export async function findCompiledObject(name: string, libraries: string[]): Pro
  */
 let outfileQueue: Promise<unknown> = Promise.resolve();
 
-function exclusive<T>(fn: () => Promise<T>): Promise<T> {
-  const run = outfileQueue.then(fn, fn);
+/**
+ * Runs `fn` after every command queued before it. A caller whose `signal` aborts stops waiting at
+ * once, and its `fn` is skipped when its turn comes, so one hung command doesn't also hold up
+ * requests nobody is waiting for any more.
+ */
+function exclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  const turn = () => (signal?.aborted ? Promise.reject(new OperationCancelledError()) : fn());
+  const run = outfileQueue.then(turn, turn);
   outfileQueue = run.catch(() => undefined);
-  return run;
+  if (!signal) {
+    return run;
+  }
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new OperationCancelledError());
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+    run.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
 /** Runs DSPPGMREF into a QTEMP outfile of the SQL job and returns its rows. */
@@ -377,10 +394,9 @@ export interface WhereUsedRow {
  * DSPPGMREF of every program in a library, kept in a QTEMP file of the SQL job. Reading a whole
  * library is the slow part of a where-used search, so each library is read once and then asked
  * about any number of objects. QTEMP ends with the job, so snapshots are dropped when Code for
- * IBM i connects or disconnects.
+ * IBM i connects or disconnects, and only the most recently used ones are kept (`whereUsedSnapshot.ts`).
  */
-const snapshots = new Map<string, { file: string; takenAt: number }>();
-let snapshotFiles = 0;
+const snapshots = new SnapshotStore();
 
 /** Forgets every where-used snapshot, e.g. when the connection changes. */
 export function resetWhereUsedSnapshots(): void {
@@ -397,7 +413,7 @@ export class OperationCancelledError extends Error {
 /**
  * Programs and service programs in `library` that refer to object `name`, from DSPPGMREF of
  * every program in the library. The first search in a library reads all of its programs, which
- * can take a while; later ones use that snapshot for {@link WHERE_USED_SNAPSHOT_MINUTES} minutes
+ * can take a while; later ones reuse that snapshot for a while (`WHERE_USED_SNAPSHOT_MINUTES`)
  * unless `refresh` asks for a new one.
  */
 export async function whereUsed(
@@ -411,50 +427,52 @@ export async function whereUsed(
   const bindings = [object];
   let typeFilter = "";
   if (objectType) {
-    typeFilter = " AND UPPER(WHOTYP) = ?";
+    // DSPPGMREF writes names and types in uppercase, so plain comparisons can use the index.
+    typeFilter = " AND WHOTYP = ?";
     bindings.push(objectType.trim().toUpperCase());
   }
   return exclusive(async () => {
-    if (options.signal?.aborted) {
-      throw new OperationCancelledError();
-    }
     const connection = requireConnection();
     const key = `${(getSystemName() ?? "").toUpperCase()}|${lib}`;
-    const take = async () => {
-      const file = snapshots.get(key)?.file ?? `IMWWU${(++snapshotFiles).toString(36).toUpperCase().padStart(5, "0")}`;
+    const take = async (): Promise<Snapshot> => {
+      const file = snapshots.fileFor(key);
       await connection.runSQL(
         `@QSYS/DSPPGMREF PGM(${lib}/*ALL) OUTPUT(*OUTFILE) OBJTYPE(*PGM *SRVPGM) ` +
         `OUTFILE(QTEMP/${file}) OUTMBR(*FIRST *REPLACE)`
       );
+      try {
+        await connection.runSQL(`CREATE INDEX QTEMP.${file}_I ON QTEMP.${file} (WHFNAM)`);
+      } catch {
+        // Already there (the file is reused) or not allowed: the query works without it.
+      }
       const snapshot = { file, takenAt: Date.now() };
-      snapshots.set(key, snapshot);
+      snapshots.record(key, snapshot);
       return snapshot;
     };
     const read = (file: string) => connection.runSQL(
-      `SELECT WHLIB, WHPNAM, WHTEXT, WHLNAM, WHOTYP, WHFUSG FROM QTEMP.${file} WHERE UPPER(WHFNAM) = ?${typeFilter}`,
+      `SELECT WHLIB, WHPNAM, WHTEXT, WHLNAM, WHOTYP, WHFUSG FROM QTEMP.${file} WHERE WHFNAM = ?${typeFilter}`,
       { bindings }
     );
-    const existing = snapshots.get(key);
-    const reusable = existing && !options.refresh &&
-      Date.now() - existing.takenAt < WHERE_USED_SNAPSHOT_MINUTES * 60_000;
-    let snapshot = reusable ? existing : await take();
+    const reused = options.refresh ? undefined : snapshots.fresh(key, Date.now());
+    let snapshot = reused ?? await take();
     let rows: Array<Record<string, unknown>>;
     try {
       rows = await read(snapshot.file);
     } catch (err) {
-      if (!reusable) {
+      if (!reused) {
         throw err;
       }
       // The job may have ended (and QTEMP with it) without a disconnect event: take it again.
+      snapshots.forget(key);
       snapshot = await take();
       rows = await read(snapshot.file);
     }
     return {
       rows: toWhereUsedRows(rows),
       snapshotTakenAt: new Date(snapshot.takenAt).toISOString(),
-      reusedSnapshot: Boolean(reusable) && snapshot === existing,
+      reusedSnapshot: snapshot === reused,
     };
-  });
+  }, options.signal);
 }
 
 function toWhereUsedRows(rows: ReadonlyArray<Record<string, unknown>>): WhereUsedRow[] {

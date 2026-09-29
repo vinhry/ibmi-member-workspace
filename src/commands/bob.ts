@@ -41,6 +41,11 @@ function tokenKey(): string {
 const SHARED_TOKEN_KEY = "bob.mcpToken";
 /** workspaceState key of the port, kept so `.bob/mcp.json` rarely needs rewriting. */
 const PORT_KEY = "bob.mcpPort";
+/**
+ * workspaceState key of the folders the user connected on this computer. Only those are kept up
+ * to date: a `.bob/mcp.json` that came with a cloned project is never given this user's token.
+ */
+const CONNECTED_KEY = "bob.connectedFolders";
 
 const MCP_CONFIG = path.join(".bob", "mcp.json");
 const RULES_FILE = path.join(".bob", "rules", "ibmi-member-workspace.md");
@@ -68,6 +73,8 @@ export function registerBobCommands(ctx: CommandContext): void {
   const { context, log } = ctx;
   let server: BobMcpServer | undefined;
   let starting: Promise<void> | undefined;
+  /** Bumped by every stop, so a start still in progress knows it was overtaken. */
+  let generation = 0;
   let port: number | undefined;
   let token: string | undefined;
 
@@ -82,13 +89,25 @@ export function registerBobCommands(ctx: CommandContext): void {
     if (server || !enabled()) {
       return Promise.resolve();
     }
-    starting ??= startNow().finally(() => {
-      starting = undefined;
-    });
+    if (!starting) {
+      const promise: Promise<void> = startNow().finally(() => {
+        if (starting === promise) {
+          starting = undefined;
+        }
+      });
+      starting = promise;
+    }
     return starting;
   };
 
+  const connectedFolders = () => context.workspaceState.get<string[]>(CONNECTED_KEY, []);
+  const setConnected = async (folder: vscode.WorkspaceFolder, connected: boolean) => {
+    const others = connectedFolders().filter((uri) => uri !== folder.uri.toString());
+    await context.workspaceState.update(CONNECTED_KEY, connected ? [...others, folder.uri.toString()] : others);
+  };
+
   const startNow = async () => {
+    const mine = generation;
     await context.secrets.delete(SHARED_TOKEN_KEY);
     token = await context.secrets.get(tokenKey());
     if (!token) {
@@ -100,14 +119,22 @@ export function registerBobCommands(ctx: CommandContext): void {
       version: String(context.extension.packageJSON.version ?? ""),
       instructions: SERVER_INSTRUCTIONS,
     }, (message) => log.appendLine(message));
-    port = await candidate.start(context.workspaceState.get<number>(PORT_KEY));
+    const listening = await candidate.start(context.workspaceState.get<number>(PORT_KEY));
+    // Stopped (turned off, or Disconnect) while this start was under way: don't come back up.
+    if (mine !== generation || !enabled()) {
+      candidate.dispose();
+      return;
+    }
     server = candidate;
+    port = listening;
     await context.workspaceState.update(PORT_KEY, port);
     log.appendLine(`[bob] Research tools listening on 127.0.0.1:${port}`);
-    refreshConfiguredEntries(port, token, tools, log);
+    refreshConfiguredEntries(port, token, tools, connectedFolders(), log);
   };
 
   const stop = () => {
+    generation++;
+    starting = undefined;
     server?.dispose();
     server = undefined;
     port = undefined;
@@ -156,7 +183,7 @@ export function registerBobCommands(ctx: CommandContext): void {
           modal: true,
           detail:
             `This adds the "${MCP_SERVER_NAME}" server to .bob/mcp.json with a token that only works on this computer, ` +
-            "and, in a Git repository, keeps that file out of commits.\n\nThe tools only read the IBM i. Members Bob looks at are " +
+            "and, in a Git repository, keeps that file out of commits. Don't commit or share .bob/mcp.json.\n\nThe tools only read the IBM i. Members Bob looks at are " +
             "brought into your checkout folder as read-only reference copies, which can't be uploaded or merged back.",
         },
         "Connect",
@@ -169,6 +196,7 @@ export function registerBobCommands(ctx: CommandContext): void {
       try {
         const target = path.join(root, MCP_CONFIG);
         writeFileBelow(root, target, mergeMcpConfig(readFileBelow(root, target), mcpServerEntry(port, token, toolNames(tools))));
+        await setConnected(folder, true);
         const excluded = excludeFromGit(root, "/.bob/mcp.json");
         if (choice === "Connect and Add Bob Rules") {
           const rules = path.join(root, RULES_FILE);
@@ -199,6 +227,7 @@ export function registerBobCommands(ctx: CommandContext): void {
           return;
         }
         writeFileBelow(root, target, mergeMcpConfig(existing, undefined));
+        await setConnected(folder, false);
         log.appendLine(`[bob] Disconnected ${folder.name}`);
         // A new token, so a copy of the old file (a backup, another checkout) no longer works.
         // Other folders of this workspace that stay connected get the new token when the server restarts.
@@ -405,11 +434,16 @@ async function pickFolder(): Promise<vscode.WorkspaceFolder | undefined> {
     : vscode.window.showWorkspaceFolderPick({ placeHolder: "Which folder should Bob use the IBM i research tools in?" });
 }
 
-/** Keeps connected folders pointing at the port and token in use, e.g. after the saved port was taken. */
+/**
+ * Keeps the folders the user connected on this computer pointing at the port and token in use,
+ * e.g. after the saved port was taken. An entry in any other folder (one that came with a cloned
+ * project) is left alone: writing this user's token into it could get the token committed.
+ */
 function refreshConfiguredEntries(
   port: number,
   token: string,
   tools: readonly McpTool[],
+  connected: readonly string[],
   log: vscode.OutputChannel
 ): void {
   const entry = mcpServerEntry(port, token, toolNames(tools));
@@ -420,6 +454,13 @@ function refreshConfiguredEntries(
       const existing = readFileBelow(root, target);
       const current = configuredEntry(existing);
       if (!current) {
+        continue;
+      }
+      if (!connected.includes(folder.uri.toString())) {
+        log.appendLine(
+          `[bob] ${target} has an "${MCP_SERVER_NAME}" entry that wasn't connected on this computer; left as it is. ` +
+          "Run Connect Bob to IBM i Research Tools to use it."
+        );
         continue;
       }
       const headers = current.headers as Record<string, unknown> | undefined;
