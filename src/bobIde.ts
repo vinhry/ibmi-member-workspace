@@ -29,6 +29,9 @@ export function mcpServerEntry(port: number, token: string, tools: readonly stri
   };
 }
 
+/** Options of this extension's `.bob/mcp.json` entry that belong to the user and are kept. */
+const USER_OPTIONS: ReadonlySet<string> = new Set(["disabled", "timeout", "disabledTools"]);
+
 /**
  * `.bob/mcp.json` text with this extension's entry set (or removed, with `entry` undefined),
  * keeping every other server and setting in the file.
@@ -48,12 +51,13 @@ export function mergeMcpConfig(existing: string | undefined, entry: McpServerEnt
   }
   const merged: Record<string, unknown> = { ...(servers as Record<string, unknown> | undefined) };
   if (entry) {
-    // Keep the user's own choices for the entry (e.g. "disabled"); the connection details are ours.
+    // Keep the user's own choices for the entry (e.g. "disabled"); everything else is ours. A
+    // "command" or "type" in an entry that came with a cloned project must not survive Connect.
     const previous = merged[MCP_SERVER_NAME];
-    merged[MCP_SERVER_NAME] = {
-      ...(previous && typeof previous === "object" && !Array.isArray(previous) ? previous : {}),
-      ...entry,
-    };
+    const kept = previous && typeof previous === "object" && !Array.isArray(previous)
+      ? Object.fromEntries(Object.entries(previous).filter(([key]) => USER_OPTIONS.has(key)))
+      : {};
+    merged[MCP_SERVER_NAME] = { ...kept, ...entry };
   } else {
     delete merged[MCP_SERVER_NAME];
   }
@@ -128,28 +132,50 @@ export function writeFileBelow(root: string, target: string, content: string, mo
 }
 
 /**
- * Adds `pattern` to `.git/info/exclude` of the repository at `root`, so a file holding a
- * token isn't committed. `.gitignore` is left alone: it is shared with everyone else.
- * Returns false when `root` is not the top of a Git repository.
+ * - "excluded": the file is listed in the repository's `.git/info/exclude`.
+ * - "noRepository": the folder isn't in a Git repository.
+ * - "notExcluded": the folder is in a repository whose exclude file isn't ours to edit
+ *   (a worktree or submodule, whose `.git` is a file, or a link).
  */
-export function excludeFromGit(root: string, pattern: string): boolean {
-  const gitDir = path.join(root, ".git");
-  let stat: fs.Stats;
-  try {
-    stat = fs.lstatSync(gitDir);
-  } catch {
-    return false;
+export type ExcludeResult = "excluded" | "noRepository" | "notExcluded";
+
+/** `text` as a literal gitignore pattern: wildcards and trailing blanks escaped. */
+function literalPattern(text: string): string {
+  return text.replace(/[\\*?[]/g, "\\$&").replace(/ +$/, (blanks) => blanks.replace(/ /g, "\\ "));
+}
+
+/**
+ * Adds `file` (relative to `folder`, e.g. ".bob/mcp.json") to `.git/info/exclude` of the repository
+ * holding `folder`, which may be `folder` itself or a folder above it, so a file holding a token isn't
+ * committed. `.gitignore` is left alone: it is shared with everyone else.
+ */
+export function excludeFromGit(folder: string, file: string): ExcludeResult {
+  let root = path.resolve(folder);
+  let stat: fs.Stats | undefined;
+  for (;;) {
+    try {
+      stat = fs.lstatSync(path.join(root, ".git"));
+      break;
+    } catch {
+      const parent = path.dirname(root);
+      if (parent === root) {
+        return "noRepository";
+      }
+      root = parent;
+    }
   }
   if (!stat.isDirectory()) {
     // A worktree or submodule (.git file) or a link: not ours to edit.
-    return false;
+    return "notExcluded";
   }
-  const exclude = path.join(gitDir, "info", "exclude");
+  const relative = path.relative(root, path.join(path.resolve(folder), file)).split(path.sep).join("/");
+  const pattern = `/${literalPattern(relative)}`;
+  const exclude = path.join(root, ".git", "info", "exclude");
   const current = readFileBelow(root, exclude) ?? "";
-  if (current.split(/\r?\n/).some((line) => line.trim() === pattern)) {
-    return true;
+  if (current.split(/\r?\n/).some((line) => line === pattern || line.trim() === pattern)) {
+    return "excluded";
   }
   const separator = current && !current.endsWith("\n") ? "\n" : "";
   writeFileBelow(root, exclude, `${current}${separator}${pattern}\n`, 0o644);
-  return true;
+  return "excluded";
 }

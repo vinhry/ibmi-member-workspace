@@ -247,6 +247,18 @@ describe("BobMcpServer", () => {
     assert.equal((await post(port, batch, { Authorization: "Bearer token" })).status, 400);
   });
 
+  it("logs a shortened copy of large tool arguments", async (t) => {
+    const logged: string[] = [];
+    const server = new BobMcpServer([echo], "token", info, (message) => logged.push(message));
+    const port = await server.start(undefined);
+    t.after(() => server.dispose());
+    const call = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "echo", arguments: { x: "y".repeat(100_000) } } });
+    assert.equal((await post(port, call, { Authorization: "Bearer token" })).status, 200);
+    const line = logged.find((message) => message.startsWith("[bob] echo "));
+    assert.ok(line && line.length < 1000, `logged ${line?.length} characters`);
+    assert.match(line, /\(100008 characters\)$/);
+  });
+
   it("uses another port when the saved one is taken", async (t) => {
     const first = new BobMcpServer([echo], "token", info, () => undefined);
     const port = await first.start(undefined);

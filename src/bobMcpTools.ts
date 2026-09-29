@@ -97,14 +97,17 @@ function name(args: Record<string, unknown>, key: string, what: string, optional
   return upper;
 }
 
+/** Libraries one call may name, at most: an IBM i library list holds no more. */
+export const MAX_LIBRARIES = 250;
+
 /** The `libraries` argument, or the search libraries when it is left out. */
 function libraries(args: Record<string, unknown>, io: ResearchIo): { libraries: string[]; given: boolean } {
   const given = args.libraries;
   if (given === undefined || given === null) {
     return { libraries: io.searchLibraries(), given: false };
   }
-  if (!Array.isArray(given) || given.length === 0) {
-    throw new ToolInputError('"libraries" must be a non-empty array of library names.');
+  if (!Array.isArray(given) || given.length === 0 || given.length > MAX_LIBRARIES) {
+    throw new ToolInputError(`"libraries" must be an array of 1 to ${MAX_LIBRARIES} library names.`);
   }
   return { libraries: given.map((library: unknown) => name({ library }, "library", "library")), given: true };
 }
@@ -138,6 +141,7 @@ const memberSchema = {
 const librariesSchema = {
   type: "array",
   items: { type: "string" },
+  maxItems: MAX_LIBRARIES,
   description: "Libraries to search, in order. Defaults to the extension's dependency search libraries (the library list unless configured).",
 };
 

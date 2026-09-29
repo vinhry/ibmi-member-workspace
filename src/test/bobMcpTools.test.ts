@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { McpTool } from "../bobMcpServer";
 import {
   DEFAULT_WHERE_USED_LIBRARIES,
+  MAX_LIBRARIES,
   MAX_REFERENCE_COPIES,
   MAX_WHERE_USED_LIBRARIES,
   ResearchIo,
@@ -256,6 +257,18 @@ describe("research tools", () => {
     await assert.rejects(tool(tools, "find_where_used").call({ object: "X); DLTLIB(PROD" }), /object name/);
     await assert.rejects(tool(tools, "search_source_members").call({ pattern: "'; DROP" }), /pattern/);
     await assert.rejects(tool(tools, "find_where_used").call({ object: "X", libraries: ["OK", "NOT OK"] }), /library name/);
+  });
+
+  it(`takes at most ${MAX_LIBRARIES} libraries per call`, async () => {
+    const searched: string[][] = [];
+    const { io } = fakeIo({ searchSourceMembers: async (_pattern, libraries) => (searched.push(libraries), []) });
+    const tools = createResearchTools(io);
+    const names = (count: number) => Array.from({ length: count }, (_, i) => `LIB${i}`);
+    await assert.rejects(tool(tools, "search_source_members").call({ pattern: "ORD*", libraries: names(MAX_LIBRARIES + 1) }), /1 to 250/);
+    await assert.rejects(tool(tools, "describe_file").call({ name: "CUSTMAST", libraries: names(MAX_LIBRARIES + 1) }));
+    assert.equal(searched.length, 0);
+    await tool(tools, "search_source_members").call({ pattern: "ORD*", libraries: names(MAX_LIBRARIES) });
+    assert.equal(searched[0].length, MAX_LIBRARIES);
   });
 
   describe("find_where_used library limit", () => {

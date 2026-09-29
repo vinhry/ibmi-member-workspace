@@ -68,14 +68,24 @@ describe("mergeMcpConfig", () => {
       other: true,
       mcpServers: {
         instana: { command: "npx", args: ["instana-mcp"] },
-        [MCP_SERVER_NAME]: { url: "http://127.0.0.1:1/mcp", disabled: true },
+        [MCP_SERVER_NAME]: { url: "http://127.0.0.1:1/mcp", disabled: true, timeout: 300 },
       },
     });
     const merged = JSON.parse(mergeMcpConfig(existing, entry));
     assert.equal(merged.other, true);
     assert.deepEqual(merged.mcpServers.instana, { command: "npx", args: ["instana-mcp"] });
     assert.equal(merged.mcpServers[MCP_SERVER_NAME].disabled, true);
+    assert.equal(merged.mcpServers[MCP_SERVER_NAME].timeout, 300);
     assert.equal(merged.mcpServers[MCP_SERVER_NAME].url, "http://127.0.0.1:4321/mcp");
+  });
+
+  it("drops anything else a cloned project put in this extension's entry", () => {
+    const existing = JSON.stringify({
+      mcpServers: {
+        [MCP_SERVER_NAME]: { type: "stdio", command: "sh", args: ["-c", "evil"], env: { A: "1" }, disabled: false },
+      },
+    });
+    assert.deepEqual(JSON.parse(mergeMcpConfig(existing, entry)).mcpServers[MCP_SERVER_NAME], { disabled: false, ...entry });
   });
 
   it("removes only this extension's entry", () => {
@@ -139,20 +149,35 @@ describe("writeFileBelow", () => {
 });
 
 describe("excludeFromGit", () => {
-  it("adds the pattern to .git/info/exclude once, leaving .gitignore alone", (t) => {
+  it("adds the file to .git/info/exclude once, leaving .gitignore alone", (t) => {
     const root = tempFolder(t);
     mkdirSync(join(root, ".git", "info"), { recursive: true });
     writeFileSync(join(root, ".git", "info", "exclude"), "# existing");
-    assert.equal(excludeFromGit(root, "/.bob/mcp.json"), true);
-    assert.equal(excludeFromGit(root, "/.bob/mcp.json"), true);
+    assert.equal(excludeFromGit(root, ".bob/mcp.json"), "excluded");
+    assert.equal(excludeFromGit(root, ".bob/mcp.json"), "excluded");
     assert.equal(readFileSync(join(root, ".git", "info", "exclude"), "utf-8"), "# existing\n/.bob/mcp.json\n");
     assert.equal(existsSync(join(root, ".gitignore")), false);
   });
 
-  it("does nothing outside a repository or in a worktree", (t) => {
+  it("excludes the file of a folder below the top of the repository", (t) => {
     const root = tempFolder(t);
-    assert.equal(excludeFromGit(root, "/.bob/mcp.json"), false);
+    mkdirSync(join(root, ".git"));
+    const folder = join(root, "apps", "ord[1]");
+    mkdirSync(folder, { recursive: true });
+    assert.equal(excludeFromGit(folder, ".bob/mcp.json"), "excluded");
+    assert.equal(readFileSync(join(root, ".git", "info", "exclude"), "utf-8"), "/apps/ord\\[1]/.bob/mcp.json\n");
+  });
+
+  it("reports a folder outside any repository", (t) => {
+    const root = tempFolder(t);
+    assert.equal(excludeFromGit(root, ".bob/mcp.json"), "noRepository");
+  });
+
+  it("leaves a worktree or submodule alone, but says the file isn't excluded", (t) => {
+    const root = tempFolder(t);
     writeFileSync(join(root, ".git"), "gitdir: /elsewhere");
-    assert.equal(excludeFromGit(root, "/.bob/mcp.json"), false);
+    mkdirSync(join(root, "sub"));
+    assert.equal(excludeFromGit(root, ".bob/mcp.json"), "notExcluded");
+    assert.equal(excludeFromGit(join(root, "sub"), ".bob/mcp.json"), "notExcluded");
   });
 });

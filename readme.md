@@ -194,7 +194,7 @@ The prompt is also left on the clipboard. If Bob's chat box stays empty, paste i
 Security:
 
 - The server listens on `127.0.0.1` only. It accepts only requests with the token stored in `.bob/mcp.json`, and never requests from a browser page.
-- The token is kept in your editor's secret storage. In a Git repository, `.bob/mcp.json` is added to `.git/info/exclude` so the token isn't committed (`.gitignore` is left alone).
+- The token is kept in your editor's secret storage. In a Git repository, `.bob/mcp.json` is added to the repository's `.git/info/exclude`, even when the folder is below the top of the repository, so the token isn't committed (`.gitignore` is left alone). In a worktree or submodule, Connect asks you to add it to `.gitignore`.
 - `.bob` files are never written through links.
 - Each workspace has its own token. **Disconnect** replaces it and closes open connections, so an old copy of `.bob/mcp.json` stops working at once.
 - Only folders you connected on this computer are kept up to date. A `.bob/mcp.json` that came with a cloned project is never given your token. Run **Connect** there if you want to use it. Don't commit `.bob/mcp.json`.

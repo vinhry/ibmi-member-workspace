@@ -24,6 +24,7 @@ import {
 } from "../codeForIBMi";
 import { BobPromptKind, PromptMember, buildBobPrompt } from "../bobPrompts";
 import { errorMessage } from "../errors";
+import { assertNoLinkBelow } from "../localPath";
 import type { BrowserNode } from "../memberInfo";
 import { resolveMemberSelections } from "../prompts";
 import { CheckedOutMember, TreeItemType, isReferenceCopy } from "../types";
@@ -197,17 +198,24 @@ export function registerBobCommands(ctx: CommandContext): void {
         const target = path.join(root, MCP_CONFIG);
         writeFileBelow(root, target, mergeMcpConfig(readFileBelow(root, target), mcpServerEntry(port, token, toolNames(tools))));
         await setConnected(folder, true);
-        const excluded = excludeFromGit(root, "/.bob/mcp.json");
+        const excluded = excludeFromGit(root, MCP_CONFIG);
         if (choice === "Connect and Add Bob Rules") {
           const rules = path.join(root, RULES_FILE);
           if (readFileBelow(root, rules) === undefined) {
             writeFileBelow(root, rules, RULES, 0o644);
           }
         }
-        log.appendLine(`[bob] Connected ${folder.name}: ${target}${excluded ? " (excluded from Git)" : ""}`);
-        vscode.window.showInformationMessage(
-          `Bob can now use the IBM i research tools in ${folder.name}. If they don't appear, refresh the MCP servers in Bob's MCP settings.`
-        );
+        log.appendLine(`[bob] Connected ${folder.name}: ${target}${excluded === "excluded" ? " (excluded from Git)" : ""}`);
+        if (excluded === "notExcluded") {
+          vscode.window.showWarningMessage(
+            `Bob can now use the IBM i research tools in ${folder.name}, but .bob/mcp.json holds a token and couldn't be ` +
+            "kept out of Git in this worktree or submodule. Add .bob/mcp.json to .gitignore so it isn't committed."
+          );
+        } else {
+          vscode.window.showInformationMessage(
+            `Bob can now use the IBM i research tools in ${folder.name}. If they don't appear, refresh the MCP servers in Bob's MCP settings.`
+          );
+        }
       } catch (err) {
         vscode.window.showErrorMessage(`Could not update .bob/mcp.json: ${errorMessage(err)}`);
       }
@@ -407,7 +415,16 @@ function createTools(ctx: CommandContext): McpTool[] {
     findMembers: findSourceMembers,
     // One batch at a time, so two calls can't both download (and index) the same member.
     bringReferenceCopies: (system, members, signal) => serially(() => bringReferenceCopiesFor(ctx, system, members, signal)),
-    readLocal: (localPath) => fs.readFileSync(localPath, "utf-8"),
+    // Research tools are always allowed in Bob, so a link planted at a checkout path must not
+    // turn them into a way to read any file on this computer.
+    readLocal: (localPath) => {
+      const root = service.getCheckoutRoot();
+      if (!root) {
+        throw new Error("No checkout folder is set for this workspace.");
+      }
+      assertNoLinkBelow(root.fsPath, localPath);
+      return fs.readFileSync(localPath, "utf-8");
+    },
     lookupDependencies: (system, entry) => lookupDependencies(ctx, system, entry),
     searchLibraries,
     whereUsedLibraryLimit: () =>

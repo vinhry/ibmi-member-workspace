@@ -275,7 +275,7 @@ export class BobMcpServer {
         continue;
       }
       if (call) {
-        this.log(`[bob] ${String(call.params?.name)} ${JSON.stringify(call.params?.arguments ?? {})}`);
+        this.log(`[bob] ${String(call.params?.name).slice(0, 100)} ${logText(call.params?.arguments ?? {})}`);
         this.running++;
       }
       try {
@@ -289,7 +289,7 @@ export class BobMcpServer {
         }
       }
       if (abandoned.signal.aborted) {
-        this.log(`[bob] The client stopped waiting${call ? ` for ${String(call.params?.name)}` : ""}; the rest of the work was skipped.`);
+        this.log(`[bob] The client stopped waiting${call ? ` for ${String(call.params?.name).slice(0, 100)}` : ""}; the rest of the work was skipped.`);
         return;
       }
     }
@@ -299,6 +299,14 @@ export class BobMcpServer {
       send(200, Array.isArray(message) ? responses : responses[0]);
     }
   }
+}
+
+/** Longest tool arguments written to the log; a request may be up to 1 MB. */
+const MAX_LOGGED_ARGUMENTS = 500;
+
+function logText(value: unknown): string {
+  const text = JSON.stringify(value) ?? "";
+  return text.length > MAX_LOGGED_ARGUMENTS ? `${text.slice(0, MAX_LOGGED_ARGUMENTS)}… (${text.length} characters)` : text;
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
