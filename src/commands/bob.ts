@@ -51,7 +51,7 @@ const PORT_KEY = "bob.mcpPort";
  * to date: a `.bob/mcp.json` that came with a cloned project is never given this user's token.
  */
 const CONNECTED_KEY = "bob.connectedFolders";
-/** globalState key of the tool names the last start offered, to tell which tools a new version added. */
+/** workspaceState key of the tool names this workspace's last start offered, to tell which tools a new version added. */
 const OFFERED_TOOLS_KEY = "bob.offeredTools";
 
 const MCP_CONFIG = path.join(".bob", "mcp.json");
@@ -155,9 +155,9 @@ export function registerBobCommands(ctx: CommandContext): void {
     port = listening;
     await context.workspaceState.update(PORT_KEY, port);
     log.appendLine(`[bob] Research tools listening on 127.0.0.1:${port}`);
-    const offeredBefore = context.globalState.get<string[]>(OFFERED_TOOLS_KEY);
+    const offeredBefore = context.workspaceState.get<string[]>(OFFERED_TOOLS_KEY);
     refreshConfiguredEntries(port, token, tools, offeredBefore, connectedFolders(), log);
-    await context.globalState.update(OFFERED_TOOLS_KEY, toolNames(tools));
+    await context.workspaceState.update(OFFERED_TOOLS_KEY, toolNames(tools));
   };
 
   const stop = () => {
