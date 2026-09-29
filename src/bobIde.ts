@@ -13,30 +13,52 @@ export function isBobProduct(appName: string, uriScheme: string): boolean {
 }
 
 /**
- * The command that best focuses Bob's chat: one that focuses its input box, then `bob.focus`, then
- * any other Bob view's focus command. Bob documents none of them, so they are found by name.
+ * The IDs of Bob's chat views, best first: webview views that a Bob extension contributes, read from
+ * the extension manifests. Views named for chat or the side bar come first.
  */
-export function pickBobFocusCommand(commands: readonly string[]): string | undefined {
-  return commands.find((command) => /^bob\b.*\.focusInput$/i.test(command)) ??
-    commands.find((command) => command.toLowerCase() === "bob.focus") ??
-    commands.find((command) => /^bob\b.*\.focus$/i.test(command));
+export function bobChatViews(extensions: ReadonlyArray<{ id: string; packageJSON: unknown }>): string[] {
+  const bob = /\bbob\b/i;
+  const found: Array<{ id: string; chat: boolean }> = [];
+  for (const extension of extensions) {
+    const views = (extension.packageJSON as { contributes?: { views?: unknown } } | undefined)?.contributes?.views;
+    if (!views || typeof views !== "object" || Array.isArray(views)) {
+      continue;
+    }
+    for (const [container, list] of Object.entries(views)) {
+      if (!Array.isArray(list)) {
+        continue;
+      }
+      for (const view of list as Array<{ id?: unknown; name?: unknown; type?: unknown }>) {
+        if (!view || view.type !== "webview" || typeof view.id !== "string") {
+          continue;
+        }
+        const viewName = typeof view.name === "string" ? view.name : "";
+        if ([extension.id, container, view.id, viewName].some((text) => bob.test(text))) {
+          found.push({ id: view.id, chat: /chat|sidebar/i.test(`${view.id} ${viewName}`) });
+        }
+      }
+    }
+  }
+  return [...found.filter((view) => view.chat), ...found.filter((view) => !view.chat)].map((view) => view.id);
 }
 
 export type BobPasteStep = { command: string } | { waitMs: number };
 
 /**
- * The commands and waits that put the clipboard into Bob's chat. `focus` runs twice, `loadWaitMs`
- * apart: the first opens a hidden chat, and the second puts the focus in its input box once it has
- * loaded. The editor is focused before each run: a focus command that toggles would otherwise hide a
- * chat that already has the focus. A paste that misses Bob's chat then lands in the editor, where it
- * is seen and undone, never in the terminal, where a multi-line prompt could run as shell commands.
+ * The commands and waits that put the clipboard into Bob's chat view `viewId`. Only VS Code's own
+ * `<viewId>.focus` is run on it: it opens a hidden view and focuses a visible one, and never closes
+ * one. Bob's own focus commands toggle the chat, so running them closed an open chat. The focus
+ * runs twice, `loadWaitMs` apart: the first opens a hidden chat, and the second focuses it once it
+ * has loaded. The editor is focused first, so a paste that misses Bob's chat lands in the editor,
+ * where it is seen and undone, never in the terminal, where a multi-line prompt could run as shell
+ * commands.
  */
-export function bobPasteSteps(focus: string, loadWaitMs: number): BobPasteStep[] {
+export function bobPasteSteps(viewId: string, loadWaitMs: number): BobPasteStep[] {
+  const focus = `${viewId}.focus`;
   return [
     { command: "workbench.action.focusActiveEditorGroup" },
     { command: focus },
     { waitMs: loadWaitMs },
-    { command: "workbench.action.focusActiveEditorGroup" },
     { command: focus },
     { waitMs: 150 },
     { command: "editor.action.clipboardPasteAction" },

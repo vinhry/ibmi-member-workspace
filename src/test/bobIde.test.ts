@@ -6,13 +6,13 @@ import { join } from "node:path";
 import {
   GENERATED_RULES_MARKER,
   MCP_SERVER_NAME,
+  bobChatViews,
   bobPasteSteps,
   configuredEntry,
   excludeFromGit,
   isBobProduct,
   mcpServerEntry,
   mergeMcpConfig,
-  pickBobFocusCommand,
   readFileBelow,
   refreshedAlwaysAllow,
   shouldRewriteRules,
@@ -131,16 +131,42 @@ describe("refreshedAlwaysAllow", () => {
   });
 });
 
-describe("pickBobFocusCommand", () => {
-  it("prefers the chat input, then bob.focus, then another Bob view", () => {
-    assert.equal(pickBobFocusCommand(["bob.focus", "bob.chatView.focusInput", "bob.other.focus"]), "bob.chatView.focusInput");
-    assert.equal(pickBobFocusCommand(["bob.other.focus", "bob.focus"]), "bob.focus");
-    assert.equal(pickBobFocusCommand(["editor.focus", "bob.other.focus"]), "bob.other.focus");
+describe("bobChatViews", () => {
+  const extension = (id: string, views: unknown) => ({ id, packageJSON: { contributes: { views } } });
+
+  it("finds the webview views a Bob extension contributes, chat views first", () => {
+    const views = bobChatViews([
+      extension("ibm.bob", {
+        "bob-ActivityBar": [
+          { type: "webview", id: "bob.historyView", name: "History" },
+          { type: "webview", id: "bob.SidebarProvider", name: "Bob" },
+        ],
+      }),
+    ]);
+    assert.deepEqual(views, ["bob.SidebarProvider", "bob.historyView"]);
   });
 
-  it("ignores commands of other extensions", () => {
-    assert.equal(pickBobFocusCommand(["bobcat.focus", "foo.bob.focus", "bobcat.focusInput"]), undefined);
-    assert.equal(pickBobFocusCommand([]), undefined);
+  it("ignores tree views and views of other extensions", () => {
+    assert.deepEqual(bobChatViews([
+      extension("ibm.bob", { explorer: [{ id: "bob.tree", name: "Bob files" }] }),
+      extension("other.chat", { "other-bar": [{ type: "webview", id: "other.chatView", name: "Chat" }] }),
+      extension("acme.bobcat", { bobcat: [{ type: "webview", id: "bobcat.view", name: "Bobcat" }] }),
+    ]), []);
+  });
+
+  it("finds a Bob view in another extension's container by its name", () => {
+    assert.deepEqual(bobChatViews([
+      extension("ibm.agent", { "agent-bar": [{ type: "webview", id: "agent.chatPanel", name: "Bob Chat" }] }),
+    ]), ["agent.chatPanel"]);
+  });
+
+  it("copes with manifests without views or with odd contributions", () => {
+    assert.deepEqual(bobChatViews([
+      { id: "ibm.bob", packageJSON: undefined },
+      { id: "ibm.bob", packageJSON: { contributes: { views: [] } } },
+      extension("ibm.bob", { bar: "not a list" }),
+      extension("ibm.bob", { bar: [null, { type: "webview" }] }),
+    ]), []);
   });
 });
 
@@ -148,20 +174,20 @@ describe("bobPasteSteps", () => {
   const commands = (steps: ReturnType<typeof bobPasteSteps>) =>
     steps.flatMap((step) => ("command" in step ? [step.command] : []));
 
-  it("focuses the editor before every run of the focus command, so a toggling command never hides a focused chat", () => {
-    const list = commands(bobPasteSteps("bob.focusInput", 600));
-    const runs = list.flatMap((command, index) => (command === "bob.focusInput" ? [index] : []));
-    assert.equal(runs.length, 2);
-    for (const index of runs) {
-      assert.equal(list[index - 1], "workbench.action.focusActiveEditorGroup");
-    }
+  it("runs only VS Code's own focus command on Bob's view, which never closes it", () => {
+    const list = commands(bobPasteSteps("bob.SidebarProvider", 600));
+    assert.deepEqual(list.filter((command) => command.startsWith("bob.")), ["bob.SidebarProvider.focus", "bob.SidebarProvider.focus"]);
+    assert.deepEqual(list.filter((command) => !command.startsWith("bob.")), [
+      "workbench.action.focusActiveEditorGroup",
+      "editor.action.clipboardPasteAction",
+    ]);
   });
 
-  it("waits for the chat to load after opening it, and pastes last", () => {
-    const steps = bobPasteSteps("bob.focus", 1500);
+  it("focuses the editor first, waits for the chat to load after opening it, and pastes last", () => {
+    const steps = bobPasteSteps("bob.SidebarProvider", 1500);
     assert.deepEqual(steps.slice(0, 3), [
       { command: "workbench.action.focusActiveEditorGroup" },
-      { command: "bob.focus" },
+      { command: "bob.SidebarProvider.focus" },
       { waitMs: 1500 },
     ]);
     assert.equal(commands(steps).at(-1), "editor.action.clipboardPasteAction");

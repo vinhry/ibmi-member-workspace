@@ -4,13 +4,13 @@ import * as vscode from "vscode";
 import {
   MCP_SERVER_NAME,
   GENERATED_RULES_MARKER,
+  bobChatViews,
   bobFocusCandidates,
   bobPasteSteps,
   configuredEntry,
   excludeFromGit,
   mcpServerEntry,
   mergeMcpConfig,
-  pickBobFocusCommand,
   readFileBelow,
   refreshedAlwaysAllow,
   shouldRewriteRules,
@@ -382,8 +382,8 @@ function fromEntry(entry: CheckedOutMember): PromptMember {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Whether the Bob commands that may focus its chat were written to the log yet. */
-let focusCandidatesLogged = false;
+/** Whether Bob's chat views and commands were written to the log yet. */
+let bobChatLogged = false;
 
 /**
  * Puts `prompt` in Bob's chat box without sending it. Bob documents no command that fills the box,
@@ -392,14 +392,15 @@ let focusCandidatesLogged = false;
  */
 async function sendToBobChat(prompt: string, log: vscode.OutputChannel): Promise<void> {
   await vscode.env.clipboard.writeText(prompt);
-  const commands = await vscode.commands.getCommands(true);
-  if (!focusCandidatesLogged) {
-    focusCandidatesLogged = true;
-    log.appendLine(`[bob] Bob commands that may focus its chat: ${bobFocusCandidates(commands).join(", ") || "none"}`);
+  const views = bobChatViews(vscode.extensions.all);
+  if (!bobChatLogged) {
+    bobChatLogged = true;
+    const commands = await vscode.commands.getCommands(true);
+    log.appendLine(`[bob] Bob chat views: ${views.join(", ") || "none"}; Bob commands: ${bobFocusCandidates(commands).join(", ") || "none"}`);
   }
-  const focus = pickBobFocusCommand(commands);
-  if (!focus) {
-    log.appendLine("[bob] No Bob focus command found; the prompt was only copied to the clipboard.");
+  const view = views[0];
+  if (!view) {
+    log.appendLine("[bob] No Bob chat view found; the prompt was only copied to the clipboard.");
     vscode.window.showInformationMessage("The prompt is on the clipboard. Open Bob's chat, paste it, review it, and press Enter.");
     return;
   }
@@ -409,14 +410,14 @@ async function sendToBobChat(prompt: string, log: vscode.OutputChannel): Promise
   let missed: vscode.TextDocument | undefined;
   for (const loadWaitMs of [600, 1500]) {
     try {
-      missed = await pasteIntoBob(focus, prompt, loadWaitMs);
+      missed = await pasteIntoBob(view, prompt, loadWaitMs);
     } catch (err) {
-      log.appendLine(`[bob] Could not paste the prompt into Bob's chat (${focus}): ${errorMessage(err)}`);
+      log.appendLine(`[bob] Could not paste the prompt into Bob's chat (${view}): ${errorMessage(err)}`);
       vscode.window.showInformationMessage("The prompt is on the clipboard. Open Bob's chat, paste it, review it, and press Enter.");
       return;
     }
     if (!missed) {
-      log.appendLine(`[bob] Prompt pasted into Bob's chat (${focus}).`);
+      log.appendLine(`[bob] Prompt pasted into Bob's chat (${view}).`);
       vscode.window.showInformationMessage(
         "The prompt is in Bob's chat: review it and press Enter. If the chat box is empty, paste it (it's on the clipboard)."
       );
@@ -436,7 +437,7 @@ async function sendToBobChat(prompt: string, log: vscode.OutputChannel): Promise
  * Focuses Bob's chat and pastes the clipboard into it (see {@link bobPasteSteps}). Returns the
  * document the paste landed in instead, if any.
  */
-async function pasteIntoBob(focus: string, prompt: string, loadWaitMs: number): Promise<vscode.TextDocument | undefined> {
+async function pasteIntoBob(view: string, prompt: string, loadWaitMs: number): Promise<vscode.TextDocument | undefined> {
   const firstLine = prompt.split("\n")[0];
   let pastedInto: vscode.TextDocument | undefined;
   const watch = vscode.workspace.onDidChangeTextDocument((event) => {
@@ -445,7 +446,7 @@ async function pasteIntoBob(focus: string, prompt: string, loadWaitMs: number): 
     }
   });
   try {
-    for (const step of bobPasteSteps(focus, loadWaitMs)) {
+    for (const step of bobPasteSteps(view, loadWaitMs)) {
       if ("command" in step) {
         await vscode.commands.executeCommand(step.command);
       } else {
