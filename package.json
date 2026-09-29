@@ -526,7 +526,7 @@
         {
           "command": "ibmi-member-workspace.findDependencies",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
-          "group": "4_status@2"
+          "group": "0_bob@2"
         },
         {
           "command": "ibmi-member-workspace.copyMemberPath",
