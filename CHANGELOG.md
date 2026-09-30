@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.7.5 - 2026-09-30
+
+- **Find Dependencies reads COBOL.** For CBLLE, SQLCBLLE, CBL and SQLCBL members, the source scan finds copybooks from `COPY` (with or without `OF`/`IN` a source file and library), `EXEC SQL INCLUDE`, the files whose record formats `COPY DDS-…` copies, and the tables, views and procedures of embedded SQL. Comment lines and columns 73–80 are ignored. A copybook named without a source file is looked for in `QCBLLESRC` first. Find All Dependencies reads a COBOL member's copybooks as COBOL, whatever their source type, so nested `COPY` statements are found too.
+
 ## 1.7.4 - 2026-09-30
 
 - **Upload on save for one member.** When a checked-out member is open, the status bar shows its upload-on-save mode, even while `autoUploadOnSave` is `off`. Click it, or run **Change Upload on Save for This Member**, to choose **Off**, **Ask** or **On** for that member alone, or **Use Setting** to follow the setting again. For example, keep the setting `off` and turn it on only for the member you're testing. The choice is kept with the checkout, survives a re-download, and is never read from workspace files. In `ask` mode, **Always Upload** switches only that member when it has its own choice. Reference copies never upload, and a change made on the IBM i still always asks.
