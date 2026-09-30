@@ -15,3 +15,4 @@ HANDOFF.md
 *.vsix
 out/test/**
 .github/**
+CLAUDE.md
