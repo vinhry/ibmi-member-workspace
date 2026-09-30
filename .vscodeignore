@@ -16,3 +16,4 @@ HANDOFF.md
 out/test/**
 .github/**
 CLAUDE.md
+docs/**
