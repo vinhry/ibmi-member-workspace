@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.7.8 - 2026-09-30
+
+- In Settings, **Dependencies: Search Scope** now shows **Automatic** as its default instead of an empty choice, and names each scope: **Automatic** (Search Libraries when `dependencies.searchLibraries` lists some, otherwise Library List), **Library List**, **Search Libraries** and **All User Libraries**. Nothing changes in how dependencies are searched.
+
 ## 1.7.7 - 2026-09-30
 
 - **Choose where Find Dependencies looks.** The new `ibmi-member-workspace.dependencies.searchScope` setting searches your **library list** (as shown in Code for IBM i), only your **specific** search libraries (`dependencies.searchLibraries`), or **everywhere**: every library except IBM's, with your library list first. Everywhere reads the whole system catalog, so it can take a while on a large system. When the setting isn't set, nothing changes: your search libraries if you listed some, otherwise your library list. To search somewhere else once, click the library button in the dependency list's title bar. When sources aren't found, the warning offers **Search All User Libraries**.
