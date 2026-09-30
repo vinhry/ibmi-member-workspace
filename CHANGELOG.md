@@ -3,6 +3,9 @@
 ## 1.7.2 - 2026-09-29
 
 - **Find All Dependencies.** A new right-click command in Checked Out Members, just below **Find Dependencies…**, finds what a member uses, what those members use, and so on: nested copybooks, a called program's own programs and files, and a file's field-reference file. Each member's source is read from the IBM i as it goes, and nothing is written until you choose. Each member in the list says how it was reached (*via ORD200 → ORDHDR*). The search looks into each member once, and it stops to ask **Keep going?** after `dependencies.transitive.maxDepth` levels (3 by default) or `dependencies.transitive.maxMembers` members (50 by default). You can cancel it and still choose from what was found. Find Dependencies is unchanged and still finds direct dependencies only.
+- Fix: if you switched Code for IBM i to another system while an upload, refresh, checkout or Bob's reference copies were running, the rest of the work went to the system you had just connected. An upload could overwrite a member there that matched your checkout, and a batch checkout with **Discard Local Changes** could overwrite that system's unsent local edits. Those members are now refused (*Connected to X, not Y*) and counted as errors.
+- Fix: a checkout that finished just as the connection dropped wrote its file but was left out of Checked Out Members.
+- Fix: **Disconnect Bob from IBM i Research Tools** could keep the old token if the research tools restarted at the same moment.
 
 ## 1.7.1 - 2026-09-29
 

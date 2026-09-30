@@ -77,6 +77,8 @@ export interface CheckoutOptions {
    * change is left as it is.
    */
   reference?: boolean;
+  /** The system the caller expects; the checkout is refused if another one is connected. */
+  system?: string;
 }
 
 export class CheckoutService implements vscode.Disposable {
@@ -166,9 +168,11 @@ export class CheckoutService implements vscode.Disposable {
 
   private get entries(): CheckedOutMember[] {
     const system = getSystemName();
-    if (!system) {
-      return [];
-    }
+    return system ? this.activeEntries(system) : [];
+  }
+
+  /** The stored checkouts of `system`'s active work item, whichever system is connected now. */
+  private activeEntries(system: string): CheckedOutMember[] {
     const state = this.ensureSystemState(system);
     return state.workItems[state.activeWorkItem] ??= [];
   }
@@ -882,6 +886,7 @@ export class CheckoutService implements vscode.Disposable {
       discardLocalChanges = false,
       deferCheckpointTo,
       reference = false,
+      system: expectedSystem,
     } = options ?? {};
     const checkoutRoot = this.getCheckoutRoot();
     if (!checkoutRoot) {
@@ -895,6 +900,10 @@ export class CheckoutService implements vscode.Disposable {
     const system = getSystemName();
     if (!system) {
       throw new Error("Not connected to IBM i");
+    }
+    // A batch decided what to overwrite for its own system; another one may be connected by now.
+    if (expectedSystem) {
+      this.assertConnectedTo(expectedSystem);
     }
 
     this.ensureSystemState(system);
@@ -955,6 +964,8 @@ export class CheckoutService implements vscode.Disposable {
       // Otherwise re-download below
     }
 
+    // The prompts above leave time to connect elsewhere; this checkout belongs to `system`.
+    this.assertConnectedTo(system);
     const content = await downloadMemberContent(
       library,
       sourceFile,
@@ -1008,11 +1019,13 @@ export class CheckoutService implements vscode.Disposable {
       this.logGitFailure(result);
     }
 
-    if (existing) {
-      const idx = this.entries.findIndex((e) => e.id === entry.id);
-      this.entries[idx] = entry;
+    // Recorded under `system` even if the connection dropped meanwhile.
+    const entries = this.activeEntries(system);
+    const idx = existing ? entries.findIndex((e) => e.id === entry.id) : -1;
+    if (idx >= 0) {
+      entries[idx] = entry;
     } else {
-      this.entries.push(entry);
+      entries.push(entry);
     }
 
     await this.persist();
@@ -1035,6 +1048,7 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   async refreshRemoteStatus(entry: CheckedOutMember): Promise<RemoteStatus> {
+    this.assertConnectedTo(entry.system);
     await this.assertEntryInActiveWorkItem(entry);
     const localUri = vscode.Uri.file(entry.localPath);
 
@@ -1071,6 +1085,7 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   private async recheckoutNow(entry: CheckedOutMember): Promise<void> {
+    this.assertConnectedTo(entry.system);
     await this.assertEntryInActiveWorkItem(entry);
     const content = await downloadMemberContent(
       entry.library,
@@ -1123,6 +1138,7 @@ export class CheckoutService implements vscode.Disposable {
     options?: { overwriteRemoteChanges?: boolean; deferCheckpointTo?: string[] }
   ): Promise<UploadResult> {
     assertEditable(entry);
+    this.assertConnectedTo(entry.system);
     await this.assertEntryInActiveWorkItem(entry);
     // Uploading through a link would send whatever file it points at to the IBM i.
     this.assertLocalPathSafe(entry.localPath);
@@ -1151,6 +1167,8 @@ export class CheckoutService implements vscode.Disposable {
     }
 
     const uploadContent = normalizeForMemberUpload(localContent);
+    // Checked again: the connection may have changed during the remote check.
+    this.assertConnectedTo(entry.system);
     if (sourceDatesEnabled()) {
       await uploadMemberContentWithDates(entry, uploadContent);
       this.log.appendLine(`[upload] ${formatMemberPath(entry)} uploaded with source dates`);
@@ -1458,6 +1476,20 @@ export class CheckoutService implements vscode.Disposable {
     if (migrated !== undefined) {
       this.setBaseline(entry, migrated);
       this.log.appendLine(`[status] Upgraded the sync baseline of ${formatMemberPath(entry)}`);
+    }
+  }
+
+  /**
+   * Refuses to reach the IBM i for a checkout of `system` while connected to another one: a
+   * connection switched during a batch must not send members to, or read them from, the wrong system.
+   */
+  private assertConnectedTo(system: string): void {
+    const connected = getSystemName();
+    if (!connected) {
+      throw new Error("Not connected to IBM i");
+    }
+    if (systemKey(connected) !== systemKey(system)) {
+      throw new Error(`Connected to ${connected}, not ${system}. Connect to ${system} first.`);
     }
   }
 

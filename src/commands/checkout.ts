@@ -54,7 +54,8 @@ export function registerCheckoutCommands(ctx: CommandContext): void {
               memberInfo.library,
               memberInfo.sourceFile,
               memberInfo.memberName,
-              memberInfo.extension
+              memberInfo.extension,
+              system ? { system } : undefined
             );
             void suggestDependencies(ctx, entry);
           } catch (err) {
@@ -242,7 +243,7 @@ export async function checkoutMembersBatch(
           try {
             await service.checkoutMember(
               m.library, m.sourceFile, m.memberName, m.extension,
-              { redownloadBehavior, suppressAutoOpen: true, discardLocalChanges, deferCheckpointTo: downloaded, reference }
+              { redownloadBehavior, suppressAutoOpen: true, discardLocalChanges, deferCheckpointTo: downloaded, reference, system }
             );
             succeeded++;
           } catch (err) {
@@ -312,7 +313,7 @@ export async function bringReferenceCopiesFor(
       {
         findEntry: (library, sourceFile, memberName) => service.findEntry(system, library, sourceFile, memberName),
         checkoutMember: (library, sourceFile, memberName, extension, options) =>
-          service.checkoutMember(library, sourceFile, memberName, extension, options),
+          service.checkoutMember(library, sourceFile, memberName, extension, { ...options, system }),
         log: (message) => log.appendLine(message),
       },
       members,
