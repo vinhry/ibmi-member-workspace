@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.7.6 - 2026-09-30
+
+- **Run your change-management checkout from Find Dependencies.** Set `ibmi-member-workspace.changeManagement.checkoutCommand` (user settings only) to the CL command that checks a member out in your change-management system, such as Rocket LMI. **I Need to Change Some…** then asks for the development library, shows the exact command for each member, runs them on the IBM i when you choose **Run**, and offers **Check Out from DEVLIB** to check out the development copies here. The command can use `&OPENLIB`, `&OPENSPF`, `&OPENMBR`, `&EXT` and `&DEVLIB`. A failed member is reported with the IBM i's message and doesn't stop the others, and nothing runs while a different IBM i is connected. Without the setting, the steps are explained as before. See **Running Your Change-Management Checkout** in the README.
+
 ## 1.7.5 - 2026-09-30
 
 - **Find Dependencies reads COBOL.** For CBLLE, SQLCBLLE, CBL and SQLCBL members, the source scan finds copybooks from `COPY` (with or without `OF`/`IN` a source file and library), `EXEC SQL INCLUDE`, the files whose record formats `COPY DDS-…` copies, and the tables, views and procedures of embedded SQL. Comment lines and columns 73–80 are ignored. A copybook named without a source file is looked for in `QCBLLESRC` first. Find All Dependencies reads a COBOL member's copybooks as COBOL, whatever their source type, so nested `COPY` statements are found too.
