@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.7.9 - 2026-09-30
+
+- Fix: **Re-checkout** from a Refresh notification could overwrite local edits. The notification that says your local copy has no changes (or that the local file no longer exists) can stay open while you keep working, so edits saved in the meantime were replaced without a warning. Re-checkout now checks the local copy again first, and if it has changes that aren't on the IBM i, asks before discarding them and suggests Merge Back instead.
+
 ## 1.7.8 - 2026-09-30
 
 - In Settings, **Dependencies: Search Scope** now shows **Automatic** as its default instead of an empty choice, and names each scope: **Automatic** (Search Libraries when `dependencies.searchLibraries` lists some, otherwise Library List), **Library List**, **Search Libraries** and **All User Libraries**. Nothing changes in how dependencies are searched.
