@@ -36,7 +36,7 @@ describe("extension manifest", () => {
 
     assert.equal(manifest.name, "ibmi-member-workspace");
     assert.equal(manifest.publisher, "vinhry");
-    assert.equal(manifest.version, "1.7.1");
+    assert.equal(manifest.version, "1.7.2");
   });
 
   it("contributes exactly the commands registered by the extension", () => {

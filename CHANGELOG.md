@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.7.2 - 2026-09-29
+
+- **Find All Dependencies.** A new right-click command in Checked Out Members, just below **Find Dependencies…**, finds what a member uses, what those members use, and so on: nested copybooks, a called program's own programs and files, and a file's field-reference file. Each member's source is read from the IBM i as it goes, and nothing is written until you choose. Each member in the list says how it was reached (*via ORD200 → ORDHDR*). The search looks into each member once, and it stops to ask **Keep going?** after `dependencies.transitive.maxDepth` levels (3 by default) or `dependencies.transitive.maxMembers` members (50 by default). You can cancel it and still choose from what was found. Find Dependencies is unchanged and still finds direct dependencies only.
+
 ## 1.7.1 - 2026-09-29
 
 - In Checked Out Members, **Find Dependencies…** is now at the top of the right-click menu, just below **Bob, Investigate** in IBM Bob.
