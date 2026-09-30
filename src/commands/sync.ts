@@ -273,10 +273,12 @@ export function registerSyncCommands(ctx: CommandContext): void {
                 "Show Diff"
               );
               if (choice === "Re-checkout") {
-                await service.recheckout(entry);
-                vscode.window.showInformationMessage(
-                  `Re-checked out ${memberPath} from IBM i.`
-                );
+                if (await confirmRecheckout(service, entry)) {
+                  await service.recheckout(entry);
+                  vscode.window.showInformationMessage(
+                    `Re-checked out ${memberPath} from IBM i.`
+                  );
+                }
               } else if (choice === "Show Diff") {
                 await mergeHandler.openMergeDiff(entry);
               }
@@ -399,14 +401,37 @@ async function handleMissingLocalFile(
   );
   try {
     if (choice === "Re-checkout") {
-      await service.recheckout(entry);
-      vscode.window.showInformationMessage(`Re-checked out ${memberPath} from IBM i.`);
+      if (await confirmRecheckout(service, entry)) {
+        await service.recheckout(entry);
+        vscode.window.showInformationMessage(`Re-checked out ${memberPath} from IBM i.`);
+      }
     } else if (choice === "Remove from Checkouts") {
       await service.forgetEntries([entry]);
     }
   } catch (err) {
     vscode.window.showErrorMessage(`${choice} failed: ${errorMessage(err)}`);
   }
+}
+
+/**
+ * Whether a re-checkout offered by a notification may go ahead. The notification can stay open
+ * while the local copy is edited (or restored), so changes made since the check are never
+ * overwritten without asking.
+ */
+async function confirmRecheckout(service: CheckoutService, entry: CheckedOutMember): Promise<boolean> {
+  if (!(await service.hasLocalChanges(entry))) {
+    return true;
+  }
+  const discard = "Re-checkout (discard local changes)";
+  const choice = await vscode.window.showWarningMessage(
+    `${formatMemberPath(entry)} has local changes that are not on the IBM i.`,
+    {
+      modal: true,
+      detail: "Re-checkout will discard them. Use Merge Back to review and combine the differences instead.",
+    },
+    discard
+  );
+  return choice === discard;
 }
 
 function showRefreshSummary(
