@@ -1,5 +1,10 @@
 # Change Log
 
+## 1.7.7 - 2026-09-30
+
+- **Choose where Find Dependencies looks.** The new `ibmi-member-workspace.dependencies.searchScope` setting searches your **library list** (as shown in Code for IBM i), only your **specific** search libraries (`dependencies.searchLibraries`), or **everywhere**: every library except IBM's, with your library list first. Everywhere reads the whole system catalog, so it can take a while on a large system. When the setting isn't set, nothing changes: your search libraries if you listed some, otherwise your library list. To search somewhere else once, click the library button in the dependency list's title bar. When sources aren't found, the warning offers **Search All User Libraries**.
+- Fix: Find Dependencies searched libraries outside your library list or search libraries whenever a dependency named one, for example the library DSPPGMREF says a program was compiled from, a cross-reference row, or `/COPY OTHERLIB/QCPYSRC,X`. With the library list or specific libraries, it now looks for that member by name inside them instead, and the output panel lists the libraries it skipped.
+
 ## 1.7.6 - 2026-09-30
 
 - **Run your change-management checkout from Find Dependencies.** Set `ibmi-member-workspace.changeManagement.checkoutCommand` (user settings only) to the CL command that checks a member out in your change-management system, such as Rocket LMI. **I Need to Change Some…** then asks for the development library, shows the exact command for each member, runs them on the IBM i when you choose **Run**, and offers **Check Out from DEVLIB** to check out the development copies here. The command can use `&OPENLIB`, `&OPENSPF`, `&OPENMBR`, `&EXT` and `&DEVLIB`. A failed member is reported with the IBM i's message and doesn't stop the others, and nothing runs while a different IBM i is connected. Without the setting, the steps are explained as before. See **Running Your Change-Management Checkout** in the README.
