@@ -159,15 +159,14 @@ Where each dependency is looked up on the IBM i is set by `ibmi-member-workspace
 
 | Scope | Searches |
 |---|---|
-| `libraryList` | The connection's current library and library list, as shown in Code for IBM i. |
-| `specific` | Only the libraries in `ibmi-member-workspace.dependencies.searchLibraries`, in order. List both your object and source libraries, since DSPPGMREF looks for compiled programs there too. |
-| `everywhere` | Every library except IBM's (`Q…` and `#…` libraries, apart from `QGPL` and `QUSR…`), with the library list first. This reads the whole system catalog and can take a while on a large system. |
+| **Automatic** (default) | **Search Libraries** when `dependencies.searchLibraries` lists some, otherwise **Library List**, as in earlier versions. |
+| **Library List** | The connection's current library and library list, as shown in Code for IBM i. |
+| **Search Libraries** | Only the libraries in `ibmi-member-workspace.dependencies.searchLibraries`, in order. List both your object and source libraries, since DSPPGMREF looks for compiled programs there too. |
+| **All User Libraries** | Every library except IBM's (`Q…` and `#…` libraries, apart from `QGPL` and `QUSR…`), with the library list first. This reads the whole system catalog and can take a while on a large system. |
 
-When the scope isn't set, earlier versions' behavior is kept: `specific` if `dependencies.searchLibraries` lists libraries, otherwise `libraryList`.
+With **Library List** and **Search Libraries**, Find Dependencies never leaves those libraries. A dependency that names another library, for example the library DSPPGMREF says a program was compiled from, a cross-reference row, or `/COPY OTHERLIB/QCPYSRC,X`, is looked for by name (and source file) inside them instead. The output panel lists each library that was skipped. With **All User Libraries**, a library named in the source is matched exactly.
 
-With `libraryList` and `specific`, Find Dependencies never leaves those libraries. A dependency that names another library, for example the library DSPPGMREF says a program was compiled from, a cross-reference row, or `/COPY OTHERLIB/QCPYSRC,X`, is looked for by name (and source file) inside them instead. The output panel lists each library that was skipped. With `everywhere`, a library named in the source is matched exactly.
-
-To search somewhere else just once, click the library button in the list's title bar and choose **Library List**, **Search Libraries** or **All User Libraries**. The search runs again there, and the setting doesn't change. When some sources aren't found, the warning also offers **Search All User Libraries**. Bob's research tools read the library list when a call names no libraries and the scope is `everywhere`, since where-used can't read every library. A copybook named without a source file is looked for in `QRPGLESRC` first, or `QCBLLESRC` for COBOL. Only source members that can build a program are offered for a `CALL`, and only file source for a `REF`.
+To search somewhere else just once, click the library button in the list's title bar and choose **Library List**, **Search Libraries** or **All User Libraries**. The search runs again there, and the setting doesn't change. When some sources aren't found, the warning also offers **Search All User Libraries**. Bob's research tools read the library list when a call names no libraries and the scope is **All User Libraries**, since where-used can't read every library. A copybook named without a source file is looked for in `QRPGLESRC` first, or `QCBLLESRC` for COBOL. Only source members that can build a program are offered for a `CALL`, and only file source for a `REF`.
 
 A list shows what was found, grouped into copybooks, called programs, referenced files, and SQL tables and views. Bound procedures are counted but not listed, since a procedure has no member of its own; its module is found through the copybook or service program that declares it. Copybooks are preselected, and members you already have checked out are marked. Choose the members you want, then:
 
@@ -298,8 +297,8 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.autoOpenOnCheckout` | `true` | Automatically open the file in the editor after a single-member checkout. |
 | `ibmi-member-workspace.allowCheckoutFromProtectedFilter` | `false` | Allow checking out members from protected (read-only) filters. |
 | `ibmi-member-workspace.dependencies.suggestAfterCheckout` | `true` | After checking out a single member, offer to review the members it uses. |
-| `ibmi-member-workspace.dependencies.searchScope` | not set | Where dependencies are looked for: `libraryList`, `specific` (the search libraries) or `everywhere` (all user libraries). Not set: `specific` when search libraries are listed, otherwise `libraryList`. |
-| `ibmi-member-workspace.dependencies.searchLibraries` | `[]` | Libraries to search, in order, for the source members and compiled programs of dependencies when the scope is `specific` (for example, `PRODOBJ`, `PRODSRC`). Empty uses the connection's library list. |
+| `ibmi-member-workspace.dependencies.searchScope` | **Automatic** | Where dependencies are looked for: **Library List**, **Search Libraries** or **All User Libraries**. **Automatic** uses the search libraries when some are listed, otherwise the library list. |
+| `ibmi-member-workspace.dependencies.searchLibraries` | `[]` | Libraries to search, in order, for the source members and compiled programs of dependencies when the scope is **Search Libraries** or **Automatic** (for example, `PRODOBJ`, `PRODSRC`). Empty uses the connection's library list. |
 | `ibmi-member-workspace.dependencies.sources` | all | Which kinds of dependency sources to use: `source`, `programReferences` (DSPPGMREF), `crossReferences`. Unavailable ones are skipped automatically. |
 | `ibmi-member-workspace.dependencies.transitive.maxDepth` | `3` | How many levels **Find All Dependencies** looks through before asking whether to keep going (1 to 10). |
 | `ibmi-member-workspace.dependencies.transitive.maxMembers` | `50` | How many members **Find All Dependencies** lists before asking whether to keep going (5 to 500). |

@@ -84,7 +84,7 @@ The moved code keeps all of today's behavior (`loadIndex`, `saveIndex`, `persist
 
 Users reported that Find Dependencies, with no search libraries set, searched beyond their library list. `librariesToSearch` added every library a reference named: DSPPGMREF source locations, cross-reference rows, and qualified names in the source.
 
-- Setting `ibmi-member-workspace.dependencies.searchScope`: `libraryList`, `specific` or `everywhere`, with no default. When it isn't set, `specific` applies if `dependencies.searchLibraries` lists libraries, otherwise `libraryList`, as before (`searchScopeFrom` in `src/dependencyResolve.ts`).
+- Setting `ibmi-member-workspace.dependencies.searchScope`: `auto` (the default), `libraryList`, `specific` or `everywhere`, shown as **Automatic**, **Library List**, **Search Libraries** and **All User Libraries** (`enumItemLabels`). `auto` uses `specific` if `dependencies.searchLibraries` lists libraries, otherwise `libraryList`, as before (`searchScopeFrom` in `src/dependencyResolve.ts`).
 - `libraryList` and `specific` never leave their libraries. `scopeReferences` drops an outside library from a reference (keeping its source file) so it is looked up by name inside the scope. Each skipped library is logged.
 - `everywhere` searches every library except IBM's (`isIbmLibrary`: `Q…` and `#…` except `QGPL` and `QUSR…`), with the library list ranked first and the rest alphabetically. DSPPGMREF also looks in `*ALLUSR` for the compiled program.
 - The Find Dependencies list has a title-bar button to rerun with another scope. The unresolved warning offers **Search All User Libraries**. Neither changes the setting.

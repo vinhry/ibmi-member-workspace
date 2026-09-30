@@ -201,6 +201,14 @@ describe("extension manifest", () => {
       const setting = configuration.properties[`ibmi-member-workspace.dependencies.transitive.${name}`];
       return [setting?.default, setting?.minimum, setting?.maximum];
     };
+    // The scope has a named default, so Settings never shows an empty choice.
+    const scope = configuration.properties["ibmi-member-workspace.dependencies.searchScope"] as unknown as {
+      default?: string; enum?: string[]; enumItemLabels?: string[]; enumDescriptions?: string[];
+    };
+    assert.equal(scope.default, "auto");
+    assert.equal(scope.enum?.[0], "auto");
+    assert.equal(scope.enumItemLabels?.length, scope.enum?.length);
+    assert.equal(scope.enumDescriptions?.length, scope.enum?.length);
     assert.deepEqual(limits("maxDepth"), [3, 1, 10]);
     assert.deepEqual(limits("maxMembers"), [50, 5, 500]);
   });

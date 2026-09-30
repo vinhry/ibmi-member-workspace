@@ -126,6 +126,11 @@ describe("searchScopeFrom", () => {
     assert.match(note ?? "", /searchLibraries is empty/);
   });
 
+  it("treats the default \"auto\" like no setting", () => {
+    assert.equal(searchScopeFrom({ setting: "auto", searchLibraries: [], libraryList }).scope.kind, "libraryList");
+    assert.equal(searchScopeFrom({ setting: "auto", searchLibraries: ["PRODSRC"], libraryList }).scope.kind, "specific");
+  });
+
   it("ignores an unknown scope value", () => {
     assert.equal(searchScopeFrom({ setting: "anywhere", searchLibraries: [], libraryList }).scope.kind, "libraryList");
   });

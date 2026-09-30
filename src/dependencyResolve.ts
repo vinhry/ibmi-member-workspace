@@ -56,8 +56,8 @@ export function isSearchScopeKind(value: unknown): value is SearchScopeKind {
 }
 
 /**
- * The scope from the settings. Without a `dependencies.searchScope` of its own, it follows what
- * earlier versions did: the configured libraries when there are some, else the library list.
+ * The scope from the settings. "auto" (the default), or any value that isn't a scope, follows
+ * what earlier versions did: the configured libraries when there are some, else the library list.
  * "specific" without libraries falls back to the library list, with a note saying so.
  */
 export function searchScopeFrom(settings: {
