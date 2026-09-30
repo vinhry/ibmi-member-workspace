@@ -183,6 +183,19 @@ describe("walkDependencies", () => {
     assert.deepEqual(looked.slice(1).map((s) => `${s.memberName}.${s.extension}`), ["NOTYPE.rpgle", "CUSTMAST.pf", "UNTYPED.mbr"]);
   });
 
+  it("scans a copybook of a COBOL member as COBOL, whatever its own source type", async () => {
+    const cobolRoot: DependencySubject = { ...root, sourceFile: "QCBLLESRC", extension: "cblle" };
+    const { lookup, looked } = system({
+      ORD100: [["copybook", "ORDCOPY", "CPY"], ["file", "CUSTMAST", "PF"], ["program", "ORD200", "SQLCBLLE"]],
+      ORD200: [["copybook", "SQLCOPY", "RPGLEINC"]],
+    });
+    await walkDependencies(cobolRoot, io(lookup), wide);
+    assert.deepEqual(
+      looked.slice(1).map((s) => `${s.memberName}.${s.extension}`),
+      ["ORDCOPY.cblle", "CUSTMAST.pf", "ORD200.sqlcblle", "SQLCOPY.sqlcblle"]
+    );
+  });
+
   it("collects unresolved references with the member they were found in", async () => {
     const { lookup } = system({
       ORD100: [["copybook", "MISSING1"], ["program", "ORD200"]],

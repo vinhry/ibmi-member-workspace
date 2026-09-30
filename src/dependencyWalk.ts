@@ -1,5 +1,5 @@
 import type { Resolution, SourceMemberRow } from "./dependencyResolve";
-import type { RawReference } from "./dependencyScan";
+import { RawReference, isCobolType } from "./dependencyScan";
 import type { DependencySubject, ProviderOutcome } from "./dependencySources";
 
 /**
@@ -35,6 +35,18 @@ export interface WalkProgress {
   /** The level of the member being looked into; the root is 0. */
   depth: number;
   member: string;
+}
+
+/**
+ * The source type a found member is scanned as. A copybook without a source type is written in
+ * the language of the member that copies it, and a COBOL copybook is COBOL whatever its type
+ * (shops use CPY, CBLLE, blank and others).
+ */
+function scanTypeOf(reference: RawReference, sourceType: string, parentType: string): string {
+  if (reference.kind === "copybook" && (!sourceType || isCobolType(parentType))) {
+    return parentType.toLowerCase();
+  }
+  return (sourceType || "mbr").toLowerCase();
 }
 
 export interface WalkIo {
@@ -150,8 +162,7 @@ export async function walkDependencies(
         library: best.library,
         sourceFile: best.sourceFile,
         memberName: best.member,
-        // A copybook without a source type is written in the language of the member that copies it.
-        extension: (best.sourceType || (reference.kind === "copybook" ? current.subject.extension : "mbr")).toLowerCase(),
+        extension: scanTypeOf(reference, best.sourceType, current.subject.extension),
       };
       const key = subjectKey(subject);
       if (visited.has(key)) {

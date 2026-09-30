@@ -31,7 +31,7 @@ export const PROGRAM_SOURCE_TYPES = new Set([
 /** Source types of members that create files DDS can refer to. */
 const FILE_SOURCE_TYPES = new Set(["PF", "LF", "DSPF", "PRTF", "SQL", "TABLE", "VIEW", "INDEX"]);
 
-/** Copybooks named without a source file are looked for here first, as the RPG compiler does. */
+/** Copybooks named without a source file are looked for here first, as the RPG compiler does (COBOL sets its own). */
 const DEFAULT_COPY_FILE = "QRPGLESRC";
 
 /** The libraries to search: the configured order, plus any library a reference names explicitly. */
@@ -105,5 +105,6 @@ function typeMatches(ref: RawReference, sourceType: string): boolean {
 }
 
 function preferredFile(ref: RawReference, row: SourceMemberRow): number {
-  return ref.kind === "copybook" && !ref.sourceFile && row.sourceFile.toUpperCase() !== DEFAULT_COPY_FILE ? 1 : 0;
+  const preferred = ref.defaultSourceFile ?? DEFAULT_COPY_FILE;
+  return ref.kind === "copybook" && !ref.sourceFile && row.sourceFile.toUpperCase() !== preferred.toUpperCase() ? 1 : 0;
 }

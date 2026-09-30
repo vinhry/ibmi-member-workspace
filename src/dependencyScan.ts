@@ -1,8 +1,9 @@
 /**
  * Finds what a member refers to, from its text alone: copybooks (/COPY,
- * /INCLUDE, EXEC SQL INCLUDE), called programs (CL CALL, TFRCTL, RPG EXTPGM
- * prototypes), referenced files (RPG F-specs, dcl-f, EXTNAME; DDS REF, REFFLD,
- * PFILE, JFILE), SQL tables and views (embedded SQL), and bound procedures (RPG
+ * /INCLUDE, COBOL COPY, EXEC SQL INCLUDE), called programs (CL CALL, TFRCTL,
+ * RPG EXTPGM prototypes), referenced files (RPG F-specs, dcl-f, EXTNAME; COBOL
+ * COPY DDS; DDS REF, REFFLD, PFILE, JFILE), SQL tables and views (embedded
+ * SQL), and bound procedures (RPG
  * prototypes, SQL CALL, CL CALLPRC). Pure text in, references out; resolving
  * them to members on the IBM i is `dependencyResolve`, and other providers are
  * in `dependencySources`.
@@ -24,6 +25,8 @@ export interface RawReference {
   text: string;
   /** Why this can never resolve to a source member, e.g. an IFS path. */
   unresolvable?: string;
+  /** For a copybook named without a source file: the file its compiler looks in first. */
+  defaultSourceFile?: string;
   /** Labels of the providers that found it, e.g. ["source scan", "DSPPGMREF"]. */
   foundBy?: string[];
 }
@@ -31,9 +34,15 @@ export interface RawReference {
 const RPG_TYPES = new Set(["rpgle", "sqlrpgle", "rpgleinc", "rpg", "sqlrpg", "rpginc"]);
 const CL_TYPES = new Set(["clle", "clp", "cl"]);
 const DDS_TYPES = new Set(["pf", "lf", "dspf", "prtf"]);
+const COBOL_TYPES = new Set(["cblle", "sqlcblle", "cbl", "sqlcbl"]);
 
 /** Source types (lowercase extensions) the scan understands. */
-export const SCANNED_SOURCE_TYPES: ReadonlySet<string> = new Set([...RPG_TYPES, ...CL_TYPES, ...DDS_TYPES]);
+export const SCANNED_SOURCE_TYPES: ReadonlySet<string> = new Set([...RPG_TYPES, ...CL_TYPES, ...DDS_TYPES, ...COBOL_TYPES]);
+
+/** Whether a source type is COBOL, whose copybooks are COBOL whatever their own type. */
+export function isCobolType(extension: string): boolean {
+  return COBOL_TYPES.has(extension.toLowerCase());
+}
 
 /** IBM i object name characters. */
 const NAME = "[A-Z0-9_$#@][A-Z0-9_$#@.]*";
@@ -45,12 +54,14 @@ export function scanReferences(text: string, extension: string): RawReference[] 
   const type = extension.toLowerCase();
   const lines = text.split(/\r?\n/);
   const found = RPG_TYPES.has(type)
-    ? [...scanRpg(lines), ...scanRpgPrototypes(lines), ...scanEmbeddedSql(lines, type)]
+    ? [...scanRpg(lines), ...scanRpgPrototypes(lines), ...scanEmbeddedSql(sqlStatements(lines))]
     : CL_TYPES.has(type)
       ? scanCl(lines)
       : DDS_TYPES.has(type)
         ? scanDds(lines)
-        : [];
+        : COBOL_TYPES.has(type)
+          ? scanCobol(lines)
+          : [];
   // Each scan reports in line order; interleave them so the first occurrence is kept.
   return dedupe(found.sort((a, b) => (a.line ?? 0) - (b.line ?? 0)));
 }
@@ -352,13 +363,12 @@ const SQL_CLAUSE = new Set([
 /** Tokens of one SQL statement that are looked at; the rest of a longer one is ignored. */
 const MAX_SQL_TOKENS = 5000;
 
-/** Tables and views embedded SQL reads or changes, and the procedures it CALLs. */
-function scanEmbeddedSql(lines: string[], type: string): RawReference[] {
-  if (!RPG_TYPES.has(type)) {
-    return [];
-  }
+type SqlStatement = { line: number; text: string; sql: string };
+
+/** Tables and views embedded SQL reads or changes, and the procedures it CALLs. INCLUDE is left to each language. */
+function scanEmbeddedSql(statements: SqlStatement[]): RawReference[] {
   const refs: RawReference[] = [];
-  for (const { line, text, sql } of sqlStatements(lines)) {
+  for (const { line, text, sql } of statements) {
     const upper = sql.replace(/"([^"]*)"/g, (_match, name: string) => name).toUpperCase();
     // A statement is at most 200 lines; the token cap bounds even one made of nothing but punctuation.
     const tokens: string[] = (upper.match(/[:A-Z0-9_$#@][A-Z0-9_$#@./]*|[(),]/g) ?? []).slice(0, MAX_SQL_TOKENS);
@@ -559,6 +569,135 @@ function scanDds(lines: string[]): RawReference[] {
     }
   });
   return refs;
+}
+
+/** Copybooks named without a source file are looked for here first, as the ILE COBOL compiler does. */
+const DEFAULT_COBOL_COPY_FILE = "QCBLLESRC";
+
+/** A COBOL word or an IBM i name, possibly qualified with "/" (as in a COPY operand). */
+const COBOL_OPERAND = String.raw`"[^"]*"|'[^']*'|[A-Z0-9_$#@][A-Z0-9_$#@\-/.]*`;
+const COBOL_COPY = new RegExp(
+  String.raw`^COPY\s+(${COBOL_OPERAND})((?:\s+(?:OF|IN)\s+(?:${COBOL_OPERAND}))*)`,
+  "i"
+);
+const COBOL_QUALIFIER = new RegExp(String.raw`\b(?:OF|IN)\s+(${COBOL_OPERAND})`, "gi");
+
+/** Replaces the inside of each literal with blanks, keeping every offset. */
+function blankCobolLiterals(code: string): string {
+  return code.replace(/"[^"]*"?|'[^']*'?/g, (literal) => literal.charAt(0) + " ".repeat(Math.max(0, literal.length - 1)));
+}
+
+/**
+ * The code area (columns 8-72) of each line; undefined for a comment line ("*" or "/" in
+ * column 7). A floating "*>" comment is dropped. Sequence numbers (1-6) and the identification
+ * area (73-80) are never read.
+ */
+function cobolCode(lines: string[]): Array<string | undefined> {
+  return lines.map((raw) => {
+    const indicator = raw.charAt(6);
+    if (indicator === "*" || indicator === "/") {
+      return undefined;
+    }
+    const code = raw.slice(7, 72);
+    const comment = blankCobolLiterals(code).indexOf("*>");
+    return comment < 0 ? code : code.slice(0, comment);
+  });
+}
+
+function unquote(operand: string): { name: string; quoted: boolean } {
+  const quoted = /^(["'])(.*)\1$/.exec(operand);
+  return quoted ? { name: quoted[2].trim(), quoted: true } : { name: operand, quoted: false };
+}
+
+function scanCobol(lines: string[]): RawReference[] {
+  const code = cobolCode(lines);
+  const refs: RawReference[] = [];
+  /** Code from line `start` on, joined up to `limit` lines, with literals blanked in `blank`. */
+  const joined = (start: number, column: number, limit: number) => {
+    const parts: string[] = [];
+    for (let i = start; i < code.length && i < start + limit; i++) {
+      const part = code[i];
+      if (part !== undefined) {
+        parts.push(i === start ? part.slice(column) : part);
+      }
+    }
+    const text = parts.join(" ");
+    return { text, blank: blankCobolLiterals(text) };
+  };
+
+  for (let index = 0; index < code.length; index++) {
+    const line = code[index];
+    if (line === undefined) {
+      continue;
+    }
+    const at = { line: index + 1, text: lines[index].trim() };
+    const blank = blankCobolLiterals(line);
+
+    // COPY (a data name such as WS-COPY-COUNT is not one, nor is COPY inside a literal).
+    for (const match of blank.matchAll(/(?<![A-Z0-9_$#@-])COPY(?![A-Z0-9_$#@-])/gi)) {
+      const statement = joined(index, match.index, 10);
+      const end = statement.blank.search(/\.(\s|$)/);
+      const copy = COBOL_COPY.exec(end < 0 ? statement.text : statement.text.slice(0, end));
+      const ref = copy && cobolCopyTarget(copy[1], [...copy[2].matchAll(COBOL_QUALIFIER)].map((q) => q[1]));
+      if (ref) {
+        refs.push({ ...ref, ...at });
+      }
+    }
+
+    // EXEC SQL … END-EXEC: INCLUDE is a copybook, the rest is scanned like RPG's embedded SQL.
+    const exec = /\bEXEC\s+SQL\b/i.exec(blank);
+    if (exec) {
+      const statement = joined(index, exec.index, 200);
+      const end = statement.blank.search(/\bEND-EXEC\b/i);
+      const sql = (end < 0 ? statement.text : statement.text.slice(0, end))
+        .replace(/^EXEC\s+SQL/i, "")
+        .replace(/'[^']*'/g, "''")
+        .replace(/--.*$/gm, "");
+      const include = /^\s*INCLUDE\s+("[^"]*"|'[^']*'|[^\s.]+)/i.exec(sql);
+      if (include) {
+        const { name, quoted } = unquote(include[1]);
+        if (quoted && name.includes("/")) {
+          refs.push({ kind: "copybook", member: name, unresolvable: "IFS path", ...at });
+        } else if (!SQL_BUILT_INS.has(name.toUpperCase())) {
+          refs.push({ kind: "copybook", member: name.toUpperCase(), defaultSourceFile: DEFAULT_COBOL_COPY_FILE, ...at });
+        }
+      } else {
+        refs.push(...scanEmbeddedSql([{ ...at, sql }]));
+      }
+    }
+  }
+  return refs;
+}
+
+/**
+ * What a COPY statement names. `COPY DDS-format OF [LIB/|LIB-]FILE` (also DDSR-, DD-, DDR-) takes
+ * a record format from a file, so the file is referenced. Otherwise `COPY member [OF|IN file
+ * [OF|IN library]]`, where the file may also be written `LIB/FILE`, names a copybook; a quoted
+ * name with a "/" is an IFS path.
+ */
+function cobolCopyTarget(operand: string, qualifiers: string[]): Omit<RawReference, "line" | "text"> | undefined {
+  const { name, quoted } = unquote(operand);
+  if (!name) {
+    return undefined;
+  }
+  const [first, second] = qualifiers.map((q) => unquote(q).name.toUpperCase());
+  if (!quoted && /^DDS?R?-/i.test(name)) {
+    if (!first) {
+      return undefined;
+    }
+    // IBM i names never hold "-", so "LIB-FILE" is a library and a file.
+    const { library, name: file } = splitQualified(first.replace("-", "/"));
+    return { kind: "file", library: second ?? library, member: file };
+  }
+  if (quoted && name.includes("/")) {
+    return { kind: "copybook", member: name, unresolvable: "IFS path" };
+  }
+  const member = name.toUpperCase();
+  if (!first) {
+    return { kind: "copybook", member, defaultSourceFile: DEFAULT_COBOL_COPY_FILE };
+  }
+  const { library, name: sourceFile } = splitQualified(first);
+  return { kind: "copybook", library: second ?? library, sourceFile, member };
 }
 
 /** Keeps the first occurrence of each reference. */

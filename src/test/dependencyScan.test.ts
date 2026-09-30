@@ -9,6 +9,101 @@ function brief(refs: RawReference[]) {
   );
 }
 
+/** A fixed-format COBOL line: sequence number, indicator, code in columns 8-72, identification area. */
+function cbl(code: string, indicator = " ", ident = "CHG0001"): string {
+  return `000100${indicator}${code.padEnd(65).slice(0, 65)}${ident}`;
+}
+
+describe("scanReferences: COBOL", () => {
+  it("reads every COPY form, with OF or IN", () => {
+    const source = [
+      cbl("       WORKING-STORAGE SECTION."),
+      cbl("       COPY DATEUTIL."),
+      cbl("       COPY PROTOS OF QCPYSRC."),
+      cbl("       COPY ERRDS IN QCPYSRC IN MYLIB."),
+      cbl("       COPY CONSTS OF MYLIB/QCBLLESRC."),
+      cbl("       COPY \"QUOTED\"."),
+    ].join("\n");
+    const refs = scanReferences(source, "cblle");
+    assert.deepEqual(brief(refs), [
+      "copybook|||DATEUTIL|",
+      "copybook||QCPYSRC|PROTOS|",
+      "copybook|MYLIB|QCPYSRC|ERRDS|",
+      "copybook|MYLIB|QCBLLESRC|CONSTS|",
+      "copybook|||QUOTED|",
+    ]);
+    assert.deepEqual(refs.map((ref) => ref.defaultSourceFile), ["QCBLLESRC", undefined, undefined, undefined, "QCBLLESRC"]);
+    assert.deepEqual(refs.map((ref) => ref.line), [2, 3, 4, 5, 6]);
+  });
+
+  it("reads a COPY statement split over lines, and REPLACING doesn't hide it", () => {
+    const source = [
+      cbl("       COPY PROTOS"),
+      cbl("            OF QCPYSRC"),
+      cbl("            REPLACING ==:PFX:== BY ==WS==."),
+      cbl("       COPY ERRDS SUPPRESS."),
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "sqlcblle")), [
+      "copybook||QCPYSRC|PROTOS|",
+      "copybook|||ERRDS|",
+    ]);
+  });
+
+  it("ignores comments, literals, data names and the identification area", () => {
+    const source = [
+      cbl("       COPY OLDCOPY.", "*"),
+      cbl("       COPY PAGED.", "/"),
+      cbl("           DISPLAY 'COPY FAILED'."),
+      cbl("           MOVE 1 TO WS-COPY-COUNT."),
+      cbl("           ADD 1 TO COPY-TOTAL. *> COPY NOTME."),
+      cbl("           MOVE A TO B.", " ", "COPY X"),
+    ].join("\n");
+    assert.deepEqual(scanReferences(source, "cblle"), []);
+  });
+
+  it("reads COPY DDS as a reference to the file whose formats it copies", () => {
+    const source = [
+      cbl("       COPY DDS-ALL-FORMATS OF CUSTMAST."),
+      cbl("       COPY DDS-ORDREC-I OF MYLIB-ORDHDR."),
+      cbl("       COPY DDSR-ALL-FORMATS OF PRODLIB/ITEMS."),
+      cbl("       COPY DD-DSPREC OF ORDDSP IN APPLIB."),
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "cblle")), [
+      "file|||CUSTMAST|",
+      "file|MYLIB||ORDHDR|",
+      "file|PRODLIB||ITEMS|",
+      "file|APPLIB||ORDDSP|",
+    ]);
+  });
+
+  it("records a quoted IFS path as unresolvable", () => {
+    const source = cbl("       COPY '/home/dev/copy/dates.cpy'.");
+    assert.deepEqual(brief(scanReferences(source, "cblle")), ["copybook|||/home/dev/copy/dates.cpy|IFS path"]);
+  });
+
+  it("reads embedded SQL: INCLUDE as a copybook, tables and CALLs", () => {
+    const source = [
+      cbl("           EXEC SQL INCLUDE SQLCA END-EXEC."),
+      cbl("           EXEC SQL INCLUDE ORDSQL END-EXEC."),
+      cbl("           EXEC SQL"),
+      cbl("             SELECT NAME INTO :WS-NAME"),
+      cbl("               FROM MYLIB.CUSTOMER C JOIN ORDERS O"),
+      cbl("               ON C.ID = O.CUSTID"),
+      cbl("           END-EXEC."),
+      cbl("           EXEC SQL CALL PRCLIB.RECALC END-EXEC."),
+    ].join("\n");
+    const refs = scanReferences(source, "sqlcblle");
+    assert.deepEqual(brief(refs), [
+      "copybook|||ORDSQL|",
+      "table|MYLIB||CUSTOMER|",
+      "table|||ORDERS|",
+      "procedure|PRCLIB||RECALC|",
+    ]);
+    assert.equal(refs[0].defaultSourceFile, "QCBLLESRC");
+    assert.equal(refs[1].line, 3);
+  });
+});
+
 describe("scanReferences: RPG", () => {
   it("reads every /COPY form in fixed-form source", () => {
     const source = [

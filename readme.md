@@ -104,6 +104,7 @@ Find Dependencies asks up to three kinds of sources. Every IBM i is different, s
 | RPGLE, SQLRPGLE, RPGLEINC, RPG | `/COPY` and `/INCLUDE` (`LIB/FILE,MEMBER`, `FILE,MEMBER`, or `MEMBER`), `EXEC SQL INCLUDE`, externally described files (F-specs and `dcl-f`, honoring `EXTDESC`), `EXTNAME` data structures, SQL tables and views used by embedded SQL (`FROM`, `JOIN`, `INSERT INTO`, `UPDATE`, `DELETE FROM`, `MERGE INTO`), programs called through `EXTPGM` prototypes, and bound procedures (other prototypes, and SQL `CALL`) |
 | CLLE, CLP, CL | `CALL` and `TFRCTL` programs, including calls inside `SBMJOB CMD(...)`, and `CALLPRC` procedures |
 | PF, LF, DSPF, PRTF | Files named in `REF`, `REFFLD`, `PFILE`, and `JFILE` |
+| CBLLE, SQLCBLLE, CBL, SQLCBL | `COPY` (`COPY MEMBER`, `OF`/`IN` a source file, optionally `OF`/`IN` a library or written `LIB/FILE`), `EXEC SQL INCLUDE`, files whose record formats are copied with `COPY DDS-…` (also `DDSR-`, `DD-`, `DDR-`), and the SQL tables, views and `CALL`ed procedures of embedded SQL. Comment lines and columns 73–80 are ignored. |
 
 **DSPPGMREF** (program source only) finds the compiled program with the member's name in the search libraries and runs `DSPPGMREF` on it. This finds the files, programs, and service programs the object really uses, including files used only by embedded SQL. Each one points at the source member it was created from when the object records it; otherwise it's matched by name. It can't see copybooks, and it's skipped when the IBM i SQL services it needs aren't available or you aren't authorized.
 
@@ -154,7 +155,7 @@ Abstract (Fortra) keeps its cross-reference in the `ABSTRACT` library. Three of 
 
 #### Finding the source
 
-Each dependency is looked up on the IBM i in the libraries listed in `ibmi-member-workspace.dependencies.searchLibraries`, in order, or in the connection's library list when that setting is empty. List both your object and source libraries, since DSPPGMREF looks for compiled programs there too. A library or source file named in the source is matched exactly. A copybook named without a source file is looked for in `QRPGLESRC` first. Only source members that can build a program are offered for a `CALL`, and only file source for a `REF`.
+Each dependency is looked up on the IBM i in the libraries listed in `ibmi-member-workspace.dependencies.searchLibraries`, in order, or in the connection's library list when that setting is empty. List both your object and source libraries, since DSPPGMREF looks for compiled programs there too. A library or source file named in the source is matched exactly. A copybook named without a source file is looked for in `QRPGLESRC` first, or `QCBLLESRC` for COBOL. Only source members that can build a program are offered for a `CALL`, and only file source for a `REF`.
 
 A list shows what was found, grouped into copybooks, called programs, referenced files, and SQL tables and views. Bound procedures are counted but not listed, since a procedure has no member of its own; its module is found through the copybook or service program that declares it. Copybooks are preselected, and members you already have checked out are marked. Choose the members you want, then:
 
@@ -174,7 +175,7 @@ ORD100 ── /COPY ORDCPY ── /COPY DATECPY
        └─ CALL ORD200 ─── uses ORDHDR ── REF FLDREF
 ```
 
-Here Find Dependencies lists ORDCPY and ORD200. Find All Dependencies also lists DATECPY, ORDHDR and FLDREF. Each member's source is read from the IBM i as it goes, and the same sources are asked for each one. Nothing is written until you choose. Each member is looked into once, so members that use each other don't loop, and one reached two ways is shown through the shorter way.
+Here Find Dependencies lists ORDCPY and ORD200. Find All Dependencies also lists DATECPY, ORDHDR and FLDREF. Each member's source is read from the IBM i as it goes, and the same sources are asked for each one. Nothing is written until you choose. A copybook copied by a COBOL member is read as COBOL, whatever its own source type. Each member is looked into once, so members that use each other don't loop, and one reached two ways is shown through the shorter way.
 
 The list is the same as Find Dependencies' list, and each member's details line says how it was reached, for example *via ORD200 → ORDHDR · REF(FLDREF)*. Members you already have checked out are read from your local copy.
 

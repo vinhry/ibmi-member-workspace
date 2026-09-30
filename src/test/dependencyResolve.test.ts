@@ -41,6 +41,20 @@ describe("resolveReferences", () => {
     assert.deepEqual(result.resolved[0].candidates.map((c) => c.sourceFile), ["QRPGLESRC", "QCPYSRC"]);
   });
 
+  it("looks for a COBOL copybook without a source file in the file the scan names first", () => {
+    const cobolRows = [
+      row("PRODLIB", "QCPYSRC", "ORDCOPY", "CBLLE"),
+      row("PRODLIB", "QCBLLESRC", "ORDCOPY", "CBLLE"),
+      row("PRODLIB", "QRPGLESRC", "ORDCOPY", "RPGLEINC"),
+    ];
+    const result = resolveReferences(
+      [ref({ kind: "copybook", member: "ORDCOPY", defaultSourceFile: "QCBLLESRC" })],
+      cobolRows,
+      ["PRODLIB"]
+    );
+    assert.equal(result.resolved[0].candidates[0].sourceFile, "QCBLLESRC");
+  });
+
   it("matches a called program only to program source, not a display file of the same name", () => {
     const result = resolveReferences([ref({ kind: "program", member: "ORD001" })], rows, ["PRODLIB"]);
     assert.deepEqual(result.resolved[0].candidates, [rows[4]]);

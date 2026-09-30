@@ -14,21 +14,23 @@ IBM i Member Workspace (`vinhry.ibmi-member-workspace`) is a VS Code extension t
 
 ## Requirements
 
-### 1. COBOL `COPY` in the dependency scan
+### 1. COBOL `COPY` in the dependency scan (shipped in 1.7.5)
 
-Find Dependencies and Find All Dependencies read COBOL members and report their copybooks. Today `src/dependencyScan.ts` scans only RPG, CL and DDS (`SCANNED_SOURCE_TYPES`), so a COBOL member returns no references.
+Find Dependencies and Find All Dependencies read COBOL members (`cblle`, `sqlcblle`, `cbl`, `sqlcbl`) with `scanCobol` in `src/dependencyScan.ts`.
 
-- Add COBOL source types to the scan: `cblle`, `sqlcblle`, `cbl`, `sqlcbl`, the same COBOL types `PROGRAM_SOURCE_TYPES` in `src/dependencyResolve.ts` already knows.
-- Copybooks have no fixed source type (shops use `CBLLE`, `CPY`, blank and others). So Find All Dependencies scans a copybook reached from a COBOL member as COBOL, whatever its type, the same way it scans an RPG copybook as RPG.
-- Recognize `COPY name`, `COPY name OF|IN file`, and `COPY name OF|IN file OF|IN library` as copybook references. Without a file, `QCBLLESRC` is preferred, as the ILE COBOL compiler does. This mirrors `DEFAULT_COPY_FILE` (`QRPGLESRC`) for RPG. The search libraries still decide the library.
-- Ignore comment lines (`*` or `/` in column 7) and text in the sequence and identification areas (columns 1–6 and 73–80).
-- Treat `COPY DDS-…` / `COPY DD-…` (a record format taken from an externally described file) as a **file** reference to the named file, not as a copybook.
-- Embedded SQL in `sqlcblle`/`sqlcbl` reports tables, views and `EXEC SQL INCLUDE` the same way it does for SQL RPG.
+- Only the code area (columns 8–72) is read. Comment lines (`*` or `/` in column 7), floating `*>` comments, literals, and data names containing `COPY` (`WS-COPY-COUNT`) are ignored.
+- `COPY name`, `COPY name OF|IN file`, `COPY name OF|IN lib/file`, and `COPY name OF|IN file OF|IN library` are copybooks. A statement may span lines up to its period. A quoted name with a `/` is an IFS path (unresolvable).
+- A copybook without a source file carries `defaultSourceFile: "QCBLLESRC"`, which the resolver prefers, as it prefers `QRPGLESRC` for RPG. Other files are still searched.
+- `COPY DDS-…`, `DDSR-…`, `DD-…`, `DDR-…` `OF file`, `lib/file` or `lib-file` (IBM i names can't contain `-`) is a **file** reference.
+- `EXEC SQL … END-EXEC`: `INCLUDE` is a copybook (not `SQLCA`/`SQLDA`). Tables, views and `CALL` go through the same SQL scan as RPG.
+- Find All Dependencies scans a copybook reached from a COBOL member as COBOL, whatever its own source type (`scanTypeOf` in `src/dependencyWalk.ts`).
+- The ILE COBOL syntax wasn't checked against IBM's reference (their pages don't render through the fetch tool), so the parser accepts every qualification form above.
 
 **Validation**
-- `src/test/dependencyScan.test.ts` has cases for each `COPY` form, `OF` and `IN`, a commented-out `COPY`, a `COPY` in columns 73–80 (ignored), `COPY DDS-ALL-FORMATS OF file` (file reference), and embedded SQL in `sqlcblle`.
-- A COBOL member's copybooks are resolved and offered by Find Dependencies, which is covered by a `dependencyResolve` test with a fake IBM i.
-- The README "Where dependencies come from" section lists COBOL.
+- `src/test/dependencyScan.test.ts` "scanReferences: COBOL": every `COPY` form, a split statement with `REPLACING`, comments, literals, data names, columns 73–80, `COPY DDS` forms, an IFS path, and embedded SQL.
+- `src/test/dependencyResolve.test.ts`: a COBOL copybook prefers `QCBLLESRC`.
+- `src/test/dependencyWalk.test.ts`: a `CPY` copybook of a COBOL member is scanned as COBOL.
+- README source-scan table and Find All Dependencies.
 
 ### 2. Configurable LMI checkout command
 
