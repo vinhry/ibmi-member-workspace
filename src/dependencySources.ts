@@ -1,4 +1,4 @@
-import { PROGRAM_SOURCE_TYPES } from "./dependencyResolve";
+import { PROGRAM_SOURCE_TYPES, SearchScopeKind } from "./dependencyResolve";
 import { RawReference, ReferenceKind, SCANNED_SOURCE_TYPES, scanReferences } from "./dependencyScan";
 import type { CheckedOutMember } from "./types";
 
@@ -23,6 +23,8 @@ export interface ProviderContext {
   system: string;
   /** Search libraries, in order, for source members and compiled objects. */
   libraries: string[];
+  /** "everywhere" also looks for compiled objects outside `libraries`, in every user library. */
+  scope?: SearchScopeKind;
 }
 
 export interface ProviderResult {
@@ -280,12 +282,12 @@ export function createProgramReferencesProvider(io: ProgramReferencesIo): Depend
     available: async () =>
       (await io.sqlServicesAvailable()) ? { ok: true } : { ok: false, reason: "IBM i SQL services not available" },
     find: async (entry, context) => {
-      const object = await io.findCompiledObject(entry.memberName, context.libraries);
+      const everywhere = context.scope === "everywhere";
+      const object = await io.findCompiledObject(entry.memberName, context.libraries) ??
+        (everywhere ? await io.findCompiledObject(entry.memberName, ["*ALLUSR"]) : undefined);
       if (!object) {
-        return {
-          references: [],
-          note: `no compiled program ${entry.memberName} in ${context.libraries.join(", ") || "the search libraries"}`,
-        };
+        const searched = everywhere ? "any user library" : context.libraries.join(", ") || "the search libraries";
+        return { references: [], note: `no compiled program ${entry.memberName} in ${searched}` };
       }
       const objects = pgmRefRowsToObjects(await io.programReferences(object));
       const sources = await io.objectSources(objects.filter((o) => o.library));

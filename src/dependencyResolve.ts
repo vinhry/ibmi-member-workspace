@@ -34,15 +34,115 @@ const FILE_SOURCE_TYPES = new Set(["PF", "LF", "DSPF", "PRTF", "SQL", "TABLE", "
 /** Copybooks named without a source file are looked for here first, as the RPG compiler does (COBOL sets its own). */
 const DEFAULT_COPY_FILE = "QRPGLESRC";
 
-/** The libraries to search: the configured order, plus any library a reference names explicitly. */
-export function librariesToSearch(refs: readonly RawReference[], libraryOrder: readonly string[]): string[] {
-  const libraries = libraryOrder.map((library) => library.toUpperCase());
-  for (const ref of refs) {
-    if (ref.library && !libraries.includes(ref.library)) {
-      libraries.push(ref.library);
-    }
+/**
+ * Where dependencies are looked for: the connection's library list, the libraries in
+ * `dependencies.searchLibraries`, or every user library on the system.
+ */
+export type SearchScopeKind = "libraryList" | "specific" | "everywhere";
+
+export const SEARCH_SCOPE_KINDS: readonly SearchScopeKind[] = ["libraryList", "specific", "everywhere"];
+
+export interface SearchScope {
+  kind: SearchScopeKind;
+  /**
+   * The libraries searched, in order: the library list, or the configured libraries for
+   * "specific". For "everywhere" they only rank what is found; every user library is searched.
+   */
+  libraries: string[];
+}
+
+export function isSearchScopeKind(value: unknown): value is SearchScopeKind {
+  return (SEARCH_SCOPE_KINDS as readonly unknown[]).includes(value);
+}
+
+/**
+ * The scope from the settings. Without a `dependencies.searchScope` of its own, it follows what
+ * earlier versions did: the configured libraries when there are some, else the library list.
+ * "specific" without libraries falls back to the library list, with a note saying so.
+ */
+export function searchScopeFrom(settings: {
+  setting: unknown;
+  searchLibraries: readonly string[];
+  libraryList: readonly string[];
+}): { scope: SearchScope; note?: string } {
+  const configured = [...new Set(settings.searchLibraries.map((library) => library.trim().toUpperCase()).filter(Boolean))];
+  const libraryList = settings.libraryList.map((library) => library.toUpperCase());
+  const kind = isSearchScopeKind(settings.setting)
+    ? settings.setting
+    : configured.length > 0 ? "specific" : "libraryList";
+  if (kind === "specific") {
+    return configured.length > 0
+      ? { scope: { kind, libraries: configured } }
+      : {
+        scope: { kind: "libraryList", libraries: libraryList },
+        note: "dependencies.searchLibraries is empty, so the library list was searched instead.",
+      };
   }
-  return libraries;
+  return { scope: { kind, libraries: libraryList } };
+}
+
+/** How a scope is named to the user, e.g. in the list's title. */
+export function describeScope(scope: SearchScope): string {
+  switch (scope.kind) {
+    case "everywhere":
+      return "all user libraries";
+    case "specific":
+      return `the search libraries (${scope.libraries.join(", ")})`;
+    default:
+      return "the library list";
+  }
+}
+
+/** A reference that named a library outside the scope, and so was looked for by name inside it. */
+export interface OutsideReference {
+  reference: RawReference;
+  library: string;
+}
+
+/**
+ * Keeps references inside the scope. In "libraryList" and "specific", a reference naming a
+ * library outside it (a DSPPGMREF source location, a cross-reference row, `/COPY OTHERLIB/…`)
+ * is looked for by name in the scope instead, keeping its source file. "everywhere" keeps them.
+ */
+export function scopeReferences(
+  refs: readonly RawReference[],
+  scope: SearchScope
+): { references: RawReference[]; outside: OutsideReference[] } {
+  if (scope.kind === "everywhere") {
+    return { references: [...refs], outside: [] };
+  }
+  const inScope = new Set(scope.libraries.map((library) => library.toUpperCase()));
+  const outside: OutsideReference[] = [];
+  const references = refs.map((ref) => {
+    if (!ref.library || inScope.has(ref.library.toUpperCase())) {
+      return ref;
+    }
+    outside.push({ reference: ref, library: ref.library });
+    const inside = { ...ref };
+    delete inside.library;
+    return inside;
+  });
+  return { references, outside };
+}
+
+/**
+ * The libraries to search: exactly the scope's libraries, or undefined for every user library.
+ * Libraries named by references are never added; `scopeReferences` keeps references in scope.
+ */
+export function librariesToSearch(scope: SearchScope): string[] | undefined {
+  return scope.kind === "everywhere" ? undefined : scope.libraries.map((library) => library.toUpperCase());
+}
+
+/**
+ * IBM's libraries, which "everywhere" leaves out: names starting with Q or #, except QGPL and
+ * QUSR…, which hold user objects. Keep in step with the SQL in `findSourceMembers`.
+ */
+export function isIbmLibrary(library: string): boolean {
+  const name = library.toUpperCase();
+  if (name === "QGPL" || name.startsWith("QUSR")) {
+    return false;
+  }
+  return name.startsWith("Q") || name.startsWith("#");
 }
 
 /**
@@ -77,6 +177,8 @@ export function resolveReferences(
       )
       .sort((a, b) =>
         rank(a.library) - rank(b.library) ||
+        // Libraries outside the order (found searching everywhere) come after it, alphabetically.
+        (rank(a.library) === order.length ? a.library.localeCompare(b.library) : 0) ||
         preferredFile(ref, a) - preferredFile(ref, b) ||
         a.sourceFile.localeCompare(b.sourceFile)
       );

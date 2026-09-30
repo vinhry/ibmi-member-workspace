@@ -12,7 +12,17 @@ import {
   runCrossReferenceQuery,
   sqlServicesAvailable,
 } from "../codeForIBMi";
-import { Resolution, SourceMemberRow, librariesToSearch, resolveReferences } from "../dependencyResolve";
+import {
+  Resolution,
+  SearchScope,
+  SearchScopeKind,
+  SourceMemberRow,
+  describeScope,
+  librariesToSearch,
+  resolveReferences,
+  scopeReferences,
+  searchScopeFrom,
+} from "../dependencyResolve";
 import { RawReference, ReferenceKind, scanReferences } from "../dependencyScan";
 import {
   DependencyProvider,
@@ -55,8 +65,9 @@ export interface DependencyLookup {
   resolution: Resolution;
   /** Bound procedures the member calls, by name. */
   procedures: RawReference[];
-  /** The libraries searched, in order. */
+  /** The libraries searched, in order; for "everywhere", the order that ranks what was found. */
   libraries: string[];
+  scope?: SearchScopeKind;
 }
 
 /**
@@ -66,23 +77,33 @@ export interface DependencyLookup {
 export async function lookupDependencies(
   ctx: CommandContext,
   system: string,
-  subject: DependencySubject
+  subject: DependencySubject,
+  scope: SearchScope = searchScope(ctx)
 ): Promise<DependencyLookup> {
-  const libraries = searchLibraries();
+  const { libraries } = scope;
   const run = await runProviders(
     activeProviders(ctx, system),
     subject,
-    { system, libraries },
+    { system, libraries, scope: scope.kind },
     ctx.dependencyAvailability
   );
   const procedures = run.references.filter((ref) => ref.kind === "procedure");
-  const members = run.references.filter((ref) => ref.kind !== "procedure");
+  const { references: members, outside } = scopeReferences(
+    run.references.filter((ref) => ref.kind !== "procedure"),
+    scope
+  );
+  for (const { reference, library } of outside) {
+    const where = [library, reference.sourceFile].filter(Boolean).join("/");
+    ctx.log.appendLine(
+      `[dependencies] ${where}(${reference.member}) is outside ${describeScope(scope)}; looked for ${reference.member} there instead`
+    );
+  }
   const lookup = members.filter((ref) => !ref.unresolvable && MEMBER_NAME.test(ref.member));
   const rows = await findSourceMembers(
     [...new Set(lookup.map((ref) => ref.member))],
-    librariesToSearch(lookup, libraries)
+    librariesToSearch(scope)
   );
-  return { ...run, procedures, resolution: resolveReferences(members, rows, libraries), libraries };
+  return { ...run, procedures, resolution: resolveReferences(members, rows, libraries), libraries, scope: scope.kind };
 }
 
 /** A valid member name; anything else (e.g. an IFS path) can't be looked up. */
@@ -159,21 +180,28 @@ export async function suggestDependencies(ctx: CommandContext, entry: CheckedOut
  * user pick which members to bring in, and checks them out as read-only reference copies.
  * Changing one goes through change management instead.
  */
-export async function reviewDependencies(ctx: CommandContext, entry: CheckedOutMember): Promise<void> {
+export async function reviewDependencies(
+  ctx: CommandContext,
+  entry: CheckedOutMember,
+  scopeOverride?: SearchScopeKind
+): Promise<void> {
   const { log } = ctx;
   const memberPath = formatMemberPath(entry);
   const system = connectedSystemFor(entry, memberPath);
   if (!system) {
     return;
   }
+  const scope = searchScope(ctx, scopeOverride);
+  const rescope = { scope, rerun: (kind: SearchScopeKind) => reviewDependencies(ctx, entry, kind) };
+  log.appendLine(`[dependencies] Looking up the dependencies of ${memberPath} in ${describeScope(scope)}`);
 
   let references: RawReference[];
   let outcomes: ProviderOutcome[];
   let resolution: Resolution;
   try {
     ({ references, outcomes, resolution } = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: `Looking up the dependencies of ${memberPath}...` },
-      () => lookupDependencies(ctx, system, entry)
+      { location: vscode.ProgressLocation.Notification, title: `Looking up the dependencies of ${memberPath}${progressScope(scope)}...` },
+      () => lookupDependencies(ctx, system, entry, scope)
     ));
   } catch (err) {
     log.appendLine(`[dependencies] Lookup failed for ${memberPath}: ${errorMessage(err)}`);
@@ -194,7 +222,7 @@ export async function reviewDependencies(ctx: CommandContext, entry: CheckedOutM
     if (unresolved.length === 0) {
       vscode.window.showInformationMessage(`${memberPath} uses ${describeCounts(references)}, with no source members to bring.`);
     }
-    reportUnresolved(ctx, memberPath, unresolved);
+    reportUnresolved(ctx, memberPath, unresolved, rescope);
     return;
   }
   await pickAndBring(ctx, system, items, {
@@ -202,6 +230,7 @@ export async function reviewDependencies(ctx: CommandContext, entry: CheckedOutM
     placeHolder: `Choose the members to bring into your checkout folder — ${summary}`,
     memberPath,
     unresolved,
+    rescope,
   });
 }
 
@@ -210,13 +239,20 @@ export async function reviewDependencies(ctx: CommandContext, entry: CheckedOutM
  * limits in `dependencies.transitive`, then offers every member found in one picker. Members
  * are read from the IBM i while walking; nothing is written until the user brings them.
  */
-export async function reviewAllDependencies(ctx: CommandContext, entry: CheckedOutMember): Promise<void> {
+export async function reviewAllDependencies(
+  ctx: CommandContext,
+  entry: CheckedOutMember,
+  scopeOverride?: SearchScopeKind
+): Promise<void> {
   const { log } = ctx;
   const memberPath = formatMemberPath(entry);
   const system = connectedSystemFor(entry, memberPath);
   if (!system) {
     return;
   }
+  const scope = searchScope(ctx, scopeOverride);
+  const rescope = { scope, rerun: (kind: SearchScopeKind) => reviewAllDependencies(ctx, entry, kind) };
+  log.appendLine(`[dependencies] Looking up all dependencies of ${memberPath} in ${describeScope(scope)}`);
   const config = vscode.workspace.getConfiguration("ibmi-member-workspace");
   const limits = {
     maxDepth: clamp(config.get<number>("dependencies.transitive.maxDepth", 3), 1, 10),
@@ -224,9 +260,9 @@ export async function reviewAllDependencies(ctx: CommandContext, entry: CheckedO
   };
 
   const result = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: `Looking up all dependencies of ${memberPath}`, cancellable: true },
+    { location: vscode.ProgressLocation.Notification, title: `Looking up all dependencies of ${memberPath}${progressScope(scope)}`, cancellable: true },
     (progress, token) => walkDependencies(entry, {
-      lookup: (subject) => lookupDependencies(ctx, system, subject),
+      lookup: (subject) => lookupDependencies(ctx, system, subject, scope),
       onLimit: (reached) => askToContinue(reached),
       cancelled: () => token.isCancellationRequested,
       progress: ({ members, depth, member }) => progress.report({
@@ -264,7 +300,7 @@ export async function reviewAllDependencies(ctx: CommandContext, entry: CheckedO
   }
   const items = buildItems(ctx, system, result.nodes);
   if (items.length === 0) {
-    reportUnresolved(ctx, memberPath, result.unresolved);
+    reportUnresolved(ctx, memberPath, result.unresolved, rescope);
     return;
   }
   const levels = Math.max(...result.nodes.map((node) => node.depth));
@@ -274,7 +310,19 @@ export async function reviewAllDependencies(ctx: CommandContext, entry: CheckedO
     placeHolder: `Choose the members to bring into your checkout folder — ${summary}${partial}`,
     memberPath,
     unresolved: result.unresolved,
+    rescope,
   });
+}
+
+/** A search that can be run again in another scope. */
+interface Rescope {
+  scope: SearchScope;
+  rerun(kind: SearchScopeKind): Promise<void>;
+}
+
+/** " in all user libraries (…)" for the progress title of a search everywhere; nothing otherwise. */
+function progressScope(scope: SearchScope): string {
+  return scope.kind === "everywhere" ? " in all user libraries (this can take a while)" : "";
 }
 
 /** The connected system, if it is the one `entry` was checked out from; otherwise says why not. */
@@ -325,23 +373,25 @@ async function pickAndBring(
   ctx: CommandContext,
   system: string,
   items: DependencyItem[],
-  { title, placeHolder, memberPath, unresolved }: {
+  { title, placeHolder, memberPath, unresolved, rescope }: {
     title: string;
     placeHolder: string;
     memberPath: string;
     unresolved: WalkUnresolved[];
+    rescope: Rescope;
   }
 ): Promise<void> {
-  const picked = await vscode.window.showQuickPick(items, {
-    canPickMany: true,
-    title,
-    placeHolder,
-    matchOnDescription: true,
-    matchOnDetail: true,
-  });
-  const members = (picked ?? []).flatMap((item) => (item.member ? [item.member] : []));
+  const outcome = await pickDependencies(items, `${title} · ${capitalize(describeScope(rescope.scope))}`, placeHolder);
+  if (outcome === "changeScope") {
+    const kind = await pickSearchScope(ctx, rescope.scope);
+    if (kind) {
+      await rescope.rerun(kind);
+    }
+    return;
+  }
+  const members = (outcome ?? []).flatMap((item) => (item.member ? [item.member] : []));
   if (members.length === 0) {
-    reportUnresolved(ctx, memberPath, unresolved);
+    reportUnresolved(ctx, memberPath, unresolved, rescope);
     return;
   }
 
@@ -364,7 +414,96 @@ async function pickAndBring(
     return;
   }
   await checkoutMembersBatch(ctx.service, system, members, ctx.log, { reference: true });
-  reportUnresolved(ctx, memberPath, unresolved);
+  reportUnresolved(ctx, memberPath, unresolved, rescope);
+}
+
+/**
+ * The dependency list, with a title button to search in another scope. Resolves with the chosen
+ * items, "changeScope", or undefined when dismissed.
+ */
+function pickDependencies(
+  items: DependencyItem[],
+  title: string,
+  placeholder: string
+): Promise<readonly DependencyItem[] | "changeScope" | undefined> {
+  return new Promise((resolve) => {
+    const quickPick = vscode.window.createQuickPick<DependencyItem>();
+    const scopeButton: vscode.QuickInputButton = {
+      iconPath: new vscode.ThemeIcon("library"),
+      tooltip: "Search in Other Libraries…",
+    };
+    let result: readonly DependencyItem[] | "changeScope" | undefined;
+    quickPick.items = items;
+    quickPick.selectedItems = items.filter((item) => item.picked);
+    quickPick.canSelectMany = true;
+    quickPick.title = title;
+    quickPick.placeholder = placeholder;
+    quickPick.matchOnDescription = true;
+    quickPick.matchOnDetail = true;
+    quickPick.buttons = [scopeButton];
+    quickPick.onDidTriggerButton(() => {
+      result = "changeScope";
+      quickPick.hide();
+    });
+    quickPick.onDidAccept(() => {
+      result = quickPick.selectedItems;
+      quickPick.hide();
+    });
+    quickPick.onDidHide(() => {
+      quickPick.dispose();
+      resolve(result);
+    });
+    quickPick.show();
+  });
+}
+
+/** Asks where to search this time; the setting is left as it is. */
+async function pickSearchScope(ctx: CommandContext, current: SearchScope): Promise<SearchScopeKind | undefined> {
+  const configured = configuredSearchLibraries();
+  const libraryList = connectionLibraryList();
+  type Item = vscode.QuickPickItem & { scope?: SearchScopeKind; openSetting?: boolean };
+  const items: Item[] = [
+    {
+      scope: "libraryList",
+      label: "Library List",
+      description: current.kind === "libraryList" ? "current" : undefined,
+      detail: libraryList.join(", ") || "The connection's current library and library list",
+    },
+    configured.length > 0
+      ? {
+        scope: "specific",
+        label: "Search Libraries",
+        description: current.kind === "specific" ? "current" : undefined,
+        detail: configured.join(", "),
+      }
+      : {
+        openSetting: true,
+        label: "Search Libraries…",
+        detail: "None set yet. Opens ibmi-member-workspace.dependencies.searchLibraries.",
+      },
+    {
+      scope: "everywhere",
+      label: "All User Libraries",
+      description: current.kind === "everywhere" ? "current" : undefined,
+      detail: "Every library except IBM's, library list first. Can take a while on a large system.",
+    },
+  ];
+  const picked = await vscode.window.showQuickPick(items, {
+    title: "Search Dependencies In",
+    placeHolder: "Only this search; the dependencies.searchScope setting is unchanged",
+  });
+  if (picked?.openSetting) {
+    void vscode.commands.executeCommand("workbench.action.openSettings", "ibmi-member-workspace.dependencies.search");
+    return undefined;
+  }
+  if (picked?.scope) {
+    ctx.log.appendLine(`[dependencies] Searching again in ${picked.label}`);
+  }
+  return picked?.scope;
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /** Every provider the settings turn on for `system`; availability is checked when they run. */
@@ -409,14 +548,36 @@ function logOutcomes(ctx: CommandContext, memberPath: string, outcomes: Provider
   }
 }
 
-/** The configured libraries, or the connection's library list. */
-export function searchLibraries(): string[] {
-  const configured = vscode.workspace
+function configuredSearchLibraries(): string[] {
+  return vscode.workspace
     .getConfiguration("ibmi-member-workspace")
     .get<string[]>("dependencies.searchLibraries", [])
-    .map((library) => library.trim().toUpperCase())
+    .map((library) => String(library).trim().toUpperCase())
     .filter(Boolean);
-  return configured.length > 0 ? configured : connectionLibraryList();
+}
+
+/**
+ * Where to look for dependencies: `override` for one search, else `dependencies.searchScope`
+ * (or, when that isn't set, the search libraries if any, else the library list).
+ */
+export function searchScope(ctx?: CommandContext, override?: SearchScopeKind): SearchScope {
+  const { scope, note } = searchScopeFrom({
+    setting: override ?? vscode.workspace.getConfiguration("ibmi-member-workspace").get<unknown>("dependencies.searchScope"),
+    searchLibraries: configuredSearchLibraries(),
+    libraryList: connectionLibraryList(),
+  });
+  if (note) {
+    ctx?.log.appendLine(`[dependencies] ${note}`);
+  }
+  return scope;
+}
+
+/**
+ * The libraries Bob's tools read when a call names none. They always read a bounded list, so
+ * "everywhere" gives them the library list.
+ */
+export function searchLibraries(): string[] {
+  return searchScope().libraries;
 }
 
 /**
@@ -567,7 +728,12 @@ function describeVia(via: readonly string[], prefix: string, suffix: string): st
   return via.length > 0 ? `${prefix}${via.join(" → ")}${suffix}` : "";
 }
 
-function reportUnresolved(ctx: CommandContext, memberPath: string, unresolved: readonly WalkUnresolved[]): void {
+function reportUnresolved(
+  ctx: CommandContext,
+  memberPath: string,
+  unresolved: readonly WalkUnresolved[],
+  rescope?: Rescope
+): void {
   if (unresolved.length === 0) {
     return;
   }
@@ -577,17 +743,20 @@ function reportUnresolved(ctx: CommandContext, memberPath: string, unresolved: r
     const where = ref.line !== undefined ? `line ${ref.line}: ` : "";
     ctx.log.appendLine(`  ${describeVia(via, "in ", ", ")}${where}${ref.text}${ref.unresolvable ? ` (${ref.unresolvable})` : ""} → ${ref.member}`);
   }
+  const everywhere = "Search All User Libraries";
+  const settings = "Search Settings…";
+  const buttons = rescope && rescope.scope.kind !== "everywhere" ? [everywhere, settings] : [settings];
   void vscode.window
     .showWarningMessage(
-      `Source not found for: ${names.join(", ")}. It may be in libraries that were not searched.`,
-      "Search Libraries…"
+      `Source not found for: ${names.join(", ")}. It may be in libraries that were not searched ` +
+        `(searched ${describeScope(rescope?.scope ?? searchScope())}).`,
+      ...buttons
     )
     .then((choice) => {
-      if (choice) {
-        void vscode.commands.executeCommand(
-          "workbench.action.openSettings",
-          "ibmi-member-workspace.dependencies.searchLibraries"
-        );
+      if (choice === everywhere && rescope) {
+        void rescope.rerun("everywhere");
+      } else if (choice === settings) {
+        void vscode.commands.executeCommand("workbench.action.openSettings", "ibmi-member-workspace.dependencies.search");
       }
     });
 }

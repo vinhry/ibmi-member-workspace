@@ -79,3 +79,18 @@ The moved code keeps all of today's behavior (`loadIndex`, `saveIndex`, `persist
 - `checkoutService.ts` no longer reads or writes the index file directly.
 - `CLAUDE.md`'s list of vscode-free modules includes the new module.
 - The HANDOFF.md status line no longer lists this as open.
+
+### 5. Dependency search scope (shipped in 1.7.7)
+
+Users reported that Find Dependencies, with no search libraries set, searched beyond their library list. `librariesToSearch` added every library a reference named: DSPPGMREF source locations, cross-reference rows, and qualified names in the source.
+
+- Setting `ibmi-member-workspace.dependencies.searchScope`: `libraryList`, `specific` or `everywhere`, with no default. When it isn't set, `specific` applies if `dependencies.searchLibraries` lists libraries, otherwise `libraryList`, as before (`searchScopeFrom` in `src/dependencyResolve.ts`).
+- `libraryList` and `specific` never leave their libraries. `scopeReferences` drops an outside library from a reference (keeping its source file) so it is looked up by name inside the scope. Each skipped library is logged.
+- `everywhere` searches every library except IBM's (`isIbmLibrary`: `Q…` and `#…` except `QGPL` and `QUSR…`), with the library list ranked first and the rest alphabetically. DSPPGMREF also looks in `*ALLUSR` for the compiled program.
+- The Find Dependencies list has a title-bar button to rerun with another scope. The unresolved warning offers **Search All User Libraries**. Neither changes the setting.
+- Bob's tools default to `searchScope().libraries`, which is the library list in `everywhere` mode. `find_member_dependencies` reports `searchScope`.
+
+**Validation**
+- `src/test/dependencyResolve.test.ts`: `searchScopeFrom`, `scopeReferences` (including resolving to the in-scope copy), `librariesToSearch`, outside ranking, `isIbmLibrary`.
+- `src/test/dependencySources.test.ts`: DSPPGMREF tries `*ALLUSR` only for `everywhere`.
+

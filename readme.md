@@ -148,14 +148,26 @@ Abstract (Fortra) keeps its cross-reference in the `ABSTRACT` library. Three of 
 ]
 ```
 
-- **Copybooks** come with their exact location, so that member is checked out. **Files and programs** come by name only, because `PGMREF` and `OBJREF` record *object* libraries, not source libraries. Their source is found through `dependencies.searchLibraries`.
+- **Copybooks** come with their exact location, so that member is checked out. **Files and programs** come by name only, because `PGMREF` and `OBJREF` record *object* libraries, not source libraries. Their source is found in the search scope (see **Finding the source**).
 - `NOT LIKE 'Q%'` leaves out IBM system objects such as `QSQLOPEN`, which have no source. Remove it if your own objects start with Q.
 - The same object used by a program in two libraries is listed once.
 - Before adding it, check that the library name matches your installation: `DSPOBJD OBJ(QSYS/ABSTRACT) OBJTYPE(*LIB)` should show "ABSTRACT R11". To try the query, run it in Code for IBM i's SQL editor with `{member}` and `{object}` replaced by a quoted program name.
 
 #### Finding the source
 
-Each dependency is looked up on the IBM i in the libraries listed in `ibmi-member-workspace.dependencies.searchLibraries`, in order, or in the connection's library list when that setting is empty. List both your object and source libraries, since DSPPGMREF looks for compiled programs there too. A library or source file named in the source is matched exactly. A copybook named without a source file is looked for in `QRPGLESRC` first, or `QCBLLESRC` for COBOL. Only source members that can build a program are offered for a `CALL`, and only file source for a `REF`.
+Where each dependency is looked up on the IBM i is set by `ibmi-member-workspace.dependencies.searchScope`:
+
+| Scope | Searches |
+|---|---|
+| `libraryList` | The connection's current library and library list, as shown in Code for IBM i. |
+| `specific` | Only the libraries in `ibmi-member-workspace.dependencies.searchLibraries`, in order. List both your object and source libraries, since DSPPGMREF looks for compiled programs there too. |
+| `everywhere` | Every library except IBM's (`Q…` and `#…` libraries, apart from `QGPL` and `QUSR…`), with the library list first. This reads the whole system catalog and can take a while on a large system. |
+
+When the scope isn't set, earlier versions' behavior is kept: `specific` if `dependencies.searchLibraries` lists libraries, otherwise `libraryList`.
+
+With `libraryList` and `specific`, Find Dependencies never leaves those libraries. A dependency that names another library, for example the library DSPPGMREF says a program was compiled from, a cross-reference row, or `/COPY OTHERLIB/QCPYSRC,X`, is looked for by name (and source file) inside them instead. The output panel lists each library that was skipped. With `everywhere`, a library named in the source is matched exactly.
+
+To search somewhere else just once, click the library button in the list's title bar and choose **Library List**, **Search Libraries** or **All User Libraries**. The search runs again there, and the setting doesn't change. When some sources aren't found, the warning also offers **Search All User Libraries**. Bob's research tools read the library list when a call names no libraries and the scope is `everywhere`, since where-used can't read every library. A copybook named without a source file is looked for in `QRPGLESRC` first, or `QCBLLESRC` for COBOL. Only source members that can build a program are offered for a `CALL`, and only file source for a `REF`.
 
 A list shows what was found, grouped into copybooks, called programs, referenced files, and SQL tables and views. Bound procedures are counted but not listed, since a procedure has no member of its own; its module is found through the copybook or service program that declares it. Copybooks are preselected, and members you already have checked out are marked. Choose the members you want, then:
 
@@ -286,7 +298,8 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.autoOpenOnCheckout` | `true` | Automatically open the file in the editor after a single-member checkout. |
 | `ibmi-member-workspace.allowCheckoutFromProtectedFilter` | `false` | Allow checking out members from protected (read-only) filters. |
 | `ibmi-member-workspace.dependencies.suggestAfterCheckout` | `true` | After checking out a single member, offer to review the members it uses. |
-| `ibmi-member-workspace.dependencies.searchLibraries` | `[]` | Libraries to search, in order, for the source members and compiled programs of dependencies (for example, `PRODOBJ`, `PRODSRC`). Empty uses the connection's library list. |
+| `ibmi-member-workspace.dependencies.searchScope` | not set | Where dependencies are looked for: `libraryList`, `specific` (the search libraries) or `everywhere` (all user libraries). Not set: `specific` when search libraries are listed, otherwise `libraryList`. |
+| `ibmi-member-workspace.dependencies.searchLibraries` | `[]` | Libraries to search, in order, for the source members and compiled programs of dependencies when the scope is `specific` (for example, `PRODOBJ`, `PRODSRC`). Empty uses the connection's library list. |
 | `ibmi-member-workspace.dependencies.sources` | all | Which kinds of dependency sources to use: `source`, `programReferences` (DSPPGMREF), `crossReferences`. Unavailable ones are skipped automatically. |
 | `ibmi-member-workspace.dependencies.transitive.maxDepth` | `3` | How many levels **Find All Dependencies** looks through before asking whether to keep going (1 to 10). |
 | `ibmi-member-workspace.dependencies.transitive.maxMembers` | `50` | How many members **Find All Dependencies** lists before asking whether to keep going (5 to 500). |

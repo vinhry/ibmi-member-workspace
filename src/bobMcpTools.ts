@@ -356,6 +356,8 @@ export function createResearchTools(io: ResearchIo): McpTool[] {
           member: describeEntry(entry),
           broughtAsReferenceCopy: brought,
           librariesSearched: lookup.libraries,
+          // "everywhere" also searched every other user library; librariesSearched then only ranks.
+          ...(lookup.scope ? { searchScope: lookup.scope } : {}),
           providers: lookup.outcomes,
           uses: resolved,
           sourceNotFound: lookup.resolution.unresolved.map((ref) => ({

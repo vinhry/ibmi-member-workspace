@@ -151,20 +151,32 @@ export function connectionLibraryList(): string[] {
 const MEMBERS_PER_LOOKUP = 100;
 
 /**
- * Source members named `members` in any source file of `libraries`.
+ * Libraries other than IBM's: not starting with Q or #, except QGPL and QUSR…, which hold user
+ * objects. The same rule as `isIbmLibrary` in dependencyResolve.
+ */
+const USER_LIBRARIES_ONLY =
+  "(SYSTEM_TABLE_SCHEMA NOT LIKE 'Q%' OR SYSTEM_TABLE_SCHEMA = 'QGPL' OR SYSTEM_TABLE_SCHEMA LIKE 'QUSR%') " +
+  "AND SYSTEM_TABLE_SCHEMA NOT LIKE '#%'";
+
+/**
+ * Source members named `members` in any source file of `libraries`, or of every user library when
+ * `libraries` is undefined (which reads the whole catalog, so it can take a while).
  * SYSPARTITIONSTAT has a null SOURCE_TYPE for members of data files.
  */
 export async function findSourceMembers(
   members: string[],
-  libraries: string[]
+  libraries: string[] | undefined
 ): Promise<SourceMemberRow[]> {
   const connection = getConnection();
   if (!connection) {
     throw new Error("Not connected to IBM i");
   }
-  if (members.length === 0 || libraries.length === 0) {
+  if (members.length === 0 || libraries?.length === 0) {
     return [];
   }
+  const libraryFilter = libraries
+    ? `AND SYSTEM_TABLE_SCHEMA IN (${libraries.map(() => "?").join(", ")}) `
+    : `AND ${USER_LIBRARIES_ONLY} `;
   const rows: SourceMemberRow[] = [];
   for (let i = 0; i < members.length; i += MEMBERS_PER_LOOKUP) {
     const chunk = members.slice(i, i + MEMBERS_PER_LOOKUP);
@@ -172,9 +184,9 @@ export async function findSourceMembers(
       `SELECT RTRIM(SYSTEM_TABLE_SCHEMA) AS LIBRARY, RTRIM(SYSTEM_TABLE_NAME) AS SOURCE_FILE, ` +
       `RTRIM(SYSTEM_TABLE_MEMBER) AS MEMBER, COALESCE(RTRIM(CAST(SOURCE_TYPE AS VARCHAR(10))), '') AS SOURCE_TYPE ` +
       `FROM QSYS2.SYSPARTITIONSTAT WHERE SOURCE_TYPE IS NOT NULL ` +
-      `AND SYSTEM_TABLE_SCHEMA IN (${libraries.map(() => "?").join(", ")}) ` +
+      libraryFilter +
       `AND SYSTEM_TABLE_MEMBER IN (${chunk.map(() => "?").join(", ")})`,
-      { bindings: [...libraries, ...chunk] }
+      { bindings: [...(libraries ?? []), ...chunk] }
     );
     rows.push(...result.map((row) => ({
       library: String(row.LIBRARY),

@@ -118,6 +118,28 @@ describe("createProgramReferencesProvider", () => {
     assert.match(result.note ?? "", /no compiled program ORD001 in PRODOBJ, PRODSRC/);
   });
 
+  it("looks in every user library for the compiled program only when searching everywhere", async () => {
+    const searched: string[][] = [];
+    const provider = createProgramReferencesProvider({
+      sqlServicesAvailable: async () => true,
+      findCompiledObject: async (_name, libraries) => {
+        searched.push(libraries);
+        return libraries[0] === "*ALLUSR" ? object : undefined;
+      },
+      programReferences: async () => [],
+      objectSources: async () => new Map(),
+    });
+
+    const inList = await provider.find(entry, { ...context, scope: "libraryList" });
+    assert.deepEqual(searched, [["PRODOBJ", "PRODSRC"]]);
+    assert.match(inList.note ?? "", /in PRODOBJ, PRODSRC/);
+
+    searched.length = 0;
+    const everywhere = await provider.find(entry, { ...context, scope: "everywhere" });
+    assert.deepEqual(searched, [["PRODOBJ", "PRODSRC"], ["*ALLUSR"]]);
+    assert.equal(everywhere.note, undefined);
+  });
+
   it("points at the member each object was built from, or matches by name", async () => {
     const provider = createProgramReferencesProvider({
       sqlServicesAvailable: async () => true,

@@ -769,13 +769,27 @@
           "scope": "application",
           "markdownDescription": "CL command that checks a member out in your change-management system (for example Rocket LMI), run on the IBM i for each member when you choose **I Need to Change Some…** in **Find Dependencies**. Placeholders: `&OPENLIB`, `&OPENSPF`, `&OPENMBR` and `&EXT` (the member's library, source file, member and source type) and `&DEVLIB` (the development library, asked each time). The commands are shown before they run. Empty: the steps are explained instead. User settings only."
         },
+        "ibmi-member-workspace.dependencies.searchScope": {
+          "type": "string",
+          "enum": [
+            "libraryList",
+            "specific",
+            "everywhere"
+          ],
+          "enumDescriptions": [
+            "The connection's current library and library list, as shown in Code for IBM i.",
+            "Only the libraries in `dependencies.searchLibraries`, in order.",
+            "Every library except IBM's (Q… and #… libraries, apart from QGPL and QUSR…), library list first. This reads the whole system catalog, so it can take a while on a large system."
+          ],
+          "markdownDescription": "Where **Find Dependencies** looks for the source of dependencies. With **libraryList** or **specific**, it never leaves those libraries: a dependency that names another library (for example, where DSPPGMREF says a program was compiled from) is looked for by name inside them instead. The list's title-bar button searches somewhere else for one search. When not set: `specific` if `dependencies.searchLibraries` lists libraries, otherwise `libraryList`."
+        },
         "ibmi-member-workspace.dependencies.searchLibraries": {
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
-          "markdownDescription": "Libraries to search, in order, for the source members and compiled programs of dependencies found by **Find Dependencies**, for example your production object and source libraries (`PRODOBJ`, `PRODSRC`). When empty, the connection's current library and library list are searched."
+          "markdownDescription": "Libraries to search, in order, when `dependencies.searchScope` is `specific` (or not set), for the source members and compiled programs of dependencies found by **Find Dependencies**, for example your production object and source libraries (`PRODOBJ`, `PRODSRC`). When empty, the connection's current library and library list are searched."
         },
         "ibmi-member-workspace.dependencies.sources": {
           "type": "array",
