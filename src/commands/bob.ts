@@ -313,8 +313,9 @@ export function registerBobCommands(ctx: CommandContext): void {
         log.appendLine(`[bob] Disconnected ${folder.name}`);
         // A new token, so a copy of the old file (a backup, another checkout) no longer works.
         // Other folders of this workspace that stay connected get the new token when the server restarts.
-        stop();
+        // Deleted before stopping, so a start in between can't bring the server back with the old token.
         await context.secrets.delete(tokenKey());
+        stop();
         void start().catch((err) => log.appendLine(`[bob] Could not restart the research tools: ${errorMessage(err)}`));
         vscode.window.showInformationMessage(`Removed the IBM i research tools from ${folder.name}'s .bob/mcp.json.`);
       } catch (err) {
