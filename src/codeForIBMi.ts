@@ -194,6 +194,18 @@ function requireConnection(): IBMi {
   return connection;
 }
 
+/**
+ * Runs a CL command in the connection's ILE environment (its library list applies). Throws with
+ * the last job messages when the command fails.
+ */
+export async function runClCommand(command: string): Promise<void> {
+  const result = await requireConnection().runCommand({ command, environment: "ile" });
+  if (result.code !== 0) {
+    const messages = (result.stderr || result.stdout).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    throw new Error(messages.slice(-3).join(" ") || `The command ended with code ${result.code}.`);
+  }
+}
+
 /** A system object name, safe to put in a CL command. */
 const OBJECT_NAME = /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/;
 

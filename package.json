@@ -763,6 +763,12 @@
           "maximum": 500,
           "markdownDescription": "How many members **Find All Dependencies** lists before asking whether to keep going. Each member's source is read from the IBM i, and its compiled program is checked with `DSPPGMREF`, so a larger number takes longer."
         },
+        "ibmi-member-workspace.changeManagement.checkoutCommand": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "CL command that checks a member out in your change-management system (for example Rocket LMI), run on the IBM i for each member when you choose **I Need to Change Some…** in **Find Dependencies**. Placeholders: `&OPENLIB`, `&OPENSPF`, `&OPENMBR` and `&EXT` (the member's library, source file, member and source type) and `&DEVLIB` (the development library, asked each time). The commands are shown before they run. Empty: the steps are explained instead. User settings only."
+        },
         "ibmi-member-workspace.dependencies.searchLibraries": {
           "type": "array",
           "items": {

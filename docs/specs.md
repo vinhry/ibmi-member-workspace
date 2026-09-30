@@ -32,23 +32,22 @@ Find Dependencies and Find All Dependencies read COBOL members (`cblle`, `sqlcbl
 - `src/test/dependencyWalk.test.ts`: a `CPY` copybook of a COBOL member is scanned as COBOL.
 - README source-scan table and Find All Dependencies.
 
-### 2. Configurable LMI checkout command
+### 2. Configurable LMI checkout command (shipped in 1.7.6)
 
-When the user picks **I Need to Change Some…** for reference copies (`src/commands/dependencies.ts`), the extension runs the shop's change-management checkout command on the IBM i for each selected member, then offers to check out the development-library copy. Today it only shows a guide and copies member paths to the clipboard.
+**I Need to Change Some…** (in Find Dependencies' bring dialog, `src/commands/dependencies.ts`) runs the shop's change-management checkout command for each selected member, then offers to check out the development library's copies. Without a command, the guide is shown as before, with a pointer to the setting.
 
-- A new setting, `ibmi-member-workspace.changeManagement.checkoutCommand`, holds a CL command template. It is empty by default. The setting sends commands to the IBM i, so it must have `"scope": "application"`, which also means a cloned project can't set it.
-- Placeholders use Code for IBM i's action variable names, which users already know: `&OPENLIB` (the reference copy's library), `&OPENSPF` (source file), `&OPENMBR` (member), `&EXT` (source type), and `&DEVLIB` (the development library, see below). Values are IBM i system names, so they are inserted uppercase and unquoted. A name that fails the extension's existing system-name check is refused, and the command isn't run. An unknown `&NAME` placeholder is an error in the template, not literal text.
-- Development library: before running, the extension asks for it once per run in an input box pre-filled with the last one used in this workspace (kept in `workspaceState`). It fills `&DEVLIB` and is the library checked out from afterward. Source file and member names stay the same.
-- Before running, the extension shows the exact expanded command for each member and asks for confirmation. Nothing runs without that confirmation.
-- Each member's command runs through `src/codeForIBMi.ts`, the same way DSPPGMREF runs today. A failure for one member is reported with the IBM i message and doesn't stop the others. The extension refuses to run while a different IBM i is connected, as uploads already do.
-- After the commands, it offers to check out the members whose command succeeded from `&DEVLIB` as editable checkouts. The reference copies stay as they are.
-- When the setting is empty, the current guide is shown unchanged, with a line saying the setting can automate it.
-- The README shows a template example. TODO: replace its placeholder command with your shop's actual Rocket LMI checkout command and parameters.
+- Setting `ibmi-member-workspace.changeManagement.checkoutCommand`: a string, empty by default, `"scope": "application"`. It is read from user settings only.
+- Placeholders are `&OPENLIB`, `&OPENSPF`, `&OPENMBR`, `&EXT` and `&DEVLIB`, filled uppercase and unquoted. Names must pass `memberNameProblem` (`src/types.ts`), and an unknown `&NAME` refuses the template (`src/changeManagement.ts`).
+- The development library is asked each time, pre-filled from `workspaceState` (`changeManagement.lastDevLibrary`).
+- The expanded commands are shown in a modal and run only on **Run**. They run through `runClCommand` (`src/codeForIBMi.ts`, `runCommand` with the ILE environment), and a failure carries the last job messages.
+- A different connected system refuses the run before confirming, and each remaining member after it.
+- **Check Out from DEVLIB** checks out `DEVLIB/<same file>(<same member>)` through `checkoutMembersBatch` as editable checkouts.
+- TODO: your shop's actual Rocket LMI command and parameters. The README example uses a placeholder command.
 
 **Validation**
-- Unit tests for the vscode-free template expansion: every placeholder, names containing `$ # @`, invalid IBM i names rejected, and an unknown placeholder rejected.
-- Unit tests for the flow with the IBM i injected: confirmation declined runs nothing; one failure among several members is reported and the rest run; a different connected system is refused; an empty setting falls back to the guide.
-- `manifest.test.ts` asserts the new setting is `"scope": "application"`, and the application-scope list in `CLAUDE.md` is updated.
+- `src/test/changeManagement.test.ts`: every placeholder, case and repeats, names with `$#@`, invalid names, unknown placeholders, a declined confirmation or a missing library runs nothing, one failure among three, a system refusal before and during the run.
+- `manifest.test.ts` asserts the setting is application-scoped.
+- README "Running Your Change-Management Checkout".
 
 ### 3. Per-member upload on save, from the status bar (shipped in 1.7.4)
 

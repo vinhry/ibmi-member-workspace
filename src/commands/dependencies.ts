@@ -8,6 +8,7 @@ import {
   libraryExists,
   objectSources,
   programReferences,
+  runClCommand,
   runCrossReferenceQuery,
   sqlServicesAvailable,
 } from "../codeForIBMi";
@@ -28,6 +29,7 @@ import {
   summarizeRun,
 } from "../dependencySources";
 import { WalkLimitReached, WalkUnresolved, mergeOutcomes, walkDependencies } from "../dependencyWalk";
+import { ChangeCheckoutResult, runChangeManagementCheckout } from "../changeManagement";
 import { errorMessage } from "../errors";
 import { readCheckoutText } from "../localPath";
 import { MemberInfo } from "../memberInfo";
@@ -355,7 +357,7 @@ async function pickAndBring(
     "I Need to Change Some…"
   );
   if (choice === "I Need to Change Some…") {
-    await showChangeGuide(members);
+    await changeThroughChangeManagement(ctx, system, members);
     return;
   }
   if (choice !== "Bring for Reference" || !(await ensureWorkItemForCheckout(ctx, system))) {
@@ -459,6 +461,85 @@ function buildItems(ctx: CommandContext, system: string, offered: readonly Offer
   return items;
 }
 
+/** workspaceState key: the development library last named for a change-management checkout. */
+const LAST_DEV_LIBRARY = "changeManagement.lastDevLibrary";
+
+const CHECKOUT_COMMAND_SETTING = "changeManagement.checkoutCommand";
+
+/**
+ * "I Need to Change Some…": runs the change-management checkout command when one is set, then
+ * offers to check out the development library's copies; otherwise explains the steps.
+ */
+async function changeThroughChangeManagement(ctx: CommandContext, system: string, members: MemberInfo[]): Promise<void> {
+  const template = vscode.workspace
+    .getConfiguration("ibmi-member-workspace")
+    .inspect<string>(CHECKOUT_COMMAND_SETTING)?.globalValue?.trim();
+  if (!template) {
+    await showChangeGuide(members);
+    return;
+  }
+
+  let result: ChangeCheckoutResult | undefined;
+  try {
+    result = await runChangeManagementCheckout(members, system, template, {
+      askDevLibrary: async () => vscode.window.showInputBox({
+        title: "Change-Management Checkout",
+        prompt: "The development library your change-management system checks the members out to (&DEVLIB)",
+        value: ctx.context.workspaceState.get<string>(LAST_DEV_LIBRARY) ?? "",
+        ignoreFocusOut: true,
+        validateInput: (value) => /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/i.test(value.trim())
+          ? undefined
+          : "Enter an IBM i library name.",
+      }),
+      confirm: async (commands, devLibrary) => {
+        await ctx.context.workspaceState.update(LAST_DEV_LIBRARY, devLibrary);
+        const choice = await vscode.window.showWarningMessage(
+          `Run ${commands.length === 1 ? "this command" : `these ${commands.length} commands`} on ${system}?`,
+          { modal: true, detail: commands.join("\n") },
+          "Run"
+        );
+        return choice === "Run";
+      },
+      connectedSystem: getSystemName,
+      runCommand: runClCommand,
+      log: (message) => ctx.log.appendLine(message),
+    });
+  } catch (err) {
+    const choice = await vscode.window.showErrorMessage(
+      `Could not run the change-management checkout: ${errorMessage(err)}`,
+      "Open Setting"
+    );
+    if (choice) {
+      void vscode.commands.executeCommand("workbench.action.openSettings", `ibmi-member-workspace.${CHECKOUT_COMMAND_SETTING}`);
+    }
+    return;
+  }
+  if (!result) {
+    return;
+  }
+
+  const { devLibrary, succeeded, failed } = result;
+  if (failed.length > 0) {
+    const names = failed.map(({ member, error }) => `${member.memberName} (${error})`).join(", ");
+    void vscode.window
+      .showErrorMessage(`Change-management checkout failed for ${names}`, "Show Output")
+      .then((choice) => choice && ctx.log.show());
+  }
+  if (succeeded.length === 0) {
+    return;
+  }
+  const count = succeeded.length === 1 ? "1 member" : `${succeeded.length} members`;
+  const checkOut = `Check Out from ${devLibrary}`;
+  const choice = await vscode.window.showInformationMessage(
+    `Checked out ${count} in change management. Check out the ${devLibrary} copies here to change them?`,
+    checkOut
+  );
+  if (choice !== checkOut || !(await ensureWorkItemForCheckout(ctx, system))) {
+    return;
+  }
+  await checkoutMembersBatch(ctx.service, system, succeeded.map((member) => ({ ...member, library: devLibrary })), ctx.log);
+}
+
 async function showChangeGuide(members: MemberInfo[]): Promise<void> {
   const paths = members.map((m) => `${m.library}/${m.sourceFile}(${m.memberName})`);
   const choice = await vscode.window.showInformationMessage(
@@ -467,12 +548,17 @@ async function showChangeGuide(members: MemberInfo[]): Promise<void> {
       modal: true,
       detail: `Check out ${paths.length === 1 ? "this member" : "these members"} in your change-management system ` +
         "(for example, Rocket LMI) so the change is tracked, then use Check Out Member on the copy in your " +
-        `development library:\n\n${paths.join("\n")}`,
+        `development library:\n\n${paths.join("\n")}\n\n` +
+        "To run your change-management checkout command from here, set " +
+        `ibmi-member-workspace.${CHECKOUT_COMMAND_SETTING} in your user settings.`,
     },
-    "Copy Member Paths"
+    "Copy Member Paths",
+    "Open Setting"
   );
   if (choice === "Copy Member Paths") {
     await vscode.env.clipboard.writeText(paths.join("\n"));
+  } else if (choice === "Open Setting") {
+    void vscode.commands.executeCommand("workbench.action.openSettings", `ibmi-member-workspace.${CHECKOUT_COMMAND_SETTING}`);
   }
 }
 

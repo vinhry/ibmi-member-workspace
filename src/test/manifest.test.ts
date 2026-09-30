@@ -94,7 +94,7 @@ describe("extension manifest", () => {
   it("reads settings that send code to the IBM i or run queries from user settings only", () => {
     const properties = readManifest().contributes.configuration.properties as Record<string, { scope?: string }>;
 
-    for (const setting of ["autoUploadOnSave", "dependencies.crossReferences", "bob.researchTools"]) {
+    for (const setting of ["autoUploadOnSave", "dependencies.crossReferences", "bob.researchTools", "changeManagement.checkoutCommand"]) {
       assert.equal(properties[`ibmi-member-workspace.${setting}`].scope, "application", setting);
     }
   });

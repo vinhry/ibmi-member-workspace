@@ -36,10 +36,11 @@ npm run compile && node --test --test-name-pattern="ignores a leading BOM" out/t
 
 - `src/extension.ts`: `activate` builds the services and passes a shared `CommandContext` (`src/commands/context.ts`) to each `register*Commands` in `src/commands/`.
 - `src/codeForIBMi.ts`: the only bridge to Code for IBM i (connection, member download/upload, SQL, DSPPGMREF, where-used snapshots, file descriptions).
-- `src/checkoutService.ts`: the checkout index plus Git orchestration and IBM i I/O. The index is `checkout-index.json` in the workspace's extension storage (`context.storageUri`).
+- `src/checkoutService.ts`: checkout logic plus Git orchestration and IBM i I/O. `src/checkoutIndexStore.ts` loads and saves the index, `checkout-index.json` in the workspace's extension storage (`context.storageUri`).
 - `src/sync.ts`: three-way hash comparison (`in-sync | modified | remote-changed | conflict`).
 - `src/uploadFlow.ts`, `src/autoUpload.ts`, `src/commands/uploadMember.ts`: manual upload and upload on save share one flow.
 - `src/dependencyScan.ts` → `src/dependencyResolve.ts` (providers in `src/dependencySources.ts`) → `src/dependencyWalk.ts`: Find Dependencies and Find All Dependencies.
+- `src/changeManagement.ts`: the change-management (LMI) checkout command behind **I Need to Change Some…**.
 - `src/gitService.ts`, `src/repositoryTrust.ts`: Local Change History over the `git` CLI.
 - `src/bobIde.ts`, `src/bobMcpServer.ts`, `src/bobMcpTools.ts`, `src/bobPrompts.ts`: IBM Bob support.
 - `src/test/*.test.ts`: unit tests, one file per vscode-free module, plus `manifest.test.ts`.

@@ -160,7 +160,35 @@ Each dependency is looked up on the IBM i in the libraries listed in `ibmi-membe
 A list shows what was found, grouped into copybooks, called programs, referenced files, and SQL tables and views. Bound procedures are counted but not listed, since a procedure has no member of its own; its module is found through the copybook or service program that declares it. Copybooks are preselected, and members you already have checked out are marked. Choose the members you want, then:
 
 - **Bring for Reference** downloads them as **read-only reference copies**. They show with a lock icon in Checked Out Members, the local file is read-only, and **Upload** and **Merge Back** are not available for them, even with upload on save. **Refresh** offers **Update Reference Copy** when the member changed on the IBM i. A member you already have checked out for change is left as it is.
-- **I Need to Change Some…** explains how to change them instead: check them out through your change-management system (for example, Rocket LMI) so the change is tracked, then check out the copy in your development library here. **Copy Member Paths** puts their `LIBRARY/SOURCEFILE(MEMBER)` paths on the clipboard.
+- **I Need to Change Some…** is for members you want to change rather than read. Without a change-management command set, it explains the steps: check them out through your change-management system (for example, Rocket LMI) so the change is tracked, then check out the copy in your development library here. **Copy Member Paths** puts their `LIBRARY/SOURCEFILE(MEMBER)` paths on the clipboard. With a command set, it runs it for you (see below).
+
+#### Running Your Change-Management Checkout
+
+Set `ibmi-member-workspace.changeManagement.checkoutCommand` in your user settings to the CL command that checks a member out in your change-management system. **I Need to Change Some…** then:
+
+1. asks for the development library the members go to (the last one you used is filled in);
+2. shows the exact command for each member and runs them only when you choose **Run**;
+3. runs each command on the IBM i, with the connection's library list. A failed member is reported with the IBM i's message and doesn't stop the others. Nothing runs while a different IBM i is connected;
+4. offers **Check Out from DEVLIB**, which checks out the development library's copies here, ready to change.
+
+The command can use these placeholders, named as in Code for IBM i actions:
+
+| Placeholder | Value |
+|---|---|
+| `&OPENLIB` | the member's library (for example, the production library) |
+| `&OPENSPF` | its source file |
+| `&OPENMBR` | the member |
+| `&EXT` | its source type |
+| `&DEVLIB` | the development library you name |
+
+For example (the command and its parameters are placeholders; use your shop's own):
+
+```jsonc
+"ibmi-member-workspace.changeManagement.checkoutCommand":
+  "MYCHKOUT MBR(&OPENMBR) FROMLIB(&OPENLIB) SRCF(&OPENSPF) TYPE(&EXT) TOLIB(&DEVLIB)"
+```
+
+Values are filled in uppercase and unquoted, and only valid IBM i names are used. Any other `&NAME` in the command is refused, so a typo can't reach the IBM i. The setting is read from user settings only, so a workspace can't set a command that runs on your IBM i.
 
 Dependencies whose source can't be found are listed afterwards, and in the output panel with the line that refers to them. Common reasons: the source is in a library that wasn't searched, the name is only known at run time (`CALL PGM(&PGM)`), or the copybook is an IFS file.
 
