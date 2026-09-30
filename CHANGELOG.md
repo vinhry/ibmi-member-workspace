@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.7.4 - 2026-09-30
+
+- **Upload on save for one member.** When a checked-out member is open, the status bar shows its upload-on-save mode, even while `autoUploadOnSave` is `off`. Click it, or run **Change Upload on Save for This Member**, to choose **Off**, **Ask** or **On** for that member alone, or **Use Setting** to follow the setting again. For example, keep the setting `off` and turn it on only for the member you're testing. The choice is kept with the checkout, survives a re-download, and is never read from workspace files. In `ask` mode, **Always Upload** switches only that member when it has its own choice. Reference copies never upload, and a change made on the IBM i still always asks.
+
 ## 1.7.3 - 2026-09-30
 
 - Internal: the checkout index is loaded and saved by its own module, now covered by unit tests. Checkouts are stored exactly as before, and nothing changes in how the extension works.
