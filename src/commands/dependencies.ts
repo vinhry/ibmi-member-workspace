@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import {
   connectionLibraryList,
+  downloadMemberContent,
   findCompiledObject,
   findSourceMembers,
   getSystemName,
@@ -10,10 +11,11 @@ import {
   runCrossReferenceQuery,
   sqlServicesAvailable,
 } from "../codeForIBMi";
-import { Resolution, librariesToSearch, resolveReferences } from "../dependencyResolve";
+import { Resolution, SourceMemberRow, librariesToSearch, resolveReferences } from "../dependencyResolve";
 import { RawReference, ReferenceKind, scanReferences } from "../dependencyScan";
 import {
   DependencyProvider,
+  DependencySubject,
   PROVIDER_GROUPS,
   ProviderGroup,
   ProviderOutcome,
@@ -25,6 +27,7 @@ import {
   selectProviders,
   summarizeRun,
 } from "../dependencySources";
+import { WalkLimitReached, WalkUnresolved, mergeOutcomes, walkDependencies } from "../dependencyWalk";
 import { errorMessage } from "../errors";
 import { readCheckoutText } from "../localPath";
 import { MemberInfo } from "../memberInfo";
@@ -54,16 +57,19 @@ export interface DependencyLookup {
   libraries: string[];
 }
 
-/** Asks every dependency provider available on `system` what the checked-out `entry` uses. */
+/**
+ * Asks every dependency provider available on `system` what a member uses. A member that isn't
+ * checked out has its source read from the IBM i, without writing it to disk.
+ */
 export async function lookupDependencies(
   ctx: CommandContext,
   system: string,
-  entry: CheckedOutMember
+  subject: DependencySubject
 ): Promise<DependencyLookup> {
   const libraries = searchLibraries();
   const run = await runProviders(
     activeProviders(ctx, system),
-    entry,
+    subject,
     { system, libraries },
     ctx.dependencyAvailability
   );
@@ -82,6 +88,13 @@ const MEMBER_NAME = /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/;
 
 type DependencyItem = vscode.QuickPickItem & { member?: MemberInfo };
 
+/** A member offered in the picker; `via` lists the members between the checkout and it. */
+interface OfferedDependency {
+  reference: RawReference;
+  candidates: SourceMemberRow[];
+  via?: string[];
+}
+
 export function registerDependencyCommands(ctx: CommandContext): void {
   ctx.context.subscriptions.push(
     vscode.commands.registerCommand(
@@ -90,6 +103,15 @@ export function registerDependencyCommands(ctx: CommandContext): void {
         const entry = resolveMember(ctx.service, item);
         if (entry) {
           await reviewDependencies(ctx, entry);
+        }
+      }
+    ),
+    vscode.commands.registerCommand(
+      "ibmi-member-workspace.findAllDependencies",
+      async (item: TreeItemType) => {
+        const entry = resolveMember(ctx.service, item);
+        if (entry) {
+          await reviewAllDependencies(ctx, entry);
         }
       }
     )
@@ -136,15 +158,10 @@ export async function suggestDependencies(ctx: CommandContext, entry: CheckedOut
  * Changing one goes through change management instead.
  */
 export async function reviewDependencies(ctx: CommandContext, entry: CheckedOutMember): Promise<void> {
-  const { service, log } = ctx;
+  const { log } = ctx;
   const memberPath = formatMemberPath(entry);
-  const system = getSystemName();
+  const system = connectedSystemFor(entry, memberPath);
   if (!system) {
-    vscode.window.showErrorMessage("Not connected to IBM i.");
-    return;
-  }
-  if (systemKey(system) !== systemKey(entry.system)) {
-    vscode.window.showErrorMessage(`Connect to ${entry.system} to find the dependencies of ${memberPath}.`);
     return;
   }
 
@@ -164,35 +181,165 @@ export async function reviewDependencies(ctx: CommandContext, entry: CheckedOutM
 
   const summary = summarizeRun(outcomes);
   logOutcomes(ctx, memberPath, outcomes);
-  const failed = outcomes.filter((o) => o.status === "failed").map((o) => o.label);
+  warnFailed(memberPath, outcomes.filter((o) => o.status === "failed").map((o) => o.label));
+  if (references.length === 0) {
+    vscode.window.showInformationMessage(`No dependencies found for ${memberPath}. ${summary}.`);
+    return;
+  }
+  const unresolved = resolution.unresolved.map((reference) => ({ reference, via: [] }));
+  const items = buildItems(ctx, system, resolution.resolved);
+  if (items.length === 0) {
+    if (unresolved.length === 0) {
+      vscode.window.showInformationMessage(`${memberPath} uses ${describeCounts(references)}, with no source members to bring.`);
+    }
+    reportUnresolved(ctx, memberPath, unresolved);
+    return;
+  }
+  await pickAndBring(ctx, system, items, {
+    title: `Dependencies of ${memberPath}`,
+    placeHolder: `Choose the members to bring into your checkout folder — ${summary}`,
+    memberPath,
+    unresolved,
+  });
+}
+
+/**
+ * Find All Dependencies: walks what `entry` uses, what those members use, and so on, up to the
+ * limits in `dependencies.transitive`, then offers every member found in one picker. Members
+ * are read from the IBM i while walking; nothing is written until the user brings them.
+ */
+export async function reviewAllDependencies(ctx: CommandContext, entry: CheckedOutMember): Promise<void> {
+  const { log } = ctx;
+  const memberPath = formatMemberPath(entry);
+  const system = connectedSystemFor(entry, memberPath);
+  if (!system) {
+    return;
+  }
+  const config = vscode.workspace.getConfiguration("ibmi-member-workspace");
+  const limits = {
+    maxDepth: clamp(config.get<number>("dependencies.transitive.maxDepth", 3), 1, 10),
+    maxMembers: clamp(config.get<number>("dependencies.transitive.maxMembers", 50), 5, 500),
+  };
+
+  const result = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Looking up all dependencies of ${memberPath}`, cancellable: true },
+    (progress, token) => walkDependencies(entry, {
+      lookup: (subject) => lookupDependencies(ctx, system, subject),
+      onLimit: (reached) => askToContinue(reached),
+      cancelled: () => token.isCancellationRequested,
+      progress: ({ members, depth, member }) => progress.report({
+        message: `${members} member${members === 1 ? "" : "s"} found · level ${depth + 1} · ${member}`,
+      }),
+    }, limits)
+  );
+
+  const outcomes = mergeOutcomes(result.outcomes);
+  const summary = summarizeRun(outcomes);
+  for (const { member, outcomes: memberOutcomes } of result.outcomes) {
+    logOutcomes(ctx, member, memberOutcomes);
+  }
+  for (const failure of result.failed) {
+    log.appendLine(`[dependencies] Lookup failed for ${failure.member}${describeVia(failure.via, " (via ", ")")}: ${failure.error}`);
+  }
+  if (result.failed.length > 0 && result.outcomes.length === 0) {
+    vscode.window.showErrorMessage(`Could not look up the dependencies of ${memberPath}: ${result.failed[0].error}`);
+    return;
+  }
+  warnFailed(memberPath, [
+    ...new Set(result.outcomes.flatMap((member) => member.outcomes.filter((o) => o.status === "failed").map((o) => o.label))),
+  ]);
+  if (result.failed.length > 0) {
+    void vscode.window.showWarningMessage(
+      `Could not look up what ${result.failed.map((failure) => failure.member).join(", ")} use${result.failed.length === 1 ? "s" : ""}. ` +
+        "See the IBM i Member Workspace output panel."
+    );
+  }
+  if (result.nodes.length === 0 && result.unresolved.length === 0) {
+    if (!result.cancelled) {
+      vscode.window.showInformationMessage(`No dependencies found for ${memberPath}. ${summary}.`);
+    }
+    return;
+  }
+  const items = buildItems(ctx, system, result.nodes);
+  if (items.length === 0) {
+    reportUnresolved(ctx, memberPath, result.unresolved);
+    return;
+  }
+  const levels = Math.max(...result.nodes.map((node) => node.depth));
+  const partial = result.cancelled ? " · cancelled, partial list" : result.stopped ? " · stopped at the limit, partial list" : "";
+  await pickAndBring(ctx, system, items, {
+    title: `All dependencies of ${memberPath} (${levels} level${levels === 1 ? "" : "s"})`,
+    placeHolder: `Choose the members to bring into your checkout folder — ${summary}${partial}`,
+    memberPath,
+    unresolved: result.unresolved,
+  });
+}
+
+/** The connected system, if it is the one `entry` was checked out from; otherwise says why not. */
+function connectedSystemFor(entry: CheckedOutMember, memberPath: string): string | undefined {
+  const system = getSystemName();
+  if (!system) {
+    vscode.window.showErrorMessage("Not connected to IBM i.");
+    return undefined;
+  }
+  if (systemKey(system) !== systemKey(entry.system)) {
+    vscode.window.showErrorMessage(`Connect to ${entry.system} to find the dependencies of ${memberPath}.`);
+    return undefined;
+  }
+  return system;
+}
+
+function warnFailed(memberPath: string, failed: string[]): void {
   if (failed.length > 0) {
     void vscode.window.showWarningMessage(
       `${failed.join(", ")} failed while looking up ${memberPath}. See the IBM i Member Workspace output panel.`
     );
   }
-  if (references.length === 0) {
-    vscode.window.showInformationMessage(`No dependencies found for ${memberPath}. ${summary}.`);
-    return;
-  }
+}
 
-  const items = buildItems(ctx, system, resolution);
-  if (items.length === 0) {
-    if (resolution.unresolved.length === 0) {
-      vscode.window.showInformationMessage(`${memberPath} uses ${describeCounts(references)}, with no source members to bring.`);
-    }
-    reportUnresolved(ctx, memberPath, resolution.unresolved);
-    return;
+async function askToContinue({ reason, members, depth }: WalkLimitReached): Promise<boolean> {
+  const found = `Found ${members} member${members === 1 ? "" : "s"}, ${depth} level${depth === 1 ? "" : "s"} deep.`;
+  const choice = await vscode.window.showWarningMessage(
+    `${found} Keep going?`,
+    {
+      modal: true,
+      detail: reason === "depth"
+        ? "The members on the last level use more members that haven't been looked up yet."
+        : "More members were found than dependencies.transitive.maxMembers allows. Shared copybooks and " +
+          "utility programs can reach a large part of the system.",
+    },
+    "Continue",
+    "Show What Was Found"
+  );
+  return choice === "Continue";
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, Math.floor(value))) : min;
+}
+
+/** Lets the user pick members, then brings them as reference copies or points to change management. */
+async function pickAndBring(
+  ctx: CommandContext,
+  system: string,
+  items: DependencyItem[],
+  { title, placeHolder, memberPath, unresolved }: {
+    title: string;
+    placeHolder: string;
+    memberPath: string;
+    unresolved: WalkUnresolved[];
   }
+): Promise<void> {
   const picked = await vscode.window.showQuickPick(items, {
     canPickMany: true,
-    title: `Dependencies of ${memberPath}`,
-    placeHolder: `Choose the members to bring into your checkout folder — ${summary}`,
+    title,
+    placeHolder,
     matchOnDescription: true,
     matchOnDetail: true,
   });
   const members = (picked ?? []).flatMap((item) => (item.member ? [item.member] : []));
   if (members.length === 0) {
-    reportUnresolved(ctx, memberPath, resolution.unresolved);
+    reportUnresolved(ctx, memberPath, unresolved);
     return;
   }
 
@@ -214,8 +361,8 @@ export async function reviewDependencies(ctx: CommandContext, entry: CheckedOutM
   if (choice !== "Bring for Reference" || !(await ensureWorkItemForCheckout(ctx, system))) {
     return;
   }
-  await checkoutMembersBatch(service, system, members, log, { reference: true });
-  reportUnresolved(ctx, memberPath, resolution.unresolved);
+  await checkoutMembersBatch(ctx.service, system, members, ctx.log, { reference: true });
+  reportUnresolved(ctx, memberPath, unresolved);
 }
 
 /** Every provider the settings turn on for `system`; availability is checked when they run. */
@@ -229,8 +376,16 @@ function activeProviders(ctx: CommandContext, system: string): DependencyProvide
     config.get<string[]>("dependencies.sources", [...PROVIDER_GROUPS])
       .filter((group): group is ProviderGroup => (PROVIDER_GROUPS as readonly string[]).includes(group))
   );
+  const readSource = async (subject: DependencySubject): Promise<string> => {
+    const checkout = "localPath" in subject
+      ? subject as CheckedOutMember
+      : ctx.service.findEntry(system, subject.library, subject.sourceFile, subject.memberName);
+    return checkout
+      ? readCheckoutText(ctx.service.getCheckoutRoot()?.fsPath, checkout.localPath)
+      : downloadMemberContent(subject.library, subject.sourceFile, subject.memberName);
+  };
   const providers: DependencyProvider[] = [
-    createSourceScanProvider((entry) => readCheckoutText(ctx.service.getCheckoutRoot()?.fsPath, entry.localPath)),
+    createSourceScanProvider(readSource),
     createProgramReferencesProvider({ sqlServicesAvailable, findCompiledObject, programReferences, objectSources }),
     ...configs.map((xref) => createCrossReferenceProvider(xref, {
       libraryExists,
@@ -262,13 +417,16 @@ export function searchLibraries(): string[] {
   return configured.length > 0 ? configured : connectionLibraryList();
 }
 
-/** One item per member found, grouped by kind. Copybooks not yet checked out are preselected. */
-function buildItems(ctx: CommandContext, system: string, resolution: Resolution): DependencyItem[] {
+/**
+ * One item per member found, grouped by kind, in the order given (for a walk, nearest first).
+ * Copybooks not yet checked out are preselected.
+ */
+function buildItems(ctx: CommandContext, system: string, offered: readonly OfferedDependency[]): DependencyItem[] {
   const items: DependencyItem[] = [];
   const seen = new Set<string>();
   for (const { kind, group } of KINDS) {
     const groupItems: DependencyItem[] = [];
-    for (const { reference, candidates } of resolution.resolved.filter((r) => r.reference.kind === kind)) {
+    for (const { reference, candidates, via } of offered.filter((r) => r.reference.kind === kind)) {
       const [best, ...others] = candidates;
       const key = `${best.library}/${best.sourceFile}/${best.member}`;
       if (seen.has(key)) {
@@ -284,7 +442,7 @@ function buildItems(ctx: CommandContext, system: string, resolution: Resolution)
       groupItems.push({
         label: best.member,
         description: `${best.library}/${best.sourceFile}${existing ? " · already checked out" : ""}`,
-        detail: `${where}${foundBy}${alsoIn}`,
+        detail: `${describeVia(via ?? [], "via ", " · ")}${where}${foundBy}${alsoIn}`,
         picked: kind === "copybook" && !existing,
         member: {
           library: best.library,
@@ -318,15 +476,20 @@ async function showChangeGuide(members: MemberInfo[]): Promise<void> {
   }
 }
 
-function reportUnresolved(ctx: CommandContext, memberPath: string, unresolved: RawReference[]): void {
+/** "via A → B" with the given affixes, or nothing for a direct dependency. */
+function describeVia(via: readonly string[], prefix: string, suffix: string): string {
+  return via.length > 0 ? `${prefix}${via.join(" → ")}${suffix}` : "";
+}
+
+function reportUnresolved(ctx: CommandContext, memberPath: string, unresolved: readonly WalkUnresolved[]): void {
   if (unresolved.length === 0) {
     return;
   }
-  const names = [...new Set(unresolved.map((ref) => ref.unresolvable ? `${ref.member} (${ref.unresolvable})` : ref.member))];
+  const names = [...new Set(unresolved.map(({ reference: ref }) => ref.unresolvable ? `${ref.member} (${ref.unresolvable})` : ref.member))];
   ctx.log.appendLine(`[dependencies] Source not found for dependencies of ${memberPath}:`);
-  for (const ref of unresolved) {
+  for (const { reference: ref, via } of unresolved) {
     const where = ref.line !== undefined ? `line ${ref.line}: ` : "";
-    ctx.log.appendLine(`  ${where}${ref.text}${ref.unresolvable ? ` (${ref.unresolvable})` : ""} → ${ref.member}`);
+    ctx.log.appendLine(`  ${describeVia(via, "in ", ", ")}${where}${ref.text}${ref.unresolvable ? ` (${ref.unresolvable})` : ""} → ${ref.member}`);
   }
   void vscode.window
     .showWarningMessage(

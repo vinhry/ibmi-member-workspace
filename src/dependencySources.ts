@@ -16,6 +16,9 @@ export const PROVIDER_GROUPS: readonly ProviderGroup[] = ["source", "programRefe
 
 export type Availability = { ok: true } | { ok: false; reason: string };
 
+/** The member a provider is asked about: a checkout, or a member found while walking dependencies. */
+export type DependencySubject = Pick<CheckedOutMember, "library" | "sourceFile" | "memberName" | "extension">;
+
 export interface ProviderContext {
   system: string;
   /** Search libraries, in order, for source members and compiled objects. */
@@ -35,9 +38,9 @@ export interface DependencyProvider {
   group: ProviderGroup;
   /** Host names the provider is limited to; empty or undefined means every system. */
   systems?: string[];
-  applies(entry: CheckedOutMember): boolean;
+  applies(entry: DependencySubject): boolean;
   available(context: ProviderContext): Promise<Availability>;
-  find(entry: CheckedOutMember, context: ProviderContext): Promise<ProviderResult>;
+  find(entry: DependencySubject, context: ProviderContext): Promise<ProviderResult>;
 }
 
 /** Thrown when a provider can't work on this system at all; it isn't tried again this session. */
@@ -115,7 +118,7 @@ export type ProviderOutcome =
 /** Runs every applicable, available provider; one failing never stops the others. */
 export async function runProviders(
   providers: readonly DependencyProvider[],
-  entry: CheckedOutMember,
+  entry: DependencySubject,
   context: ProviderContext,
   cache: ProviderAvailabilityCache
 ): Promise<{ references: RawReference[]; outcomes: ProviderOutcome[] }> {
@@ -196,14 +199,14 @@ export function summarizeRun(outcomes: readonly ProviderOutcome[]): string {
 // ---------------------------------------------------------------------------
 // Source scan
 
-export function createSourceScanProvider(readText: (entry: CheckedOutMember) => string): DependencyProvider {
+export function createSourceScanProvider(readText: (entry: DependencySubject) => Promise<string>): DependencyProvider {
   return {
     id: "source",
     label: "source scan",
     group: "source",
     applies: (entry) => SCANNED_SOURCE_TYPES.has(entry.extension.toLowerCase()),
     available: async () => ({ ok: true }),
-    find: async (entry) => ({ references: scanReferences(readText(entry), entry.extension) }),
+    find: async (entry) => ({ references: scanReferences(await readText(entry), entry.extension) }),
   };
 }
 
@@ -338,7 +341,7 @@ const PLACEHOLDER = /\{(library|sourceFile|member|object)\}/g;
 /** Turns `{library}`-style placeholders into parameter markers; only a single SELECT is accepted. */
 export function crossReferenceStatement(
   query: string,
-  entry: Pick<CheckedOutMember, "library" | "sourceFile" | "memberName">
+  entry: Pick<DependencySubject, "library" | "sourceFile" | "memberName">
 ): { sql: string; bindings: string[] } {
   const statement = query.trim().replace(/;\s*$/, "");
   if (!/^(SELECT|WITH)\b/i.test(statement)) {

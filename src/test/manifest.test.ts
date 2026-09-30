@@ -179,6 +179,32 @@ describe("extension manifest", () => {
     }
   });
 
+  it("offers Find All Dependencies right below Find Dependencies, with bounded limits", () => {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      contributes: {
+        menus: Record<string, Array<{ command?: string; when?: string; group?: string }>>;
+        configuration: { properties: Record<string, { default?: unknown; minimum?: unknown; maximum?: unknown }> };
+      };
+    };
+    const { menus, configuration } = manifest.contributes;
+    const inCheckoutView = (command: string) =>
+      menus["view/item/context"].find((item) => item.command === command && item.when?.includes("checkoutView"));
+    const direct = inCheckoutView("ibmi-member-workspace.findDependencies");
+    const all = inCheckoutView("ibmi-member-workspace.findAllDependencies");
+    assert.equal(direct?.group, "0_bob@2");
+    assert.equal(all?.group, "0_bob@3");
+    assert.equal(all?.when, direct?.when);
+    // It needs a checked-out member, so it isn't in the Command Palette.
+    assert.equal(menus.commandPalette.find((item) => item.command === "ibmi-member-workspace.findAllDependencies")?.when, "false");
+
+    const limits = (name: string) => {
+      const setting = configuration.properties[`ibmi-member-workspace.dependencies.transitive.${name}`];
+      return [setting?.default, setting?.minimum, setting?.maximum];
+    };
+    assert.deepEqual(limits("maxDepth"), [3, 1, 10]);
+    assert.deepEqual(limits("maxMembers"), [50, 5, 500]);
+  });
+
   it("packages only the files the extension needs", async () => {
     // Anything else (handoff notes, plans, old .vsix files, .claude/, tests) must not ship.
     const allowed = [

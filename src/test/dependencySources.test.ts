@@ -8,6 +8,7 @@ import {
   ProviderGroup,
   createCrossReferenceProvider,
   createProgramReferencesProvider,
+  createSourceScanProvider,
   crossReferenceKind,
   crossReferenceStatement,
   mergeReferences,
@@ -62,6 +63,22 @@ describe("pgmRefRowsToObjects", () => {
       { library: undefined, name: "ORD002", type: "*PGM", kind: "program" },
       { library: "PRODLIB", name: "UTILS", type: "*SRVPGM", kind: "program" },
     ]);
+  });
+});
+
+describe("createSourceScanProvider", () => {
+  it("scans source read on demand, also for a member that isn't checked out", async () => {
+    const read: string[] = [];
+    const provider = createSourceScanProvider(async (subject) => {
+      read.push(subject.memberName);
+      return "      /COPY QRPGLESRC,DATEUTIL\n";
+    });
+    const subject = { library: "PRODLIB", sourceFile: "QRPGLESRC", memberName: "ORDCPY", extension: "rpgleinc" };
+    assert.equal(provider.applies(subject), true);
+    assert.equal(provider.applies({ ...subject, extension: "mbr" }), false);
+    const { references } = await provider.find(subject, context);
+    assert.deepEqual(read, ["ORDCPY"]);
+    assert.deepEqual(references.map((r) => `${r.kind}:${r.sourceFile}/${r.member}`), ["copybook:QRPGLESRC/DATEUTIL"]);
   });
 });
 

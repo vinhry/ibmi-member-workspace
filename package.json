@@ -118,6 +118,11 @@
         "category": "IBM i Member Workspace"
       },
       {
+        "command": "ibmi-member-workspace.findAllDependencies",
+        "title": "Find All Dependencies…",
+        "category": "IBM i Member Workspace"
+      },
+      {
         "command": "ibmi-member-workspace.toggleAutoUpload",
         "title": "Change Upload on Save",
         "category": "IBM i Member Workspace"
@@ -342,6 +347,10 @@
           "when": "false"
         },
         {
+          "command": "ibmi-member-workspace.findAllDependencies",
+          "when": "false"
+        },
+        {
           "command": "ibmi-member-workspace.checkoutAllMembers",
           "when": "false"
         },
@@ -527,6 +536,11 @@
           "command": "ibmi-member-workspace.findDependencies",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
           "group": "0_bob@2"
+        },
+        {
+          "command": "ibmi-member-workspace.findAllDependencies",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
+          "group": "0_bob@3"
         },
         {
           "command": "ibmi-member-workspace.copyMemberPath",
@@ -725,6 +739,20 @@
           "type": "boolean",
           "default": true,
           "description": "After checking out a single member, offer to review the copybooks, called programs, referenced files, and SQL tables it uses. Nothing is downloaded until you choose."
+        },
+        "ibmi-member-workspace.dependencies.transitive.maxDepth": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10,
+          "markdownDescription": "How many levels **Find All Dependencies** looks through before asking whether to keep going: 1 is what the member uses, 2 adds what those members use, and so on. Members on the last level are listed but not looked into."
+        },
+        "ibmi-member-workspace.dependencies.transitive.maxMembers": {
+          "type": "integer",
+          "default": 50,
+          "minimum": 5,
+          "maximum": 500,
+          "markdownDescription": "How many members **Find All Dependencies** lists before asking whether to keep going. Each member's source is read from the IBM i, and its compiled program is checked with `DSPPGMREF`, so a larger number takes longer."
         },
         "ibmi-member-workspace.dependencies.searchLibraries": {
           "type": "array",

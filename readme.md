@@ -157,7 +157,27 @@ A list shows what was found, grouped into copybooks, called programs, referenced
 
 Dependencies whose source can't be found are listed afterwards, and in the output panel with the line that refers to them. Common reasons: the source is in a library that wasn't searched, the name is only known at run time (`CALL PGM(&PGM)`), or the copybook is an IFS file.
 
-Only direct dependencies are found. To go one level deeper, run **Find Dependencies…** on a reference copy. VS Code opens read-only files as read-only when `files.readonlyFromPermissions` is on.
+VS Code opens read-only files as read-only when `files.readonlyFromPermissions` is on.
+
+#### Find All Dependencies
+
+**Find Dependencies…** finds only what the member uses directly. **Find All Dependencies…**, just below it on the right-click menu, also finds what those members use, and so on: a copybook's nested `/COPY`, a called program's own programs and files, a file's `REF` field-reference file.
+
+```
+ORD100 ── /COPY ORDCPY ── /COPY DATECPY
+       └─ CALL ORD200 ─── uses ORDHDR ── REF FLDREF
+```
+
+Here Find Dependencies lists ORDCPY and ORD200. Find All Dependencies also lists DATECPY, ORDHDR and FLDREF. Each member's source is read from the IBM i as it goes, and the same sources are asked for each one. Nothing is written until you choose. Each member is looked into once, so members that use each other don't loop, and one reached two ways is shown through the shorter way.
+
+The list is the same as Find Dependencies' list, and each member's details line says how it was reached, for example *via ORD200 → ORDHDR · REF(FLDREF)*. Members you already have checked out are read from your local copy.
+
+A shared copybook or utility program can reach a large part of the system, so the search stops and asks **Keep going?** at two limits:
+
+- `ibmi-member-workspace.dependencies.transitive.maxDepth` (3 levels by default). Members on the last level are listed but not looked into.
+- `ibmi-member-workspace.dependencies.transitive.maxMembers` (50 by default).
+
+**Continue** raises the limit by the same amount again. **Show What Was Found** stops and shows the list. You can also cancel from the progress notification and still choose from what was found.
 
 ### Using with IBM Bob
 
@@ -233,6 +253,8 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.dependencies.suggestAfterCheckout` | `true` | After checking out a single member, offer to review the members it uses. |
 | `ibmi-member-workspace.dependencies.searchLibraries` | `[]` | Libraries to search, in order, for the source members and compiled programs of dependencies (for example, `PRODOBJ`, `PRODSRC`). Empty uses the connection's library list. |
 | `ibmi-member-workspace.dependencies.sources` | all | Which kinds of dependency sources to use: `source`, `programReferences` (DSPPGMREF), `crossReferences`. Unavailable ones are skipped automatically. |
+| `ibmi-member-workspace.dependencies.transitive.maxDepth` | `3` | How many levels **Find All Dependencies** looks through before asking whether to keep going (1 to 10). |
+| `ibmi-member-workspace.dependencies.transitive.maxMembers` | `50` | How many members **Find All Dependencies** lists before asking whether to keep going (5 to 500). |
 | `ibmi-member-workspace.dependencies.crossReferences` | `[]` | Cross-reference tool queries (Abstract, Pathfinder, MDXREF…). User settings only. See **Dependencies**. |
 | `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. User settings only. See **Upload on Save**. |
 | `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. A workspace setting asks once before it turns this on. |
