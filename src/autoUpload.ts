@@ -4,6 +4,18 @@ export type AutoUploadMode = "off" | "ask" | "silent";
 
 export const AUTO_UPLOAD_MODES: readonly AutoUploadMode[] = ["off", "ask", "silent"];
 
+export function isAutoUploadMode(value: unknown): value is AutoUploadMode {
+  return (AUTO_UPLOAD_MODES as readonly unknown[]).includes(value);
+}
+
+/** The member's own choice when it has one, otherwise the `autoUploadOnSave` setting. */
+export function effectiveUploadMode(
+  entry: Pick<CheckedOutMember, "uploadOnSave"> | undefined,
+  setting: AutoUploadMode
+): AutoUploadMode {
+  return isAutoUploadMode(entry?.uploadOnSave) ? entry.uploadOnSave : setting;
+}
+
 /** Coalesces a burst of saves to one file into a single upload. */
 export const AUTO_UPLOAD_DEBOUNCE_MS = 300;
 
@@ -11,6 +23,7 @@ export const AUTO_UPLOAD_DEBOUNCE_MS = 300;
 export const AUTO_UPLOAD_BUSY_RETRY_MS = 1000;
 
 export interface AutoUploadDeps {
+  /** The `autoUploadOnSave` setting; a member's own choice overrides it. */
   mode(): AutoUploadMode;
   /** The checkout for a local file in the active work item, resolved when the upload runs. */
   findEntry(localPath: string): CheckedOutMember | undefined;
@@ -18,9 +31,13 @@ export interface AutoUploadDeps {
   skipReason(entry: CheckedOutMember): string | undefined;
   /** Whether another checkout, upload, or work-item operation is running. */
   isBusy(): boolean;
-  /** Asks before uploading in "ask" mode; "always" switches to silent. Undefined when declined. */
+  /**
+   * Asks before uploading in "ask" mode; "always" switches to silent: the member's own choice
+   * when it has one, the setting otherwise. Undefined when declined.
+   */
   confirm(entry: CheckedOutMember): Promise<"upload" | "always" | undefined>;
   setMode(mode: AutoUploadMode): Promise<void>;
+  setMemberMode(entry: CheckedOutMember, mode: AutoUploadMode): Promise<void>;
   upload(entry: CheckedOutMember): Promise<void>;
   log(message: string): void;
   setTimer(callback: () => void, ms: number): unknown;
@@ -38,7 +55,7 @@ export function hasLocalEditsToUpload(status: CheckoutStatus): boolean {
 
 /**
  * Uploads checked-out members after they are saved in the editor, according to
- * the `autoUploadOnSave` setting. One upload runs per file at a time; a save
+ * each member's own choice or the `autoUploadOnSave` setting. One upload runs per file at a time; a save
  * during an upload or an open prompt uploads the latest content afterwards
  * instead of being dropped.
  */
@@ -53,7 +70,7 @@ export class AutoUploadScheduler {
 
   /** Called after a checked-out file is saved in the editor. */
   schedule(localPath: string, delayMs = AUTO_UPLOAD_DEBOUNCE_MS): void {
-    if (this.deps.mode() === "off") {
+    if (this.modeFor(localPath) === "off") {
       return;
     }
     const pending = this.timers.get(localPath);
@@ -81,7 +98,7 @@ export class AutoUploadScheduler {
       this.rerun.add(localPath);
       return;
     }
-    const mode = this.deps.mode();
+    const mode = this.modeFor(localPath);
     let entry = this.uploadable(localPath, mode);
     if (!entry) {
       return;
@@ -106,10 +123,15 @@ export class AutoUploadScheduler {
         return;
       }
       if (choice === "always") {
-        await this.deps.setMode("silent");
+        const current = this.deps.findEntry(localPath);
+        if (current && isAutoUploadMode(current.uploadOnSave)) {
+          await this.deps.setMemberMode(current, "silent");
+        } else {
+          await this.deps.setMode("silent");
+        }
       }
       // The work item or status may have changed while the prompt was open.
-      entry = this.uploadable(localPath, this.deps.mode());
+      entry = this.uploadable(localPath, this.modeFor(localPath));
       if (!entry) {
         return;
       }
@@ -131,6 +153,10 @@ export class AutoUploadScheduler {
     if (this.rerun.delete(localPath)) {
       this.schedule(localPath);
     }
+  }
+
+  private modeFor(localPath: string): AutoUploadMode {
+    return effectiveUploadMode(this.deps.findEntry(localPath), this.deps.mode());
   }
 
   /** The checkout to upload for `localPath`, or undefined (with a log line) when it should be skipped. */

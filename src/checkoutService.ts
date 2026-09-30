@@ -962,6 +962,8 @@ export class CheckoutService implements vscode.Disposable {
       checkedOutAt: new Date().toISOString(),
       remoteHashAtCheckout: "",
       ...(reference ? { kind: "reference" as const } : {}),
+      // A re-download keeps the member's own upload-on-save choice.
+      ...(!reference && existing?.uploadOnSave ? { uploadOnSave: existing.uploadOnSave } : {}),
       status: "checked-out",
     };
 
@@ -1361,6 +1363,24 @@ export class CheckoutService implements vscode.Disposable {
     const entries = this.entries;
     return entries.find((e) => e.localPath === target) ??
       entries.find((e) => vscode.Uri.file(e.localPath).fsPath === target);
+  }
+
+  /**
+   * Sets upload on save for one checkout; undefined follows the setting again. Only the stored
+   * checkout is changed, never one passed in from elsewhere.
+   */
+  async setUploadOnSave(id: string, mode: CheckedOutMember["uploadOnSave"]): Promise<void> {
+    const entry = this.findEntryById(id);
+    if (!entry) {
+      throw new Error("That member is no longer checked out.");
+    }
+    assertEditable(entry);
+    if (mode) {
+      entry.uploadOnSave = mode;
+    } else {
+      delete entry.uploadOnSave;
+    }
+    await this.persist();
   }
 
   /** Updates a checkout's status after its local file is written, without contacting the IBM i. */

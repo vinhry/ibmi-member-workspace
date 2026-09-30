@@ -16,6 +16,8 @@ export interface CheckedOutMember {
    * never uploaded or merged back; changes go through the shop's change management instead.
    */
   kind?: "reference";
+  /** Upload on save for this member only, instead of the `autoUploadOnSave` setting. */
+  uploadOnSave?: "off" | "ask" | "silent";
   status: CheckoutStatus;
 }
 

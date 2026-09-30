@@ -128,6 +128,11 @@
         "category": "IBM i Member Workspace"
       },
       {
+        "command": "ibmi-member-workspace.changeMemberAutoUpload",
+        "title": "Change Upload on Save for This Member",
+        "category": "IBM i Member Workspace"
+      },
+      {
         "command": "ibmi-member-workspace.configureCheckoutFolder",
         "title": "Configure Checkout Folder",
         "category": "IBM i Member Workspace",
@@ -314,6 +319,10 @@
     ],
     "menus": {
       "commandPalette": [
+        {
+          "command": "ibmi-member-workspace.changeMemberAutoUpload",
+          "when": "ibmi-member-workspace:editableCheckoutActive"
+        },
         {
           "command": "ibmi-member-workspace.bob.analyzeRelationships",
           "when": "false"

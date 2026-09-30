@@ -48,27 +48,21 @@ When the user picks **I Need to Change Some…** for reference copies (`src/comm
 - Unit tests for the flow with the IBM i injected: confirmation declined runs nothing; one failure among several members is reported and the rest run; a different connected system is refused; an empty setting falls back to the guide.
 - `manifest.test.ts` asserts the new setting is `"scope": "application"`, and the application-scope list in `CLAUDE.md` is updated.
 
-### 3. Per-member upload on save, from the status bar
+### 3. Per-member upload on save, from the status bar (shipped in 1.7.4)
 
-A status bar item shows whether the member in the active editor uploads on save, and clicking it switches that for that member only. The `autoUploadOnSave` user setting (`off` / `ask` / `silent`) stays the default for members without their own choice.
+The existing **Auto-upload** status bar item shows the open member's mode whenever the active editor is an editable checked-out member, even while the `autoUploadOnSave` setting is `off`. Clicking it runs **Change Upload on Save for This Member** (`ibmi-member-workspace.changeMemberAutoUpload`), a quick pick with **Use Setting**, **Off**, **Ask**, **On**, and **Change the Setting for All Members…**. Elsewhere the item behaves as before (hidden while the setting is `off`).
 
-- The item is shown only when the active editor is an editable checked-out member. It is hidden for reference copies and for files that aren't checked out.
-- The per-member choice is stored in the checkout index (per VS Code workspace, in extension storage). It is never read from workspace files, so a cloned project can't turn uploads on. That is the same reason `autoUploadOnSave` is application-scoped.
-- The item reads, for example, `$(cloud-upload) Upload on Save: Ask`, with a mark when the member's choice differs from the setting. Clicking it opens a quick pick: **Use Setting (currently Off)**, **Off**, **Ask**, **Silent**. A quick pick is used because a click that cycles through the modes could switch to Silent by accident.
-- A member can upload on save while the user setting is `off`. Only the user's own click can set a member's choice, and it's stored where workspace files can't reach, so this is as safe as the application-scoped setting.
-- `AutoUploadScheduler` (`src/autoUpload.ts`) currently asks `deps.mode()` once for everything. It needs the effective mode per file, both when scheduling and when uploading. In `ask` mode, **Always** switches that member to Silent, not the user setting, when the member has its own choice.
-- A remote change always prompts, even when the member uploads silently. This is unchanged.
+- The choice is `uploadOnSave` on the checkout in the index (`src/types.ts`). It survives a re-download, is changed only through `CheckoutService.setUploadOnSave` on the stored checkout, and is never read from workspace files.
+- `effectiveUploadMode` (`src/autoUpload.ts`) picks the member's choice over the setting. The scheduler resolves it per file when scheduling and again when uploading.
+- In `ask` mode, **Always Upload** switches the member to **On** when it has its own choice, and the setting otherwise.
+- Reference copies never upload. A remote change always prompts, even when the member uploads silently.
 
 **Validation**
-- Unit tests in `src/test/autoUpload.test.ts` for how the effective mode is chosen:
-  - the member's choice wins over the user setting, including `silent` while the setting is `off`;
-  - with no member choice, the setting applies;
-  - reference copies never upload;
-  - **Always** updates the member's choice when it has one, and the setting otherwise.
-- A test that the per-member choice survives an index save/load round trip and older indexes without it still load.
-- README "Upload on Save" describes the status bar item.
+- `src/test/autoUpload.test.ts`: the member's choice wins both ways, a choice changed after the save applies, reference copies never upload, and **Always** updates the member or the setting.
+- `src/test/checkoutIndexStore.test.ts`: the choice survives a save and load.
+- README "Upload on Save → For One Member".
 
-### 4. Extract the checkout index store from `checkoutService.ts`
+### 4. Extract the checkout index store from `checkoutService.ts` (shipped in 1.7.3)
 
 Move checkout-index persistence out of `src/checkoutService.ts` (1,698 lines) into a vscode-free module with file access injected, so it can be unit-tested. User-visible behavior doesn't change.
 

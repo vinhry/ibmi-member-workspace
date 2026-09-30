@@ -6,6 +6,7 @@ import {
   AutoUploadDeps,
   AutoUploadMode,
   AutoUploadScheduler,
+  effectiveUploadMode,
   hasLocalEditsToUpload,
 } from "../autoUpload";
 import type { CheckedOutMember, CheckoutStatus } from "../types";
@@ -62,6 +63,9 @@ function harness(
     setMode: async (value) => {
       mode = value;
     },
+    setMemberMode: async (value, memberMode) => {
+      value.uploadOnSave = memberMode;
+    },
     upload: async (value) => {
       uploads.push(value);
     },
@@ -104,6 +108,20 @@ describe("hasLocalEditsToUpload", () => {
     for (const status of ["in-sync", "merged", "checked-out", "remote-changed"] as const) {
       assert.equal(hasLocalEditsToUpload(status), false, status);
     }
+  });
+});
+
+describe("effectiveUploadMode", () => {
+  it("uses the member's own choice over the setting", () => {
+    assert.equal(effectiveUploadMode({ uploadOnSave: "silent" }, "off"), "silent");
+    assert.equal(effectiveUploadMode({ uploadOnSave: "off" }, "silent"), "off");
+    assert.equal(effectiveUploadMode({ uploadOnSave: "ask" }, "silent"), "ask");
+  });
+
+  it("follows the setting without a valid choice of its own", () => {
+    assert.equal(effectiveUploadMode({}, "ask"), "ask");
+    assert.equal(effectiveUploadMode(undefined, "silent"), "silent");
+    assert.equal(effectiveUploadMode({ uploadOnSave: "sometimes" as never }, "off"), "off");
   });
 });
 
@@ -223,6 +241,59 @@ describe("AutoUploadScheduler", () => {
     assert.equal(attempts, 2);
   });
 
+  describe("a member's own choice", () => {
+    it("uploads a member set to silent while the setting is off", async () => {
+      const h = harness({ initialMode: "off", entry: { ...member(), uploadOnSave: "silent" } });
+      h.scheduler.schedule(PATH);
+      await h.fireTimers();
+      assert.equal(h.uploads.length, 1);
+    });
+
+    it("doesn't upload a member set to off while the setting is silent", async () => {
+      const h = harness({ initialMode: "silent", entry: { ...member(), uploadOnSave: "off" } });
+      h.scheduler.schedule(PATH);
+      assert.equal(h.timers.size, 0);
+      await h.fireTimers();
+      assert.equal(h.uploads.length, 0);
+    });
+
+    it("stops uploading when the member is set to off after the save", async () => {
+      const entry = member();
+      const h = harness({ initialMode: "silent", entry });
+      h.scheduler.schedule(PATH);
+      entry.uploadOnSave = "off";
+      await h.fireTimers();
+      assert.equal(h.uploads.length, 0);
+    });
+
+    it("never uploads a reference copy, even set to silent", async () => {
+      const h = harness({ initialMode: "off", entry: { ...member(), kind: "reference", uploadOnSave: "silent" } });
+      h.scheduler.schedule(PATH);
+      await h.fireTimers();
+      assert.equal(h.uploads.length, 0);
+      assert.ok(h.logs.some((line) => line.includes("read-only reference copy")));
+    });
+
+    it("asks for a member set to ask, and Always Upload changes only that member", async () => {
+      const entry: CheckedOutMember = { ...member(), uploadOnSave: "ask" };
+      let prompts = 0;
+      const h = harness({
+        initialMode: "off",
+        entry,
+        confirm: async () => {
+          prompts++;
+          return "always";
+        },
+      });
+      h.scheduler.schedule(PATH);
+      await h.fireTimers();
+      assert.equal(prompts, 1);
+      assert.equal(entry.uploadOnSave, "silent");
+      assert.equal(h.getMode(), "off", "the setting is unchanged");
+      assert.equal(h.uploads.length, 1);
+    });
+  });
+
   describe("ask mode", () => {
     it("does not upload when the user declines", async () => {
       const h = harness({ initialMode: "ask", confirm: async () => undefined });
@@ -231,11 +302,13 @@ describe("AutoUploadScheduler", () => {
       assert.equal(h.uploads.length, 0);
     });
 
-    it("switches to silent when the user chooses Always Upload", async () => {
-      const h = harness({ initialMode: "ask", confirm: async () => "always" });
+    it("switches the setting to silent when the user chooses Always Upload", async () => {
+      const entry = member();
+      const h = harness({ initialMode: "ask", entry, confirm: async () => "always" });
       h.scheduler.schedule(PATH);
       await h.fireTimers();
       assert.equal(h.getMode(), "silent");
+      assert.equal(entry.uploadOnSave, undefined, "a member without its own choice keeps following the setting");
       assert.equal(h.uploads.length, 1);
     });
 

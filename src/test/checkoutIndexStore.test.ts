@@ -163,6 +163,18 @@ describe("CheckoutIndexStore", () => {
     assert.equal(h.storage.files.get(INDEX_FILE), "{ not json");
   });
 
+  it("keeps a member's own upload-on-save choice across a save and load", async () => {
+    const h = harness();
+    h.store.index = v3Index("PROG", "OTHER");
+    h.store.index.systems.SYS.workItems.workspace[0].uploadOnSave = "silent";
+    await h.store.save();
+    const reloaded = harness(h.storage);
+    await reloaded.store.load();
+    const [prog, other] = reloaded.store.index.systems.SYS.workItems.workspace;
+    assert.equal(prog.uploadOnSave, "silent");
+    assert.equal(other.uploadOnSave, undefined);
+  });
+
   it("writes through a temp file and renames it into place", async () => {
     const h = harness();
     h.store.index = v3Index("PROG");

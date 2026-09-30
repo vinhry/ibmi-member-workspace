@@ -70,6 +70,12 @@ Rapid saves are combined into one upload. A save made while an upload is running
 
 While upload on save is on, the status bar shows **Auto-upload: Ask** or **Auto-upload: On**. Click it, or run **IBM i Member Workspace: Change Upload on Save**, to change the mode.
 
+#### For One Member
+
+When a checked-out member is open in the editor, the status bar shows its mode (for example **Auto-upload: Off**), even while the setting is `off`. Click it, or run **IBM i Member Workspace: Change Upload on Save for This Member**, to choose **Off**, **Ask** or **On** for that member alone, or **Use Setting** to follow the setting again. A member with its own choice shows **(this member)** in the status bar. For example, set the setting to `off` and turn it on only for the member you're testing.
+
+The choice is kept with the checkout (it survives a re-download) and is never read from workspace files. In `ask` mode, **Always Upload** switches only that member to **On** when it has its own choice. Read-only reference copies never upload.
+
 ### Refresh Remote Status
 
 Compares your local file, the live remote content, and the remote content as it was at checkout time (not just a stale comparison) to classify each checkout:
