@@ -17,7 +17,6 @@ import {
   isReferenceCopy,
   memberNameProblem,
   moveEntriesState,
-  parseCheckoutIndex,
   sanitizeSystemName,
   startWorkItemState,
   systemKey,
@@ -50,12 +49,10 @@ import {
 import { RepositoryTrust } from "./repositoryTrust";
 import { assertNoLinkBelow } from "./localPath";
 import { GitIntegrationState, gitIntegrationState } from "./workspaceSettings";
+import { CheckoutIndexStore, IndexStorage } from "./checkoutIndexStore";
 
 /** workspaceState key: the user turned on Local Change History in this workspace. */
 const GIT_INTEGRATION_CONFIRMED = "gitIntegrationConfirmed";
-
-/** How often listeners hear about changes while a batch is running; see `persist`. */
-const BATCH_CHANGE_INTERVAL_MS = 250;
 
 /** "uploaded-altered": uploaded, but the IBM i stored content that differs from the local copy. */
 export type UploadResult = "uploaded" | "uploaded-altered" | "failed" | "remote-changed";
@@ -82,20 +79,9 @@ export interface CheckoutOptions {
 }
 
 export class CheckoutService implements vscode.Disposable {
-  private index: CheckoutIndex = {
-    version: 3,
-    systems: {},
-    unassignedWorkItems: {},
-  };
   private readonly storageUri: vscode.Uri | undefined;
-  private readonly indexUri: vscode.Uri | undefined;
-  private readonly indexTempUri: vscode.Uri | undefined;
+  private readonly store: CheckoutIndexStore;
 
-  private batchDepth = 0;
-  private dirty = false;
-  /** A change made during the running batch that listeners haven't been told about yet. */
-  private changeTimer: NodeJS.Timeout | undefined;
-  private saveQueue: Promise<void> = Promise.resolve();
   private gitWarningShown = false;
   private readonly gitSetupDeclinedSystems = new Set<string>();
   /** Systems whose existing, untrusted repository the user chose not to use this session. */
@@ -120,31 +106,36 @@ export class CheckoutService implements vscode.Disposable {
   ) {
     this.storageUri = context.storageUri;
     this.repositoryTrust = new RepositoryTrust(context.globalState);
-    this.indexUri = this.storageUri
-      ? vscode.Uri.joinPath(this.storageUri, "checkout-index.json")
-      : undefined;
-    this.indexTempUri = this.storageUri
-      ? vscode.Uri.joinPath(this.storageUri, "checkout-index.json.tmp")
-      : undefined;
+    this.store = new CheckoutIndexStore({
+      storage: this.storageUri ? workspaceIndexStorage(this.storageUri) : undefined,
+      onChange: () => this._onDidChange.fire(),
+      log: (message) => this.log.appendLine(message),
+      showWarning: (message) => void vscode.window.showWarningMessage(message),
+      showError: (message) => void vscode.window.showErrorMessage(message),
+    });
+  }
+
+  /** The checkout index; the store replaces it when it loads. */
+  private get index(): CheckoutIndex {
+    return this.store.index;
   }
 
   async initialize(): Promise<void> {
     if (!this.storageUri) {
-      this.index = this.emptyIndex();
       return;
     }
     await vscode.workspace.fs.createDirectory(this.storageUri);
-    await this.loadIndex();
+    await this.store.load();
     await this.trustRepositoriesInUse();
     const system = getSystemName();
     if (system && Object.keys(this.index.unassignedWorkItems).length > 0) {
       this.ensureSystemState(system);
-      await this.saveIndex();
+      await this.store.save();
     }
   }
 
   dispose(): void {
-    clearTimeout(this.changeTimer);
+    this.store.dispose();
     this._onDidChange.dispose();
   }
 
@@ -386,7 +377,7 @@ export class CheckoutService implements vscode.Disposable {
     this.gitPreparations.set(key, preparation);
     try {
       const result = await preparation;
-      if (this.batchDepth > 0 && result.status === "success") {
+      if (this.store.inBatch && result.status === "success") {
         this.batchGitReady.set(key, result);
       }
       return result;
@@ -780,29 +771,17 @@ export class CheckoutService implements vscode.Disposable {
    * operation writes the index once instead of once per member.
    */
   async runBatch<T>(fn: () => Promise<T>): Promise<T> {
-    this.batchDepth++;
+    this.store.beginBatch();
     this.inFlight++;
     try {
       return await fn();
     } finally {
       this.inFlight--;
-      this.batchDepth--;
-      if (this.batchDepth === 0) {
+      const ended = this.store.endBatch();
+      if (!this.store.inBatch) {
         this.batchGitReady.clear();
-        if (this.changeTimer) {
-          clearTimeout(this.changeTimer);
-          this.changeTimer = undefined;
-          this._onDidChange.fire();
-        }
       }
-      if (this.batchDepth === 0 && this.dirty) {
-        try {
-          await this.saveIndex();
-        } catch (err) {
-          this.log.appendLine(`[index] Could not save checkout index: ${errorMessage(err)}`);
-          vscode.window.showErrorMessage(`Could not save the checkout index: ${errorMessage(err)}`);
-        }
-      }
+      await ended;
     }
   }
 
@@ -1559,10 +1538,6 @@ export class CheckoutService implements vscode.Disposable {
     return localPath;
   }
 
-  private emptyIndex(): CheckoutIndex {
-    return { version: 3, systems: {}, unassignedWorkItems: {} };
-  }
-
   private ensureSystemState(system: string): SystemCheckoutState {
     const key = systemKey(system);
     let state = this.index.systems[key];
@@ -1597,96 +1572,14 @@ export class CheckoutService implements vscode.Disposable {
       !path.isAbsolute(relative);
   }
 
-  private async loadIndex(): Promise<void> {
-    if (!this.storageUri || !this.indexUri) {
-      this.index = this.emptyIndex();
-      return;
-    }
-
-    let data: Uint8Array;
-    try {
-      data = await vscode.workspace.fs.readFile(this.indexUri);
-    } catch {
-      // no index yet
-      this.index = this.emptyIndex();
-      return;
-    }
-
-    try {
-      const json = Buffer.from(data).toString("utf-8");
-      const storedVersion = (JSON.parse(json) as { version?: number }).version ?? 1;
-      this.index = parseCheckoutIndex(json);
-      if (storedVersion !== 3) {
-        const backupUri = vscode.Uri.joinPath(this.storageUri, `checkout-index.v${storedVersion}-backup.json`);
-        try {
-          await vscode.workspace.fs.writeFile(backupUri, data);
-          await this.saveIndex();
-          this.log.appendLine(`[index] Migrated checkout index to work-item storage; backup: ${backupUri.fsPath}`);
-        } catch (migrationError) {
-          this.log.appendLine(`[index] Could not save checkout-index migration backup: ${errorMessage(migrationError)}`);
-        }
-      }
-    } catch (err) {
-      this.index = this.emptyIndex();
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const backupUri = vscode.Uri.joinPath(this.storageUri, `checkout-index.corrupt-${stamp}.json`);
-      try {
-        await vscode.workspace.fs.writeFile(backupUri, data);
-      } catch (backupErr) {
-        this.log.appendLine(`[index] Could not back up unreadable index: ${errorMessage(backupErr)}`);
-      }
-      this.log.appendLine(
-        `[index] ${this.indexUri.fsPath} is unreadable (${errorMessage(err)}); backed up to ${backupUri.fsPath}`
-      );
-      vscode.window.showWarningMessage(
-        `The IBM i checkout index could not be read and was reset. A backup was saved to ${backupUri.fsPath}.`
-      );
-    }
-  }
-
   /** Redraws the checkout views, e.g. after a checked-out file was deleted outside VS Code. */
   notifyLocalFileChanged(): void {
     this._onDidChange.fire();
   }
 
-  /**
-   * Notifies listeners and saves the index. While a batch is running, the save waits for its end
-   * and listeners are told at most every {@link BATCH_CHANGE_INTERVAL_MS}: each notification redraws
-   * the views and asks Git for the work item, so one per member would start thousands of Git
-   * processes for a large checkout.
-   */
-  private async persist(): Promise<void> {
-    if (this.batchDepth > 0) {
-      this.dirty = true;
-      this.changeTimer ??= setTimeout(() => {
-        this.changeTimer = undefined;
-        this._onDidChange.fire();
-      }, BATCH_CHANGE_INTERVAL_MS);
-      return;
-    }
-    this._onDidChange.fire();
-    await this.saveIndex();
-  }
-
-  /** Writes the index atomically (temp file + rename), one write at a time. */
-  private saveIndex(): Promise<void> {
-    this.dirty = false;
-    if (!this.indexUri || !this.indexTempUri) {
-      return Promise.reject(new Error("Open a folder or workspace before saving checkouts."));
-    }
-    const indexUri = this.indexUri;
-    const indexTempUri = this.indexTempUri;
-    const data = Buffer.from(JSON.stringify(this.index, null, 2), "utf-8");
-    const write = async () => {
-      await vscode.workspace.fs.writeFile(indexTempUri, data);
-      await vscode.workspace.fs.rename(indexTempUri, indexUri, { overwrite: true });
-    };
-    const result = this.saveQueue.then(write);
-    result.catch(() => {
-      this.dirty = true;
-    });
-    this.saveQueue = result.catch(() => undefined);
-    return result;
+  /** Notifies listeners and saves the index; during a batch the save waits for its end. */
+  private persist(): Promise<void> {
+    return this.store.persist();
   }
 }
 
@@ -1695,4 +1588,15 @@ export function assertEditable(entry: CheckedOutMember): void {
   if (isReferenceCopy(entry)) {
     throw new ReferenceCopyError(formatMemberPath(entry));
   }
+}
+
+/** The checkout index's files in the workspace's extension storage. */
+function workspaceIndexStorage(folder: vscode.Uri): IndexStorage {
+  const file = (name: string) => vscode.Uri.joinPath(folder, name);
+  return {
+    read: async (name) => vscode.workspace.fs.readFile(file(name)),
+    write: async (name, data) => vscode.workspace.fs.writeFile(file(name), data),
+    rename: async (from, to) => vscode.workspace.fs.rename(file(from), file(to), { overwrite: true }),
+    location: (name) => file(name).fsPath,
+  };
 }
