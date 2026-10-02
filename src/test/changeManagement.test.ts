@@ -20,11 +20,13 @@ function deps(overrides: Partial<ChangeCheckoutDeps> = {}) {
   const confirmed: string[][] = [];
   const value: ChangeCheckoutDeps = {
     askDevLibrary: async () => "devlib",
+    askProject: async () => "mod054937",
     confirm: async (commands) => {
       confirmed.push(commands);
       return true;
     },
     connectedSystem: () => "PUB400",
+    currentUser: () => "mneukirc",
     runCommand: async (command) => {
       ran.push(command);
     },
@@ -162,5 +164,50 @@ describe("runChangeManagementCheckout", () => {
     assert.equal(h.ran.length, 1);
     assert.deepEqual(result?.succeeded.map((m) => m.memberName), ["ORD100"]);
     assert.equal(result?.failed[0].error, "Connected to OTHER, not PUB400.");
+  });
+});
+
+describe("&PROJECT and &USER", () => {
+  const LMI = "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(CRETE/IESCORP/BASE)";
+
+  it("fills in Rocket LMI's ACMSCHKOUT with the project asked for and the connection's user", async () => {
+    let asked = 0;
+    const { deps: d, ran, confirmed } = deps({ askProject: async () => { asked++; return " mod054937 "; } });
+    const result = await runChangeManagementCheckout([member("VU0005CC", "clle")], "PUB400", LMI, d);
+    assert.equal(asked, 1);
+    assert.deepEqual(confirmed, [["ACMSLIB/ACMSCHKOUT OBJ((QRPGLESRC (VU0005CC))) PROJECT(MOD054937) DVP(MNEUKIRC) REL(CRETE/IESCORP/BASE)"]]);
+    assert.deepEqual(ran, confirmed[0]);
+    assert.equal(result?.succeeded.length, 1);
+  });
+
+  it("asks for a project only when the command uses it", async () => {
+    let asked = 0;
+    const { deps: d } = deps({ askProject: async () => { asked++; return "X"; } });
+    await runChangeManagementCheckout([member("ORD100")], "PUB400", TEMPLATE, d);
+    assert.equal(asked, 0);
+  });
+
+  it("runs nothing when the project prompt is cancelled", async () => {
+    const { deps: d, ran, confirmed } = deps({ askProject: async () => undefined });
+    assert.equal(await runChangeManagementCheckout([member("ORD100")], "PUB400", LMI, d), undefined);
+    assert.deepEqual(confirmed, []);
+    assert.deepEqual(ran, []);
+  });
+
+  it("refuses a project or user that isn't a valid IBM i name, or a user that isn't known", async () => {
+    await assert.rejects(
+      runChangeManagementCheckout([member("ORD100")], "PUB400", LMI, deps({ askProject: async () => "MOD1) DLTLIB(PROD" }).deps),
+      /not a valid project/
+    );
+    await assert.rejects(
+      runChangeManagementCheckout([member("ORD100")], "PUB400", LMI, deps({ currentUser: () => undefined }).deps),
+      /uses &USER, but no user profile is known/
+    );
+    assert.throws(() => expandCheckoutCommand(LMI, member("ORD100"), "DEVLIB", { project: "TOO-LONG-PROJECT", user: "ME" }), /not a valid project/);
+  });
+
+  it("still refuses placeholders it doesn't know", () => {
+    assert.match(checkoutTemplateProblem("X P(&TASK) D(&DEVELOPER)") ?? "", /&TASK, &DEVELOPER/);
+    assert.equal(checkoutTemplateProblem(LMI), undefined);
   });
 });

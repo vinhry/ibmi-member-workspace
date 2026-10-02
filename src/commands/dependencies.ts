@@ -8,6 +8,7 @@ import {
   libraryExists,
   objectSources,
   programReferences,
+  connectedUser,
   runClCommand,
   runCrossReferenceQuery,
   sqlServicesAvailable,
@@ -39,7 +40,7 @@ import {
   summarizeRun,
 } from "../dependencySources";
 import { WalkLimitReached, WalkUnresolved, mergeOutcomes, walkDependencies } from "../dependencyWalk";
-import { ChangeCheckoutResult, runChangeManagementCheckout } from "../changeManagement";
+import { ChangeCheckoutResult, nameValueProblem, runChangeManagementCheckout } from "../changeManagement";
 import { errorMessage } from "../errors";
 import { readCheckoutText } from "../localPath";
 import { MemberInfo } from "../memberInfo";
@@ -624,6 +625,8 @@ function buildItems(ctx: CommandContext, system: string, offered: readonly Offer
 
 /** workspaceState key: the development library last named for a change-management checkout. */
 const LAST_DEV_LIBRARY = "changeManagement.lastDevLibrary";
+/** workspaceState key: the project last named for a change-management checkout (&PROJECT). */
+const LAST_PROJECT = "changeManagement.lastProject";
 
 const CHECKOUT_COMMAND_SETTING = "changeManagement.checkoutCommand";
 
@@ -652,8 +655,18 @@ async function changeThroughChangeManagement(ctx: CommandContext, system: string
           ? undefined
           : "Enter an IBM i library name.",
       }),
-      confirm: async (commands, devLibrary) => {
+      askProject: async () => vscode.window.showInputBox({
+        title: "Change-Management Checkout",
+        prompt: "The change-management project (task) the members are checked out for (&PROJECT)",
+        value: ctx.context.workspaceState.get<string>(LAST_PROJECT) ?? "",
+        ignoreFocusOut: true,
+        validateInput: (value) => nameValueProblem("project", value.trim()),
+      }),
+      confirm: async (commands, devLibrary, project) => {
         await ctx.context.workspaceState.update(LAST_DEV_LIBRARY, devLibrary);
+        if (project) {
+          await ctx.context.workspaceState.update(LAST_PROJECT, project);
+        }
         const choice = await vscode.window.showWarningMessage(
           `Run ${commands.length === 1 ? "this command" : `these ${commands.length} commands`} on ${system}?`,
           { modal: true, detail: commands.join("\n") },
@@ -662,6 +675,7 @@ async function changeThroughChangeManagement(ctx: CommandContext, system: string
         return choice === "Run";
       },
       connectedSystem: getSystemName,
+      currentUser: connectedUser,
       runCommand: runClCommand,
       log: (message) => ctx.log.appendLine(message),
     });

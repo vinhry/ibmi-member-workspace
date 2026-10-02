@@ -216,7 +216,7 @@ A list shows what was found, grouped into copybooks, called programs, referenced
 
 Set `ibmi-member-workspace.changeManagement.checkoutCommand` in your user settings to the CL command that checks a member out in your change-management system. **I Need to Change Some…** then:
 
-1. asks for the development library the members go to (the last one you used is filled in);
+1. asks for the development library the members go to, and the project (task) when the command uses `&PROJECT` (the last ones you used are filled in);
 2. shows the exact command for each member and runs them only when you choose **Run**;
 3. runs each command on the IBM i, with the connection's library list. A failed member is reported with the IBM i's message and doesn't stop the others. Nothing runs while a different IBM i is connected;
 4. offers **Check Out from DEVLIB**, which checks out the development library's copies here, ready to change.
@@ -230,15 +230,19 @@ The command can use these placeholders, named as in Code for IBM i actions:
 | `&OPENMBR` | the member |
 | `&EXT` | its source type |
 | `&DEVLIB` | the development library you name |
+| `&PROJECT` | the change-management project (task) you name, for example `MOD054937` |
+| `&USER` | the user profile Code for IBM i is connected with, for example as the developer |
 
-For example (the command and its parameters are placeholders; use your shop's own):
+For example, Rocket LMI's checkout command, with your own release, application and group:
 
 ```jsonc
 "ibmi-member-workspace.changeManagement.checkoutCommand":
-  "MYCHKOUT MBR(&OPENMBR) FROMLIB(&OPENLIB) SRCF(&OPENSPF) TYPE(&EXT) TOLIB(&DEVLIB)"
+  "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(CRETE/IESCORP/BASE)"
 ```
 
 Values are filled in uppercase and unquoted, and only valid IBM i names are used. Any other `&NAME` in the command is refused, so a typo can't reach the IBM i. The setting is read from user settings only, so a workspace can't set a command that runs on your IBM i.
+
+Prefer the change-management command itself to a wrapper program. A failed command is reported with the IBM i's messages, but a wrapper whose `MONMSG` swallows an error makes a failed checkout look successful. If you do call a program, quote its parameters (`CALL PGM(MYLIB/MYCHKOUT) PARM('&OPENSPF' '&OPENMBR' '&PROJECT')`): an unquoted value starting with a digit is passed as a number, not as characters.
 
 Dependencies whose source can't be found are listed afterwards, and in the output panel with the line that refers to them. Common reasons: the source is in a library that wasn't searched, the name is only known at run time (`CALL PGM(&PGM)`), or the copybook is an IFS file.
 

@@ -105,6 +105,11 @@ export async function uploadMemberContent(
   return getContent().uploadMemberContent(library, sourceFile, member, fileContent);
 }
 
+/** The user profile Code for IBM i is connected with. */
+export function connectedUser(): string | undefined {
+  return getConnection()?.currentUser || undefined;
+}
+
 /** Whether the current Code for IBM i connection refuses writes to the IBM i. */
 export function isConnectionReadOnly(): boolean {
   return getConnection()?.getConfig().readOnlyMode === true;

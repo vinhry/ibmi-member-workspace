@@ -14,10 +14,28 @@ export interface ChangeMember {
   extension: string;
 }
 
-/** Placeholders a template may use, named as in Code for IBM i actions, plus &DEVLIB. */
-export const CHECKOUT_COMMAND_PLACEHOLDERS = ["OPENLIB", "OPENSPF", "OPENMBR", "EXT", "DEVLIB"] as const;
+/**
+ * Placeholders a template may use: the member's, named as in Code for IBM i actions, plus &DEVLIB
+ * and &PROJECT (asked when the command runs) and &USER (the connection's user profile).
+ */
+export const CHECKOUT_COMMAND_PLACEHOLDERS = ["OPENLIB", "OPENSPF", "OPENMBR", "EXT", "DEVLIB", "PROJECT", "USER"] as const;
 
 const PLACEHOLDER = /&([A-Z][A-Z0-9_]*)/gi;
+
+/** An IBM i name, as `memberNameProblem` checks them: nothing that could end a parameter or quote. */
+const IBMI_NAME = /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/i;
+
+/** Whether `template` uses the placeholder `name` (for example "PROJECT"), in any case. */
+export function usesPlaceholder(template: string, name: string): boolean {
+  return [...template.matchAll(PLACEHOLDER)].some((match) => match[1].toUpperCase() === name.toUpperCase());
+}
+
+/** Why a project number or user profile can't go in a command, or undefined when it can. */
+export function nameValueProblem(label: string, value: string): string | undefined {
+  return IBMI_NAME.test(value)
+    ? undefined
+    : `"${value}" is not a valid ${label}: use up to 10 letters, digits, _, $, # or @.`;
+}
 
 /** Why a template can't be used, or undefined when it can. */
 export function checkoutTemplateProblem(template: string): string | undefined {
@@ -36,12 +54,26 @@ export function checkoutTemplateProblem(template: string): string | undefined {
 
 /**
  * The template with the member's names filled in: uppercase and unquoted, since they are IBM i
- * system names. Names that aren't valid system names are refused rather than put in a command.
+ * system names. Names that aren't valid system names are refused rather than put in a command, as
+ * are a project or user the template uses but that is missing or not a valid name.
  */
-export function expandCheckoutCommand(template: string, member: ChangeMember, devLibrary: string): string {
+export function expandCheckoutCommand(
+  template: string,
+  member: ChangeMember,
+  devLibrary: string,
+  { project, user }: { project?: string; user?: string } = {}
+): string {
+  const needed = (name: string, label: string, value: string | undefined) =>
+    !usesPlaceholder(template, name)
+      ? undefined
+      : value === undefined || value === ""
+        ? `The command uses &${name}, but no ${label} is known.`
+        : nameValueProblem(label, value);
   const problem = checkoutTemplateProblem(template) ??
     memberNameProblem(member) ??
-    memberNameProblem({ ...member, library: devLibrary });
+    memberNameProblem({ ...member, library: devLibrary }) ??
+    needed("PROJECT", "project", project) ??
+    needed("USER", "user profile", user);
   if (problem) {
     throw new Error(problem);
   }
@@ -51,6 +83,8 @@ export function expandCheckoutCommand(template: string, member: ChangeMember, de
     OPENMBR: member.memberName,
     EXT: member.extension,
     DEVLIB: devLibrary,
+    PROJECT: project ?? "",
+    USER: user ?? "",
   };
   return template
     .trim()
@@ -60,9 +94,13 @@ export function expandCheckoutCommand(template: string, member: ChangeMember, de
 export interface ChangeCheckoutDeps {
   /** Asks for the development library; undefined when cancelled. */
   askDevLibrary(): Promise<string | undefined>;
+  /** Asks for the change-management project (&PROJECT), only when the template uses it; undefined when cancelled. */
+  askProject(): Promise<string | undefined>;
   /** Shows the exact commands and asks to run them. */
-  confirm(commands: string[], devLibrary: string): Promise<boolean>;
+  confirm(commands: string[], devLibrary: string, project?: string): Promise<boolean>;
   connectedSystem(): string | undefined;
+  /** The connection's user profile, for &USER. */
+  currentUser(): string | undefined;
   /** Runs one CL command on the IBM i; throws with the IBM i's message when it fails. */
   runCommand(command: string): Promise<void>;
   log(message: string): void;
@@ -101,12 +139,23 @@ export async function runChangeManagementCheckout(
     return undefined;
   }
   const devLibrary = answer;
-  const planned = members.map((member) => ({ member, command: expandCheckoutCommand(template, member, devLibrary) }));
+  let project: string | undefined;
+  if (usesPlaceholder(template, "PROJECT")) {
+    project = (await deps.askProject())?.trim().toUpperCase();
+    if (!project) {
+      return undefined;
+    }
+  }
+  const user = usesPlaceholder(template, "USER") ? deps.currentUser()?.trim().toUpperCase() : undefined;
+  const planned = members.map((member) => ({
+    member,
+    command: expandCheckoutCommand(template, member, devLibrary, { project, user }),
+  }));
   const refused = refusal(deps.connectedSystem(), system);
   if (refused) {
     throw new Error(refused);
   }
-  if (!(await deps.confirm(planned.map(({ command }) => command), devLibrary))) {
+  if (!(await deps.confirm(planned.map(({ command }) => command), devLibrary, project))) {
     return undefined;
   }
 

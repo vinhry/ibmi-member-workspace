@@ -42,10 +42,10 @@ Find Dependencies and Find All Dependencies read COBOL members (`cblle`, `sqlcbl
 - The expanded commands are shown in a modal and run only on **Run**. They run through `runClCommand` (`src/codeForIBMi.ts`, `runCommand` with the ILE environment), and a failure carries the last job messages.
 - A different connected system refuses the run before confirming, and each remaining member after it.
 - **Check Out from DEVLIB** checks out `DEVLIB/<same file>(<same member>)` through `checkoutMembersBatch` as editable checkouts.
-- TODO: your shop's actual Rocket LMI command and parameters. The README example uses a placeholder command.
+- Since 1.7.14: `&PROJECT` is asked after the development library, only when the template uses it, pre-filled from `workspaceState` (`changeManagement.lastProject`, saved on Run). `&USER` is the connection's `currentUser`. Both must be IBM i names (`nameValueProblem`); a template using `&USER` with no known user is refused. The shop's command is Rocket LMI's `ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(group/app/release)`, called directly rather than through its wrapper `UT0179BC`, whose `MONMSG CMS9913` would hide a failure.
 
 **Validation**
-- `src/test/changeManagement.test.ts`: every placeholder, case and repeats, names with `$#@`, invalid names, unknown placeholders, a declined confirmation or a missing library runs nothing, one failure among three, a system refusal before and during the run.
+- `src/test/changeManagement.test.ts`: the ACMSCHKOUT example expands exactly; &PROJECT asked only when used and cancelling runs nothing; invalid project or user refused; every placeholder, case and repeats, names with `$#@`, invalid names, unknown placeholders, a declined confirmation or a missing library runs nothing, one failure among three, a system refusal before and during the run.
 - `manifest.test.ts` asserts the setting is application-scoped.
 - README "Running Your Change-Management Checkout".
 
