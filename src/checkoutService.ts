@@ -53,6 +53,7 @@ import { assertNoLinkBelow } from "./localPath";
 import { GitIntegrationState, gitIntegrationState } from "./workspaceSettings";
 import { CheckoutIndexStore, IndexStorage } from "./checkoutIndexStore";
 import { SourceLayout, SourceProblem, describeProblem, sourceProblems, summarizeProblems } from "./sourceCheck";
+import { describeDuration, withDeadline } from "./deadline";
 import { RefreshPlan, groupBySourceFile, planRefresh } from "./remoteStamps";
 
 /** workspaceState key: the user turned on Local Change History in this workspace. */
@@ -64,6 +65,17 @@ const GIT_INTEGRATION_CONFIRMED = "gitIntegrationConfirmed";
  * characters its CCSID can't store.
  */
 export type UploadResult = "uploaded" | "uploaded-altered" | "failed" | "remote-changed" | "source-problems";
+
+/**
+ * How long a download from the IBM i may take. Code for IBM i rejects a pending request only when
+ * the connection closes, so without a limit a request that never answers holds the checkout (and
+ * everything waiting for it) until the user disconnects.
+ */
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+/** How long the source file layout lookup may take; without it, the checks before upload are skipped. */
+const LAYOUT_TIMEOUT_MS = 15_000;
+/** A wait longer than this is logged, so the output panel shows what a slow checkout waits for. */
+const SLOW_WAIT_MS = 10_000;
 
 /** Problems listed in the output panel per member; the editor shows them all. */
 const LOGGED_PROBLEMS = 10;
@@ -87,6 +99,8 @@ export interface CheckoutOptions {
   reference?: boolean;
   /** The system the caller expects; the checkout is refused if another one is connected. */
   system?: string;
+  /** Cancels the checkout, also while it waits for the IBM i; nothing is written then. */
+  signal?: AbortSignal;
 }
 
 export class CheckoutService implements vscode.Disposable {
@@ -880,6 +894,7 @@ export class CheckoutService implements vscode.Disposable {
       deferCheckpointTo,
       reference = false,
       system: expectedSystem,
+      signal,
     } = options ?? {};
     const checkoutRoot = this.getCheckoutRoot();
     if (!checkoutRoot) {
@@ -959,13 +974,13 @@ export class CheckoutService implements vscode.Disposable {
 
     // The prompts above leave time to connect elsewhere; this checkout belongs to `system`.
     this.assertConnectedTo(system);
-    const content = await downloadMemberContent(
-      library,
-      sourceFile,
-      memberName
-    );
+    const content = await this.download(library, sourceFile, memberName, signal);
 
     const sourceLayout = await this.lookupSourceLayout(system, library, sourceFile) ?? existing?.sourceLayout;
+    // A cancel during the lookup: nothing has been written yet, and nothing will be.
+    if (signal?.aborted) {
+      throw new CheckoutCancelledError();
+    }
     const entry: CheckedOutMember = {
       id: buildCheckoutId(system, library, sourceFile, memberName),
       system,
@@ -1053,11 +1068,7 @@ export class CheckoutService implements vscode.Disposable {
     await this.assertEntryInActiveWorkItem(entry);
     const localUri = vscode.Uri.file(entry.localPath);
 
-    const remoteContent = await downloadMemberContent(
-      entry.library,
-      entry.sourceFile,
-      entry.memberName
-    );
+    const remoteContent = await this.download(entry.library, entry.sourceFile, entry.memberName);
     const localContent = await this.readLocal(localUri);
     this.upgradeBaseline(entry, [remoteContent, localContent]);
     const remoteHash = hashContent(remoteContent);
@@ -1140,11 +1151,7 @@ export class CheckoutService implements vscode.Disposable {
   private async recheckoutNow(entry: CheckedOutMember): Promise<void> {
     this.assertConnectedTo(entry.system);
     await this.assertEntryInActiveWorkItem(entry);
-    const content = await downloadMemberContent(
-      entry.library,
-      entry.sourceFile,
-      entry.memberName
-    );
+    const content = await this.download(entry.library, entry.sourceFile, entry.memberName);
     const localUri = vscode.Uri.file(entry.localPath);
     this.assertLocalPathSafe(entry.localPath);
 
@@ -1212,11 +1219,7 @@ export class CheckoutService implements vscode.Disposable {
     }
 
     if (!options?.overwriteRemoteChanges) {
-      const remoteContent = await downloadMemberContent(
-        entry.library,
-        entry.sourceFile,
-        entry.memberName
-      );
+      const remoteContent = await this.download(entry.library, entry.sourceFile, entry.memberName);
       this.upgradeBaseline(entry, [remoteContent, localContent]);
       const remoteHash = hashContent(remoteContent);
       this.adoptNextBaseline(entry, localHash, remoteHash);
@@ -1254,11 +1257,7 @@ export class CheckoutService implements vscode.Disposable {
 
     let after = statusAfterUpload(localHash, localHash);
     try {
-      const storedContent = await downloadMemberContent(
-        entry.library,
-        entry.sourceFile,
-        entry.memberName
-      );
+      const storedContent = await this.download(entry.library, entry.sourceFile, entry.memberName);
       after = statusAfterUpload(localHash, hashContent(storedContent));
     } catch (err) {
       this.log.appendLine(
@@ -1470,12 +1469,41 @@ export class CheckoutService implements vscode.Disposable {
     return layout !== undefined;
   }
 
+  /**
+   * Downloads a member, giving up after {@link DOWNLOAD_TIMEOUT_MS} or when `signal` aborts (as a
+   * cancelled checkout). Code for IBM i's request may still finish later; its result is ignored.
+   */
+  private download(library: string, sourceFile: string, member: string, signal?: AbortSignal): Promise<string> {
+    const what = `downloading ${library}/${sourceFile}(${member})`;
+    const started = Date.now();
+    return withDeadline(downloadMemberContent(library, sourceFile, member), {
+      ms: DOWNLOAD_TIMEOUT_MS,
+      what,
+      signal,
+      cancelled: () => new CheckoutCancelledError(),
+      slowMs: SLOW_WAIT_MS,
+      onSlow: () => this.log.appendLine(
+        `[ibmi] Still waiting for the IBM i after ${describeDuration(SLOW_WAIT_MS)} while ${what}; ` +
+        `giving up after ${describeDuration(DOWNLOAD_TIMEOUT_MS)}.`
+      ),
+    }).then((content) => {
+      const elapsed = Date.now() - started;
+      if (elapsed >= SLOW_WAIT_MS) {
+        this.log.appendLine(`[ibmi] Finished ${what} after ${Math.round(elapsed / 1000)} seconds.`);
+      }
+      return content;
+    });
+  }
+
   /** The layout of a source file of the connected `system`, read once per connection. A failed read isn't kept. */
   private lookupSourceLayout(system: string, library: string, sourceFile: string): Promise<SourceLayout | undefined> {
     const key = `${systemKey(system)}/${library.toUpperCase()}/${sourceFile.toUpperCase()}`;
     let layout = this.sourceLayouts.get(key);
     if (!layout) {
-      layout = sourceFileLayout(library, sourceFile).catch((err) => {
+      layout = withDeadline(sourceFileLayout(library, sourceFile), {
+        ms: LAYOUT_TIMEOUT_MS,
+        what: `reading the line length and CCSID of ${library}/${sourceFile}`,
+      }).catch((err) => {
         this.sourceLayouts.delete(key);
         this.log.appendLine(
           `[check] Could not read the line length and CCSID of ${library}/${sourceFile}; its members aren't checked before upload: ${errorMessage(err)}`

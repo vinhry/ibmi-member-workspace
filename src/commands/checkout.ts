@@ -50,13 +50,31 @@ export function registerCheckoutCommands(ctx: CommandContext): void {
             if (system && !(await ensureWorkItemForCheckout(ctx, system))) {
               return;
             }
-            const entry = await service.checkoutMember(
+            const checkOut = (signal?: AbortSignal) => service.checkoutMember(
               memberInfo.library,
               memberInfo.sourceFile,
               memberInfo.memberName,
               memberInfo.extension,
-              system ? { system } : undefined
+              { ...(system ? { system } : {}), ...(signal ? { signal } : {}) }
             );
+            // A member already checked out first asks what to do, so its prompt never hides behind a progress.
+            const existing = system
+              ? service.findEntry(system, memberInfo.library, memberInfo.sourceFile, memberInfo.memberName)
+              : undefined;
+            const entry = existing
+              ? await checkOut()
+              : await vscode.window.withProgress(
+                {
+                  location: vscode.ProgressLocation.Notification,
+                  title: `Checking out ${memberInfo.memberName}...`,
+                  cancellable: true,
+                },
+                (_progress, token) => {
+                  const controller = new AbortController();
+                  const subscription = token.onCancellationRequested(() => controller.abort());
+                  return checkOut(controller.signal).finally(() => subscription.dispose());
+                }
+              );
             void suggestDependencies(ctx, entry);
           } catch (err) {
             if (!(err instanceof CheckoutCancelledError)) {
@@ -231,6 +249,9 @@ export async function checkoutMembersBatch(
       let errors = 0;
       let cancelled = false;
       const downloaded: string[] = [];
+      // Cancel also stops the member being waited for, not only the ones after it.
+      const controller = new AbortController();
+      const subscription = token.onCancellationRequested(() => controller.abort());
 
       await service.runBatch(async () => {
         for (let i = 0; i < memberInfoList.length; i++) {
@@ -243,16 +264,19 @@ export async function checkoutMembersBatch(
           try {
             await service.checkoutMember(
               m.library, m.sourceFile, m.memberName, m.extension,
-              { redownloadBehavior, suppressAutoOpen: true, discardLocalChanges, deferCheckpointTo: downloaded, reference, system }
+              { redownloadBehavior, suppressAutoOpen: true, discardLocalChanges, deferCheckpointTo: downloaded, reference, system, signal: controller.signal }
             );
             succeeded++;
           } catch (err) {
-            if (!(err instanceof CheckoutCancelledError)) {
+            if (err instanceof CheckoutCancelledError) {
+              cancelled ||= token.isCancellationRequested;
+            } else {
               errors++;
               log.appendLine(`[checkout] Error for ${m.memberName}: ${errorMessage(err)}`);
             }
           }
         }
+        subscription.dispose();
         // One checkpoint for the whole batch, including members downloaded before a cancel.
         await service.saveBatchCheckpoint(
           system,

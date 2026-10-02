@@ -30,6 +30,8 @@ Right-click a member in the Code for IBM i Object Browser and choose **Check Out
 
 Select multiple members (Ctrl/Shift-click) before checking out, and they're all downloaded together — if any are already checked out, you're asked once whether to re-download or skip them.
 
+A checkout shows its progress and can be cancelled at any time; cancelling writes nothing for the member being downloaded. If the IBM i doesn't answer a download within 2 minutes, the checkout of that member stops with a message instead of waiting until you disconnect. The output panel notes any wait longer than 10 seconds.
+
 ### Check Out All Members
 
 Right-click a **source file** (one level above members) and choose **Check Out All Members** to pull down every member it contains in one go. Since this can mean a lot of members, a confirmation dialog warns that it may take a while before starting.

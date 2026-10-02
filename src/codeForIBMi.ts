@@ -8,6 +8,7 @@ import {
   objectKey,
 } from "./dependencySources";
 import { commandFailureMessages } from "./changeManagement";
+import { TimedOutError, withDeadline } from "./deadline";
 import { changeStamp } from "./remoteStamps";
 import { SourceLayout, layoutFromColumn } from "./sourceCheck";
 import { CheckedOutMember, buildLocalFileName } from "./types";
@@ -245,12 +246,30 @@ function requireConnection(): IBMi {
  * Runs a CL command in the connection's ILE environment (its library list applies). Throws with
  * all its messages (the cause first, see `commandFailureMessages`) when the command fails.
  */
+/** How long a CL command such as a change-management checkout may run before the extension stops waiting. */
+const COMMAND_TIMEOUT_MS = 5 * 60_000;
+
 export async function runClCommand(command: string): Promise<void> {
   const connection = requireConnection();
   // The IBM i's clock, to read only the job log messages this command adds.
   const [started] = await connection.runSQL("VALUES VARCHAR(CURRENT TIMESTAMP)").catch(() => []);
   const since = started ? String(Object.values(started)[0] ?? "") : "";
-  const result = await connection.runCommand({ command, environment: "ile" });
+  let result: Awaited<ReturnType<typeof connection.runCommand>>;
+  try {
+    result = await withDeadline(connection.runCommand({ command, environment: "ile" }), {
+      ms: COMMAND_TIMEOUT_MS,
+      what: `running ${command.split(/\s/)[0]}`,
+    });
+  } catch (err) {
+    if (err instanceof TimedOutError) {
+      throw new Error(
+        `${err.message} The command may be waiting for a reply on the IBM i: look for its job in MSGW status (WRKACTJOB), ` +
+        "answer or end it, then reconnect.",
+        { cause: err }
+      );
+    }
+    throw err;
+  }
   if (result.code !== 0) {
     const messages = commandFailureMessages(
       [await jobLogSince(since), result.stderr, result.stdout].filter(Boolean).join("\n")

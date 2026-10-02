@@ -165,3 +165,15 @@ Users found a program on the IBM i, checked it out with LMI, then found the deve
 - `src/test/memberSearch.test.ts`: pattern checks, normalizing, ordering and dedupe.
 - `manifest.test.ts`: commands match their registrations.
 - README "Running Your Change-Management Checkout".
+
+### 11. Checkouts can't hang (shipped in 1.8.0)
+
+A checkout could wait forever on an IBM i request that never answered; Code for IBM i rejects pending requests only when the connection closes, and Cancel was only checked between members.
+
+- `withDeadline` (`src/deadline.ts`, vscode-free): settles like the promise, or rejects with `TimedOutError` after `ms`, or with the caller's error when the signal aborts; reports a slow wait once; clears its timers.
+- `CheckoutService.download`: every download (checkout, refresh, re-checkout, the upload's remote check and read-back) gives up after 2 minutes; a wait over 10 seconds is logged. The source layout lookup gives up after 15 seconds (checks skipped, not fatal). The upload write itself has no limit.
+- `CheckoutOptions.signal`: the batch checkout aborts it from Cancel, so the member being waited for stops too and nothing is written. A single checkout of a member not yet checked out runs in a cancellable progress.
+- `runClCommand` stops waiting after 5 minutes, with a hint about jobs in MSGW.
+
+**Validation**
+- `src/test/deadline.test.ts`: in time, rejected, timed out, cancelled before and during, slow reported once, no timer left.
