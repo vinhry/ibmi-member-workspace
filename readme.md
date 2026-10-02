@@ -216,7 +216,11 @@ A list shows what was found, grouped into copybooks, called programs, referenced
 
 Set `ibmi-member-workspace.changeManagement.checkoutCommand` in your user settings to the CL command that checks a member out in your change-management system. Then you can find a program and check it out for change without leaving VS Code or IBM Bob:
 
-- **Find Member…** (the search button in the Checked Out Members title bar, or the Command Palette): type a member or program name, with `*` for any characters (`VU0005CC`, `ORD*`). It searches the libraries of your search scope (see **Finding the source**; the library button in the list's title bar searches elsewhere, for example your production source libraries or all user libraries). For a program whose source member has another name, the member it was compiled from is offered too. When nothing has that name, you can search member text instead. Choose the members, then **Check Out Through Change Management…**, **Bring for Reference**, or **Check Out for Change Here** (for members already in your development library).
+- **Find Member**, the panel below Checked Out Members: click **Find Member…** (the search button in its title bar or in Checked Out Members', or the Command Palette) and type a member or program name, with `*` for any characters (`VU0005CC`, `ORD*`).
+  - It searches the libraries of your search scope (see **Finding the source**). **Search in Other Libraries…** in its title bar runs the search again elsewhere, for example in your production source libraries or all user libraries.
+  - For a program whose source member has another name, the member it was compiled from is found too. When nothing has the name, the panel offers to search member text or all user libraries.
+  - The results stay in the panel, marked when already checked out, so you can act on them one after another. Click one to read it. Right-click one or more for **Check Out Through Change Management…** (also the button on each result), **Bring for Reference**, or **Check Out for Change Here** (for members already in your development library).
+  - **Recent Searches** keeps your last 20 searches in this workspace: click one to search again.
 - **Check Out Through Change Management…** is also on the right-click menu of members in the Code for IBM i Object Browser (including protected filters) and of checkouts in Checked Out Members, for example a production reference copy you found with Find Dependencies.
 - **I Need to Change Some…** in the Find Dependencies list does the same for dependencies.
 
@@ -372,7 +376,7 @@ Right-click a checkout for comparison tools: **Select for Compare** (mark one ch
 - **Run Action** — trigger Code for IBM i's local source actions (compile, deploy, etc.)
 - **Reveal in File Explorer** — show the local file in your OS file manager
 - **Copy Member Path** — copy `LIBRARY/SOURCEFILE(MEMBER)` to the clipboard
-- **Find Member…** — search source members by name (or a program's source, or member text) and check them out (see **Running Your Change-Management Checkout**)
+- **Find Member** panel — search source members by name (or a program's source, or member text), keep the results and recent searches, and check members out (see **Running Your Change-Management Checkout**)
 - **Discard Checkout** — delete the local file and stop tracking it (with confirmation)
 
 ### Multi-Select

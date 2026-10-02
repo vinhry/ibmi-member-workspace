@@ -87,6 +87,13 @@
           "when": "code-for-ibmi:connected",
           "icon": "resources/checkout.svg",
           "initialSize": 5
+        },
+        {
+          "id": "ibmi-member-workspace.findMemberView",
+          "name": "Find Member",
+          "when": "code-for-ibmi:connected",
+          "icon": "resources/checkout.svg",
+          "initialSize": 3
         }
       ]
     },
@@ -120,6 +127,10 @@
         "view": "ibmi-member-workspace.checkoutView",
         "contents": "No members are checked out yet.\nRight-click a source member (or a source file) in the Code for IBM i Object Browser and choose Check Out.",
         "when": "ibmi-member-workspace:checkoutFolderConfigured"
+      },
+      {
+        "view": "ibmi-member-workspace.findMemberView",
+        "contents": "Search source members by name, the source of a program, or member text, then check them out through your change-management system, bring them as read-only reference copies, or check them out for change.\n[Find Member…](command:ibmi-member-workspace.findMember)"
       }
     ],
     "commands": [
@@ -152,6 +163,46 @@
       {
         "command": "ibmi-member-workspace.checkoutThroughChangeManagement",
         "title": "Check Out Through Change Management…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "ibmi-member-workspace.findMember.rerun",
+        "title": "Search Again",
+        "category": "IBM i Member Workspace",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ibmi-member-workspace.findMember.searchOtherLibraries",
+        "title": "Search in Other Libraries…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(library)"
+      },
+      {
+        "command": "ibmi-member-workspace.findMember.clearResults",
+        "title": "Clear Results",
+        "category": "IBM i Member Workspace",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "ibmi-member-workspace.findMember.clearHistory",
+        "title": "Clear Search History",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.findMember.removeFromHistory",
+        "title": "Remove from History",
+        "category": "IBM i Member Workspace",
+        "icon": "$(close)"
+      },
+      {
+        "command": "ibmi-member-workspace.findMember.bringForReference",
+        "title": "Bring for Reference",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.findMember.checkoutForChange",
+        "title": "Check Out for Change Here",
         "category": "IBM i Member Workspace"
       },
       {
@@ -455,6 +506,34 @@
           "when": "false"
         },
         {
+          "command": "ibmi-member-workspace.findMember.rerun",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.searchOtherLibraries",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.clearResults",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.clearHistory",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.removeFromHistory",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.bringForReference",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.checkoutForChange",
+          "when": "false"
+        },
+        {
           "command": "ibmi-member-workspace.checkoutAllMembers",
           "when": "false"
         },
@@ -700,6 +779,41 @@
           "command": "ibmi-member-workspace.refreshSourceFileRemote",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem == sourceFileGroup",
           "group": "1_status@1"
+        },
+        {
+          "command": "ibmi-member-workspace.checkoutThroughChangeManagement",
+          "when": "view == ibmi-member-workspace.findMemberView && viewItem == foundMember",
+          "group": "inline"
+        },
+        {
+          "command": "ibmi-member-workspace.checkoutThroughChangeManagement",
+          "when": "view == ibmi-member-workspace.findMemberView && viewItem == foundMember",
+          "group": "1_checkout@1"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.bringForReference",
+          "when": "view == ibmi-member-workspace.findMemberView && viewItem == foundMember",
+          "group": "1_checkout@2"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.checkoutForChange",
+          "when": "view == ibmi-member-workspace.findMemberView && viewItem == foundMember",
+          "group": "1_checkout@3"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.removeFromHistory",
+          "when": "view == ibmi-member-workspace.findMemberView && viewItem == searchHistory",
+          "group": "inline"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.removeFromHistory",
+          "when": "view == ibmi-member-workspace.findMemberView && viewItem == searchHistory",
+          "group": "1_history@1"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.clearHistory",
+          "when": "view == ibmi-member-workspace.findMemberView && viewItem == searchHistoryGroup",
+          "group": "1_history@1"
         }
       ],
       "explorer/context": [
@@ -834,6 +948,26 @@
           "command": "ibmi-member-workspace.viewGitHistory",
           "when": "view == ibmi-member-workspace.checkoutView && config.ibmi-member-workspace.gitIntegration",
           "group": "navigation@6"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember",
+          "when": "view == ibmi-member-workspace.findMemberView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.searchOtherLibraries",
+          "when": "view == ibmi-member-workspace.findMemberView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.clearResults",
+          "when": "view == ibmi-member-workspace.findMemberView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember.clearHistory",
+          "when": "view == ibmi-member-workspace.findMemberView",
+          "group": "history@1"
         }
       ],
       "ibmi-member-workspace.agentsInvestigate": [

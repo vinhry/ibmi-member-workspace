@@ -1,6 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { FoundMember, isWildcard, memberPattern, memberPatternProblem, orderFound } from "../memberSearch";
+import {
+  FoundMember,
+  addToHistory,
+  describeSearch,
+  foundMemberInfo,
+  isWildcard,
+  memberPattern,
+  memberPatternProblem,
+  orderFound,
+} from "../memberSearch";
 
 describe("memberPatternProblem", () => {
   it("accepts IBM i names with wildcards", () => {
@@ -47,5 +56,43 @@ describe("orderFound", () => {
       libraries: [],
     });
     assert.equal(ordered.length, 1);
+  });
+});
+
+describe("addToHistory", () => {
+  it("puts the newest search first, moving a repeated one to the top", () => {
+    let history = addToHistory([], { input: "ord*", byText: false });
+    history = addToHistory(history, { input: "VU0005CC", byText: false });
+    history = addToHistory(history, { input: "ORD*", byText: false });
+    assert.deepEqual(history, [{ input: "ORD*", byText: false }, { input: "VU0005CC", byText: false }]);
+  });
+
+  it("keeps a name search, a text search and another scope apart", () => {
+    let history = addToHistory([], { input: "ORDER", byText: false });
+    history = addToHistory(history, { input: "ORDER", byText: true });
+    history = addToHistory(history, { input: "ORDER", byText: false, scope: "everywhere" });
+    assert.equal(history.length, 3);
+  });
+
+  it("keeps at most the limit", () => {
+    let history: ReturnType<typeof addToHistory> = [];
+    for (let i = 0; i < 25; i++) {
+      history = addToHistory(history, { input: `M${i}`, byText: false });
+    }
+    assert.equal(history.length, 20);
+    assert.equal(history[0].input, "M24");
+  });
+});
+
+describe("describeSearch and foundMemberInfo", () => {
+  it("labels a search and turns a found member into a checkout's names", () => {
+    assert.equal(describeSearch({ input: "ord*", byText: false }), "ORD*");
+    assert.equal(describeSearch({ input: "order", byText: true }), 'text "ORDER"');
+    assert.deepEqual(foundMemberInfo({ library: "PROD", sourceFile: "QCLLESRC", member: "SY0204AC", sourceType: "CLLE" }), {
+      library: "PROD",
+      sourceFile: "QCLLESRC",
+      memberName: "SY0204AC",
+      extension: "clle",
+    });
   });
 });

@@ -60,3 +60,38 @@ export function orderFound(
     a.sourceFile.localeCompare(b.sourceFile)
   );
 }
+
+/** One Find Member search, as kept in its history. `scope` is the scope chosen for it, if not the setting's. */
+export interface MemberSearch {
+  input: string;
+  byText: boolean;
+  scope?: "libraryList" | "specific" | "everywhere";
+}
+
+/** Searches kept in Find Member's history. */
+export const MAX_HISTORY = 20;
+
+export function sameSearch(a: MemberSearch, b: MemberSearch): boolean {
+  return memberPattern(a.input) === memberPattern(b.input) && a.byText === b.byText && a.scope === b.scope;
+}
+
+/** The history with `search` first: a search made again moves to the top instead of being listed twice. */
+export function addToHistory(history: readonly MemberSearch[], search: MemberSearch, max = MAX_HISTORY): MemberSearch[] {
+  const entry: MemberSearch = { input: memberPattern(search.input), byText: search.byText, ...(search.scope ? { scope: search.scope } : {}) };
+  return [entry, ...history.filter((past) => !sameSearch(past, entry))].slice(0, max);
+}
+
+/** What a search looks for, for labels: the pattern, or the text searched for. */
+export function describeSearch(search: MemberSearch): string {
+  return search.byText ? `text "${memberPattern(search.input)}"` : memberPattern(search.input);
+}
+
+/** A found member as a checkout takes it; the source type is the local file extension. */
+export function foundMemberInfo(found: FoundMember): { library: string; sourceFile: string; memberName: string; extension: string } {
+  return {
+    library: found.library,
+    sourceFile: found.sourceFile,
+    memberName: found.member,
+    extension: found.sourceType.toLowerCase() || "mbr",
+  };
+}

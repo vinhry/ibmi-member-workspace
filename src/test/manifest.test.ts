@@ -167,7 +167,12 @@ describe("extension manifest", () => {
       };
     };
     const views = manifest.contributes.views["ibmi-member-workspace"].map((view) => view.id);
-    assert.deepEqual(views, ["ibmi-member-workspace.bobView", "ibmi-member-workspace.agentsView", "ibmi-member-workspace.checkoutView"]);
+    assert.deepEqual(views, [
+      "ibmi-member-workspace.bobView",
+      "ibmi-member-workspace.agentsView",
+      "ibmi-member-workspace.checkoutView",
+      "ibmi-member-workspace.findMemberView",
+    ]);
     const [bobView, , checkoutView] = manifest.contributes.views["ibmi-member-workspace"];
     assert.equal(bobView.when, "ibmi-member-workspace:isBobIde");
     // The status needs a few rows: the Bob section starts at its minimum height, not half the side bar.
