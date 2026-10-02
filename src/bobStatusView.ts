@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { BobFolderStatus, bobFolderStatus, bobStatusSummary, readFileBelow } from "./bobIde";
+import { readFileBelow } from "./agentFiles";
+import { BobFolderStatus, bobFolderStatus, bobStatusSummary } from "./bobIde";
 import { getSystemName } from "./codeForIBMi";
 
 /** What the Bob Research Tools view shows, read from `registerBobCommands` each time it redraws. */

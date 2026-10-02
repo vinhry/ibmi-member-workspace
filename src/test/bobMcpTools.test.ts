@@ -319,6 +319,17 @@ describe("research tools", () => {
       assert.equal((await run(20)).read.length, 20);
     });
 
+    it("names the setting of the host it runs in", async () => {
+      const { io } = fakeIo({
+        searchLibraries: () => libraryNames(40),
+        whereUsedSetting: "ibmi-member-workspace.agents.whereUsedMaxLibraries",
+      });
+      const tools = createResearchTools(io);
+      assert.match(tools.find((t) => t.name === "find_where_used")?.description ?? "", /agents\.whereUsedMaxLibraries/);
+      const result = await tool(tools, "find_where_used").call({ object: "ORDENT" }) as WhereUsedResult;
+      assert.match(result.note ?? "", /ibmi-member-workspace\.agents\.whereUsedMaxLibraries/);
+    });
+
     it("keeps the setting within 1 to 25", async () => {
       assert.equal((await run(0)).read.length, 1);
       assert.equal((await run(99)).read.length, MAX_WHERE_USED_LIBRARIES);

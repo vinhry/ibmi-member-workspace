@@ -134,3 +134,19 @@ Refresh downloaded every member's full source, one at a time, and changes made o
 **Validation**
 - `src/test/statusDecorations.test.ts`: each status, reference copies, badge length.
 - README "Status in the Explorer".
+
+### 9. Research tools and Investigate for Claude Code, Codex and GitHub Copilot (shipped in 1.7.13)
+
+In VS Code, the agents of Claude Code (`anthropic.claude-code`), Codex (`openai.chatgpt`) and GitHub Copilot (`github.copilot-chat`, with VS Code's MCP API) get what Bob's agent gets in Bob. Bob's behavior doesn't change.
+
+- Shared pieces: `src/agentFiles.ts` (moved from `bobIde.ts`: link-safe reads and writes, `.git/info/exclude`, rules-file updates, now also after YAML frontmatter, and the generic `mcpServers` JSON merge), `src/commands/researchServer.ts` (token, port, start and stop, tools; key prefix `bob` or `agents`), `src/commands/chatPaste.ts` (Bob's clipboard paste, for any webview chat), `src/commands/investigate.ts` (selections and the Explorer context key), and `buildInvestigatePrompt` with a mention style.
+- `src/agentConfig.ts` (vscode-free): agent detection; Claude's `.mcp.json` entry (`type: "http"`), `.claude/settings.local.json` (`permissions.allow` gets `mcp__ibmi-member-workspace`, `enabledMcpjsonServers` gets the server; both checked against Claude Code's settings schema) and `claude mcp add --scope local` command; Codex's `[mcp_servers.ibmi-member-workspace]` table (`http_headers`, `default_tools_approval_mode = "approve"`), merged by headers outside multi-line strings, keeping the user's `enabled`/timeouts/tool lists and refusing inline or dotted definitions; mention styles (`@path`, `#file:path`, plain path); the prompt link's query (Claude Code reads it with `URLSearchParams`).
+- `src/commands/agents.ts`: connections per agent and folder in `workspaceState`; the server starts only once one exists. Connect refuses to put the token in a committed `.mcp.json` or `.codex/config.toml` (`GitService.isTracked`, run with the safe Git options). Copilot's server is offered by `vscode.lm.registerMcpServerDefinitionProvider` (found at run time; `engines` stays `^1.90.0`) under `contributes.mcpServerDefinitionProviders` id `ibmi-member-workspace.researchTools`, only while connected. VS Code's MCP client (checked in 1.139) sends no `Origin` header and accepts the 405 for its GET stream.
+- Investigate with AI: Claude Code through `<scheme>://anthropic.claude-code/open?prompt=`, Copilot through `workbench.action.chat.open` with `isPartialQuery`, Codex by pasting into `chatgpt.sidebarSecondaryView` or `chatgpt.sidebarView`.
+- Settings `agents.researchTools` (application scope) and `agents.whereUsedMaxLibraries`; the tools name the host's setting (`ResearchIo.whereUsedSetting`).
+
+**Validation**
+- `src/test/agentConfig.test.ts`: detection, rules texts, the Claude files and command, the prompt query round trip, every Codex merge case, status summaries.
+- `src/test/agentFiles.test.ts`: the moved helpers, the frontmatter marker, the JSON merge.
+- `src/test/bobPrompts.test.ts`, `src/test/bobMcpTools.test.ts`, `src/test/manifest.test.ts`: mention styles, the setting the tools name, the view, welcome content, provider id and application scope. Bob's tests pass unchanged.
+- README "Using with Claude Code, Codex and GitHub Copilot".

@@ -173,7 +173,7 @@ export class BobMcpServer {
     const listen = (port: number) => new Promise<http.Server>((resolve, reject) => {
       const server = http.createServer((req, res) => {
         this.handle(req, res).catch((err) => {
-          this.log(`[bob] Request failed: ${err instanceof Error ? err.message : String(err)}`);
+          this.log(`[mcp] Request failed: ${err instanceof Error ? err.message : String(err)}`);
           // Never leave a client waiting for an answer that won't come.
           if (!res.headersSent) {
             res.writeHead(500, { "Content-Type": "application/json" });

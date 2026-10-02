@@ -1,10 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
-  GENERATED_RULES_MARKER,
   MCP_SERVER_NAME,
   bobChatViews,
   bobFolderStatus,
@@ -12,35 +8,11 @@ import {
   bobPasteSteps,
   bobStatusSummary,
   configuredEntry,
-  excludeFromGit,
   isBobProduct,
   mcpServerEntry,
   mergeMcpConfig,
-  readFileBelow,
   refreshedAlwaysAllow,
-  shouldRewriteRules,
-  writeFileBelow,
 } from "../bobIde";
-
-function tempFolder(t: { after: (fn: () => void) => void }): string {
-  const folder = mkdtempSync(join(tmpdir(), "ibmi-member-workspace-bob-"));
-  t.after(() => rmSync(folder, { recursive: true, force: true }));
-  return folder;
-}
-
-/** Creates a link, or skips the test where links need Developer Mode (Windows). */
-function linkOrSkip(t: { skip: (message: string) => void }, target: string, link: string, type: "file" | "dir"): boolean {
-  try {
-    symlinkSync(target, link, type === "dir" ? "junction" : "file");
-    return true;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "EPERM") {
-      t.skip("creating links needs Developer Mode on Windows");
-      return false;
-    }
-    throw err;
-  }
-}
 
 describe("isBobProduct", () => {
   it("recognizes IBM Bob and nothing else", () => {
@@ -274,102 +246,5 @@ describe("bobFocusInputCommand", () => {
   it("finds none when Bob has only commands that may toggle its chat, or among other extensions", () => {
     assert.equal(bobFocusInputCommand(["bob.focus", "bob.SidebarProvider.focus"]), undefined);
     assert.equal(bobFocusInputCommand(["bobcat.focusInput", "other.focusInput"]), undefined);
-  });
-});
-
-describe("shouldRewriteRules", () => {
-  const current = `${GENERATED_RULES_MARKER}\n# Rules\n- new\n`;
-  const previous = ["# Rules\n- old\n"];
-
-  it("leaves a missing or current file alone", () => {
-    assert.equal(shouldRewriteRules(undefined, current, previous), false);
-    assert.equal(shouldRewriteRules(current, current, previous), false);
-    assert.equal(shouldRewriteRules(current.replace(/\n/g, "\r\n"), current, previous), false);
-  });
-
-  it("updates a file it wrote: with the marker, or exactly an earlier text", () => {
-    assert.equal(shouldRewriteRules(`${GENERATED_RULES_MARKER}\n# Rules\n- old\n`, current, previous), true);
-    assert.equal(shouldRewriteRules("# Rules\r\n- old\r\n", current, previous), true);
-  });
-
-  it("leaves a file the user edited alone", () => {
-    assert.equal(shouldRewriteRules("# Rules\n- old\n- mine\n", current, previous), false);
-    assert.equal(shouldRewriteRules(`# Mine\n${GENERATED_RULES_MARKER}\n`, current, previous), false);
-  });
-});
-
-describe("writeFileBelow", () => {
-  it("creates folders and replaces the file", (t) => {
-    const root = tempFolder(t);
-    const target = join(root, ".bob", "mcp.json");
-    writeFileBelow(root, target, "one");
-    writeFileBelow(root, target, "two");
-    assert.equal(readFileSync(target, "utf-8"), "two");
-    assert.equal(readFileBelow(root, target), "two");
-    if (process.platform !== "win32") {
-      assert.equal(statSync(target).mode & 0o777, 0o600);
-    }
-  });
-
-  it("never writes through a linked folder", (t) => {
-    const root = tempFolder(t);
-    const outside = tempFolder(t);
-    if (!linkOrSkip(t, outside, join(root, ".bob"), "dir")) {
-      return;
-    }
-    assert.throws(() => writeFileBelow(root, join(root, ".bob", "mcp.json"), "x"), /link/);
-    assert.equal(existsSync(join(outside, "mcp.json")), false);
-  });
-
-  it("never reads or writes through a linked file", (t) => {
-    const root = tempFolder(t);
-    const outside = join(tempFolder(t), "target.json");
-    writeFileSync(outside, "{}");
-    mkdirSync(join(root, ".bob"));
-    if (!linkOrSkip(t, outside, join(root, ".bob", "mcp.json"), "file")) {
-      return;
-    }
-    assert.throws(() => readFileBelow(root, join(root, ".bob", "mcp.json")), /link/);
-    assert.throws(() => writeFileBelow(root, join(root, ".bob", "mcp.json"), "x"), /link/);
-    assert.equal(readFileSync(outside, "utf-8"), "{}");
-  });
-
-  it("refuses a path outside the root", (t) => {
-    const root = tempFolder(t);
-    assert.throws(() => writeFileBelow(root, join(root, "..", "elsewhere.json"), "x"), /outside/);
-  });
-});
-
-describe("excludeFromGit", () => {
-  it("adds the file to .git/info/exclude once, leaving .gitignore alone", (t) => {
-    const root = tempFolder(t);
-    mkdirSync(join(root, ".git", "info"), { recursive: true });
-    writeFileSync(join(root, ".git", "info", "exclude"), "# existing");
-    assert.equal(excludeFromGit(root, ".bob/mcp.json"), "excluded");
-    assert.equal(excludeFromGit(root, ".bob/mcp.json"), "excluded");
-    assert.equal(readFileSync(join(root, ".git", "info", "exclude"), "utf-8"), "# existing\n/.bob/mcp.json\n");
-    assert.equal(existsSync(join(root, ".gitignore")), false);
-  });
-
-  it("excludes the file of a folder below the top of the repository", (t) => {
-    const root = tempFolder(t);
-    mkdirSync(join(root, ".git"));
-    const folder = join(root, "apps", "ord[1]");
-    mkdirSync(folder, { recursive: true });
-    assert.equal(excludeFromGit(folder, ".bob/mcp.json"), "excluded");
-    assert.equal(readFileSync(join(root, ".git", "info", "exclude"), "utf-8"), "/apps/ord\\[1]/.bob/mcp.json\n");
-  });
-
-  it("reports a folder outside any repository", (t) => {
-    const root = tempFolder(t);
-    assert.equal(excludeFromGit(root, ".bob/mcp.json"), "noRepository");
-  });
-
-  it("leaves a worktree or submodule alone, but says the file isn't excluded", (t) => {
-    const root = tempFolder(t);
-    writeFileSync(join(root, ".git"), "gitdir: /elsewhere");
-    mkdirSync(join(root, "sub"));
-    assert.equal(excludeFromGit(root, ".bob/mcp.json"), "notExcluded");
-    assert.equal(excludeFromGit(join(root, "sub"), ".bob/mcp.json"), "notExcluded");
   });
 });

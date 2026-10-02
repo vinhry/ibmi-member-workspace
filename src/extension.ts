@@ -24,6 +24,7 @@ import { registerDependencyCommands } from "./commands/dependencies";
 import { offerLegacyRepositoryRepair, registerGitCommands } from "./commands/git";
 import { registerAutoUpload } from "./commands/autoUpload";
 import { registerBackgroundRefresh } from "./commands/backgroundRefresh";
+import { registerAgentCommands } from "./commands/agents";
 import { registerBobCommands } from "./commands/bob";
 import { registerSyncCommands } from "./commands/sync";
 import { registerViewCommands } from "./commands/view";
@@ -253,12 +254,14 @@ export async function activate(
   registerSourceDiagnostics(context, service);
   registerBackgroundRefresh(ctx);
 
-  // Bob's agent is the only user of the research tools; VS Code gets neither the server nor its commands.
+  // In IBM Bob, Bob's agent uses the research tools; elsewhere, Claude Code, Codex and GitHub Copilot can.
   const inBob = isBobProduct(vscode.env.appName, vscode.env.uriScheme);
   void vscode.commands.executeCommand("setContext", "ibmi-member-workspace:isBobIde", inBob);
   if (inBob) {
     log.appendLine(`[bob] Running in ${vscode.env.appName}`);
     registerBobCommands(ctx);
+  } else {
+    registerAgentCommands(ctx);
   }
 
   void offerCheckoutFolderSetup(ctx).catch((err) => {

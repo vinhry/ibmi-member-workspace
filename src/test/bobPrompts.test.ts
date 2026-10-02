@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import * as path from "node:path";
-import { MAX_PROMPT_MEMBERS, buildBobPrompt, deepDiveFileName, mentionFor } from "../bobPrompts";
+import { MAX_PROMPT_MEMBERS, buildBobPrompt, buildInvestigatePrompt, deepDiveFileName, mentionFor } from "../bobPrompts";
 
 const root = path.join(path.sep, "work", "project");
 const inside = path.join(root, "checkouts", "PUB400", "PRODSRC", "QRPGLESRC", "ORDENT.SQLRPGLE");
@@ -101,5 +101,18 @@ describe("mentionFor", () => {
       "@/src/ORDENT.RPGLE"
     );
     assert.equal(mentionFor("D:\\other\\X.RPGLE", ["C:\\work\\project"], path.win32), undefined);
+  });
+});
+
+describe("buildInvestigatePrompt", () => {
+  const member = { library: "PRODSRC", sourceFile: "QRPGLESRC", member: "ORDENT", localPath: inside };
+
+  it("names a checked-out file the way the agent reads it", () => {
+    const { text } = buildInvestigatePrompt("explain", [member], [root], { mention: (relative) => `#file:${relative}` });
+    assert.match(text, /^- PRODSRC\/QRPGLESRC\(ORDENT\) #file:checkouts\/PUB400\/PRODSRC\/QRPGLESRC\/ORDENT\.SQLRPGLE$/m);
+  });
+
+  it("asks the same as Bob's prompt, which is the default", () => {
+    assert.deepEqual(buildInvestigatePrompt("deepDive", [member], [root]), buildBobPrompt("deepDive", [member], [root]));
   });
 });

@@ -50,6 +50,10 @@
       {
         "id": "ibmi-member-workspace.bobInvestigate",
         "label": "Bob, Investigate"
+      },
+      {
+        "id": "ibmi-member-workspace.agentsInvestigate",
+        "label": "Investigate with AI"
       }
     ],
     "viewsContainers": {
@@ -67,6 +71,13 @@
           "id": "ibmi-member-workspace.bobView",
           "name": "Bob Research Tools",
           "when": "ibmi-member-workspace:isBobIde",
+          "icon": "resources/checkout.svg",
+          "initialSize": 1
+        },
+        {
+          "id": "ibmi-member-workspace.agentsView",
+          "name": "AI Research Tools",
+          "when": "!ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable",
           "icon": "resources/checkout.svg",
           "initialSize": 1
         },
@@ -89,6 +100,16 @@
         "view": "ibmi-member-workspace.bobView",
         "contents": "The IBM i research tools for Bob are turned off in your user settings.\n[Open Settings](command:workbench.action.openSettings?%5B%22ibmi-member-workspace.bob.researchTools%22%5D)",
         "when": "ibmi-member-workspace:isBobIde && !config.ibmi-member-workspace.bob.researchTools"
+      },
+      {
+        "view": "ibmi-member-workspace.agentsView",
+        "contents": "Let Claude Code, Codex or GitHub Copilot research your IBM i programs: what a program uses, what uses it, file layouts and source. The tools only read the IBM i.\n[Connect an AI Agent](command:ibmi-member-workspace.agents.connect)",
+        "when": "!ibmi-member-workspace:isBobIde && config.ibmi-member-workspace.agents.researchTools"
+      },
+      {
+        "view": "ibmi-member-workspace.agentsView",
+        "contents": "The IBM i research tools for AI agents are turned off in your user settings.\n[Open Settings](command:workbench.action.openSettings?%5B%22ibmi-member-workspace.agents.researchTools%22%5D)",
+        "when": "!ibmi-member-workspace:isBobIde && !config.ibmi-member-workspace.agents.researchTools"
       },
       {
         "view": "ibmi-member-workspace.checkoutView",
@@ -315,6 +336,37 @@
         "command": "ibmi-member-workspace.bob.deepDive",
         "title": "Deep Dive",
         "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.agents.connect",
+        "title": "Connect an AI Agent to IBM i Research Tools",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.agents.disconnect",
+        "title": "Disconnect an AI Agent from IBM i Research Tools",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.agents.refreshStatus",
+        "title": "Refresh AI Research Tools Status",
+        "category": "IBM i Member Workspace",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ibmi-member-workspace.agents.analyzeRelationships",
+        "title": "Analyze Relationships",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.agents.explainProgram",
+        "title": "Explain Program",
+        "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.agents.deepDive",
+        "title": "Deep Dive",
+        "category": "IBM i Member Workspace"
       }
     ],
     "menus": {
@@ -346,6 +398,30 @@
         {
           "command": "ibmi-member-workspace.bob.disconnectResearchTools",
           "when": "ibmi-member-workspace:isBobIde"
+        },
+        {
+          "command": "ibmi-member-workspace.agents.analyzeRelationships",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.agents.explainProgram",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.agents.deepDive",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.agents.refreshStatus",
+          "when": "false"
+        },
+        {
+          "command": "ibmi-member-workspace.agents.connect",
+          "when": "!ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable"
+        },
+        {
+          "command": "ibmi-member-workspace.agents.disconnect",
+          "when": "!ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable"
         },
         {
           "command": "ibmi-member-workspace.checkoutMember",
@@ -467,13 +543,28 @@
           "group": "bob@1"
         },
         {
+          "command": "ibmi-member-workspace.agents.disconnect",
+          "when": "view == ibmi-member-workspace.agentsView && viewItem == agentConnection && !ibmi-member-workspace:isBobIde",
+          "group": "agents@1"
+        },
+        {
           "submenu": "ibmi-member-workspace.bobInvestigate",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && ibmi-member-workspace:isBobIde",
           "group": "0_bob@1"
         },
         {
+          "submenu": "ibmi-member-workspace.agentsInvestigate",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable",
+          "group": "0_bob@1"
+        },
+        {
           "submenu": "ibmi-member-workspace.bobInvestigate",
           "when": "view == objectBrowser && viewItem =~ /^member/ && ibmi-member-workspace:isBobIde",
+          "group": "ibmiCheckout@2"
+        },
+        {
+          "submenu": "ibmi-member-workspace.agentsInvestigate",
+          "when": "view == objectBrowser && viewItem =~ /^member/ && !ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable",
           "group": "ibmiCheckout@2"
         },
         {
@@ -587,6 +678,11 @@
           "submenu": "ibmi-member-workspace.bobInvestigate",
           "when": "ibmi-member-workspace:isBobIde && resourcePath in ibmi-member-workspace:checkoutPaths",
           "group": "0_bob@1"
+        },
+        {
+          "submenu": "ibmi-member-workspace.agentsInvestigate",
+          "when": "!ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable && resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "0_bob@1"
         }
       ],
       "ibmi-member-workspace.bobInvestigate": [
@@ -646,6 +742,21 @@
           "group": "bob@2"
         },
         {
+          "command": "ibmi-member-workspace.agents.refreshStatus",
+          "when": "view == ibmi-member-workspace.agentsView && !ibmi-member-workspace:isBobIde",
+          "group": "navigation@0"
+        },
+        {
+          "command": "ibmi-member-workspace.agents.connect",
+          "when": "view == ibmi-member-workspace.agentsView && !ibmi-member-workspace:isBobIde",
+          "group": "agents@1"
+        },
+        {
+          "command": "ibmi-member-workspace.agents.disconnect",
+          "when": "view == ibmi-member-workspace.agentsView && !ibmi-member-workspace:isBobIde",
+          "group": "agents@2"
+        },
+        {
           "command": "ibmi-member-workspace.configureCheckoutFolder",
           "when": "view == ibmi-member-workspace.checkoutView",
           "group": "navigation@0"
@@ -689,6 +800,23 @@
           "command": "ibmi-member-workspace.viewGitHistory",
           "when": "view == ibmi-member-workspace.checkoutView && config.ibmi-member-workspace.gitIntegration",
           "group": "navigation@6"
+        }
+      ],
+      "ibmi-member-workspace.agentsInvestigate": [
+        {
+          "command": "ibmi-member-workspace.agents.analyzeRelationships",
+          "when": "!ibmi-member-workspace:isBobIde",
+          "group": "agents@1"
+        },
+        {
+          "command": "ibmi-member-workspace.agents.explainProgram",
+          "when": "!ibmi-member-workspace:isBobIde",
+          "group": "agents@2"
+        },
+        {
+          "command": "ibmi-member-workspace.agents.deepDive",
+          "when": "!ibmi-member-workspace:isBobIde",
+          "group": "agents@3"
         }
       ]
     },
@@ -757,6 +885,19 @@
           "minimum": 1,
           "maximum": 25,
           "markdownDescription": "**IBM Bob only.** How many search libraries Bob's `find_where_used` tool reads when Bob doesn't name any, from 1 to 25. Each library runs `DSPPGMREF` over every program in it, one library after another, so more libraries take longer. Bob stops waiting for a tool after its MCP network timeout (1 minute by default): raise that in Bob's MCP settings when you use a large value."
+        },
+        "ibmi-member-workspace.agents.researchTools": {
+          "type": "boolean",
+          "scope": "application",
+          "default": true,
+          "markdownDescription": "**VS Code only.** Let Claude Code, Codex or GitHub Copilot use IBM i research tools: what a program uses, what uses it, file layouts and source, through a local MCP server that only this computer can reach. Nothing runs until you connect an agent with **Connect an AI Agent to IBM i Research Tools**. Members an agent looks at are brought as read-only reference copies. Only user settings are read, so a workspace can't turn it on."
+        },
+        "ibmi-member-workspace.agents.whereUsedMaxLibraries": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 25,
+          "markdownDescription": "**VS Code only.** How many search libraries the `find_where_used` research tool reads when the agent doesn't name any, from 1 to 25. Each library runs `DSPPGMREF` over every program in it, one library after another, so more libraries take longer."
         },
         "ibmi-member-workspace.dependencies.suggestAfterCheckout": {
           "type": "boolean",
@@ -872,7 +1013,13 @@
           "markdownDescription": "Cross-reference tools to ask in **Find Dependencies**, such as Abstract, Pathfinder or MDXREF. Each entry is a SQL `SELECT` against the tool's files; see **Dependencies** in the README for the columns and an example. Only user settings are read, so a workspace can't add queries."
         }
       }
-    }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "ibmi-member-workspace.researchTools",
+        "label": "IBM i Member Workspace"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

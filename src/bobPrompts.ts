@@ -1,9 +1,9 @@
 import * as path from "node:path";
 
 /**
- * Ready-made prompts for Bob's chat, offered from the "Bob, Investigate" right-click menu.
- * They ask Bob to use the research tools (`bobMcpTools.ts`) and never to change a file.
- * Kept free of the `vscode` module so it can be unit tested.
+ * Ready-made prompts for an agent's chat, offered from the "Bob, Investigate" right-click menu in
+ * IBM Bob and "Investigate with AI" in VS Code. They ask the agent to use the research tools
+ * (`bobMcpTools.ts`) and never to change a file. Kept free of the `vscode` module so it can be unit tested.
  */
 
 export type BobPromptKind = "relationships" | "explain" | "deepDive";
@@ -35,17 +35,26 @@ export function deepDiveFileName(member: string): string {
 }
 
 /**
+ * The path of a file inside one of `workspaceRoots`, relative to it and with "/"; undefined for a
+ * file outside them (the tools read it instead).
+ */
+export function workspaceRelativePath(localPath: string, workspaceRoots: readonly string[], pathApi = path): string | undefined {
+  for (const root of workspaceRoots) {
+    const relative = pathApi.relative(root, localPath);
+    if (relative && !relative.startsWith("..") && !pathApi.isAbsolute(relative)) {
+      return relative.split(pathApi.sep).join("/");
+    }
+  }
+  return undefined;
+}
+
+/**
  * `@/path` for a file inside one of `workspaceRoots`, which makes Bob include the file's text;
  * undefined for a file outside them (the tools read it instead). Mentions always use "/".
  */
 export function mentionFor(localPath: string, workspaceRoots: readonly string[], pathApi = path): string | undefined {
-  for (const root of workspaceRoots) {
-    const relative = pathApi.relative(root, localPath);
-    if (relative && !relative.startsWith("..") && !pathApi.isAbsolute(relative)) {
-      return `@/${relative.split(pathApi.sep).join("/")}`;
-    }
-  }
-  return undefined;
+  const relative = workspaceRelativePath(localPath, workspaceRoots, pathApi);
+  return relative === undefined ? undefined : `@/${relative}`;
 }
 
 export function buildBobPrompt(
@@ -53,6 +62,19 @@ export function buildBobPrompt(
   members: readonly PromptMember[],
   workspaceRoots: readonly string[],
   pathApi = path
+): { text: string; skipped: string[] } {
+  return buildInvestigatePrompt(kind, members, workspaceRoots, { pathApi });
+}
+
+/**
+ * The prompt for `kind`. `mention` names a checked-out file inside the workspace, given its
+ * workspace-relative path, the way the agent reads it (Bob's `@/path` when not given).
+ */
+export function buildInvestigatePrompt(
+  kind: BobPromptKind,
+  members: readonly PromptMember[],
+  workspaceRoots: readonly string[],
+  { mention = (relative: string) => `@/${relative}`, pathApi = path }: { mention?: (relative: string) => string; pathApi?: typeof path } = {}
 ): { text: string; skipped: string[] } {
   const seen = new Set<string>();
   const unique: PromptMember[] = [];
@@ -67,9 +89,10 @@ export function buildBobPrompt(
   const skipped = unique.slice(MAX_PROMPT_MEMBERS).map((m) => `${m.library}/${m.sourceFile}(${m.member})`.toUpperCase());
   const lines = listed.map((m) => {
     const name = `${m.library}/${m.sourceFile}(${m.member})`.toUpperCase();
-    const mention = m.localPath ? mentionFor(m.localPath, workspaceRoots, pathApi) : undefined;
+    const relative = m.localPath ? workspaceRelativePath(m.localPath, workspaceRoots, pathApi) : undefined;
+    const named = relative === undefined ? undefined : mention(relative);
     const type = m.sourceType ? ` [${m.sourceType.toUpperCase()}]` : "";
-    return `- ${name}${type}${mention ? ` ${mention}` : ""}${m.readOnly ? " (read-only reference copy)" : ""}`;
+    return `- ${name}${type}${named ? ` ${named}` : ""}${m.readOnly ? " (read-only reference copy)" : ""}`;
   });
   const one = listed.length === 1;
   const these = one ? "this IBM i member" : `these ${listed.length} IBM i members`;

@@ -101,6 +101,7 @@ describe("extension manifest", () => {
       "changeManagement.checkoutCommand",
       "backgroundRefresh.onConnect",
       "backgroundRefresh.intervalMinutes",
+      "agents.researchTools",
     ]) {
       assert.equal(properties[`ibmi-member-workspace.${setting}`].scope, "application", setting);
     }
@@ -166,8 +167,8 @@ describe("extension manifest", () => {
       };
     };
     const views = manifest.contributes.views["ibmi-member-workspace"].map((view) => view.id);
-    assert.deepEqual(views, ["ibmi-member-workspace.bobView", "ibmi-member-workspace.checkoutView"]);
-    const [bobView, checkoutView] = manifest.contributes.views["ibmi-member-workspace"];
+    assert.deepEqual(views, ["ibmi-member-workspace.bobView", "ibmi-member-workspace.agentsView", "ibmi-member-workspace.checkoutView"]);
+    const [bobView, , checkoutView] = manifest.contributes.views["ibmi-member-workspace"];
     assert.equal(bobView.when, "ibmi-member-workspace:isBobIde");
     // The status needs a few rows: the Bob section starts at its minimum height, not half the side bar.
     assert.ok((bobView.initialSize ?? 0) > 0 && (bobView.initialSize ?? 0) < (checkoutView.initialSize ?? 0));
@@ -184,6 +185,38 @@ describe("extension manifest", () => {
         assert.ok(command.startsWith("workbench.") || commands.includes(command), command);
       }
     }
+  });
+
+  it("puts the AI Research Tools view, shown only outside IBM Bob with an agent installed, above Checked Out Members", () => {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      contributes: {
+        commands: Array<{ command: string }>;
+        views: Record<string, Array<{ id: string; when?: string; initialSize?: number }>>;
+        viewsWelcome: Array<{ view: string; contents: string; when: string }>;
+        mcpServerDefinitionProviders?: Array<{ id: string; label: string }>;
+      };
+    };
+    const views = manifest.contributes.views["ibmi-member-workspace"];
+    const agentsView = views.find((view) => view.id === "ibmi-member-workspace.agentsView");
+    const checkoutView = views.find((view) => view.id === "ibmi-member-workspace.checkoutView");
+    assert.equal(agentsView?.when, "!ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable");
+    assert.ok((agentsView?.initialSize ?? 0) > 0 && (agentsView?.initialSize ?? 0) < (checkoutView?.initialSize ?? 0));
+
+    const welcome = manifest.contributes.viewsWelcome.filter((item) => item.view === "ibmi-member-workspace.agentsView");
+    assert.deepEqual(welcome.map((item) => item.when), [
+      "!ibmi-member-workspace:isBobIde && config.ibmi-member-workspace.agents.researchTools",
+      "!ibmi-member-workspace:isBobIde && !config.ibmi-member-workspace.agents.researchTools",
+    ]);
+    const commands = manifest.contributes.commands.map(({ command }) => command);
+    for (const { contents } of welcome) {
+      for (const [, command] of contents.matchAll(/\(command:([^)?]+)/g)) {
+        assert.ok(command.startsWith("workbench.") || commands.includes(command), command);
+      }
+    }
+    // The id the extension registers its Copilot MCP server provider under (src/commands/agents.ts).
+    assert.deepEqual(manifest.contributes.mcpServerDefinitionProviders, [
+      { id: "ibmi-member-workspace.researchTools", label: "IBM i Member Workspace" },
+    ]);
   });
 
   it("offers Find All Dependencies right below Find Dependencies, with bounded limits", () => {

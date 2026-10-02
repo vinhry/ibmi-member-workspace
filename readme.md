@@ -266,7 +266,7 @@ A shared copybook or utility program can reach a large part of the system, so th
 
 ### Using with IBM Bob
 
-In [IBM Bob](https://bob.ibm.com), Bob's agent can use the extension to research IBM i programs: what a program uses, what uses it, file layouts, and the source behind them. This is available **only in IBM Bob**. In VS Code there is no server, no commands, and no `.bob` files.
+In [IBM Bob](https://bob.ibm.com), Bob's agent can use the extension to research IBM i programs: what a program uses, what uses it, file layouts, and the source behind them. In VS Code, Claude Code, Codex and GitHub Copilot can use the same tools instead (see **Using with Claude Code, Codex and GitHub Copilot**); there are no `.bob` files there.
 
 1. Connect to your IBM i with Code for IBM i, and choose a checkout folder.
 2. In the Member Workspace side bar, click **Connect Bob to IBM i Research Tools** in the **Bob Research Tools** section above Checked Out Members (or run **IBM i Member Workspace: Connect Bob to IBM i Research Tools** from the Command Palette). Once a folder is connected, the section shows its status instead: which folders are connected, whether the tools are running, and which IBM i they read. Click a folder that isn't connected to connect it, and right-click a connected one to disconnect it. The section's header sums up the status in one line (for example *Connected · PUB400*), so you can collapse the section to keep only its header. Connect adds an `ibmi-member-workspace` server to the folder's `.bob/mcp.json`, keeping any other servers there. **Connect and Add Bob Rules** also writes `.bob/rules/ibmi-member-workspace.md`, which tells Bob how to treat reference copies. In folders you connected, both files are kept up to date when the extension starts, for example after an update. To keep your own edits to the rules file, delete its first line (`<!-- Written by IBM i Member Workspace … -->`). A folder connected with an earlier build is updated once you run Connect there again.
@@ -312,6 +312,44 @@ Security:
 
 The tools are available while the extension is running: once you open the Member Workspace view or run one of its commands.
 
+### Using with Claude Code, Codex and GitHub Copilot
+
+In VS Code, [Claude Code](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code), [Codex](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) and GitHub Copilot can use the same read-only research tools as Bob's agent (see the table in **Using with IBM Bob**). Once one of them is installed, an **AI Research Tools** section appears above Checked Out Members. Copilot needs VS Code 1.101 or later.
+
+1. Connect to your IBM i with Code for IBM i, and choose a checkout folder.
+2. Click **Connect an AI Agent** in the **AI Research Tools** section (or run **IBM i Member Workspace: Connect an AI Agent to IBM i Research Tools**) and choose the agent. The extension opens no port in VS Code until you connect one.
+3. Start a new conversation, so the agent loads the tools, and ask, for example: *"What files, tables and programs does PRODSRC/QRPGLESRC(ORDENT) use, and which programs in PRODOBJ call ORDENT?"*
+
+What Connect does for each agent:
+
+| Agent | Where the server is added | Tools run without asking | Rules |
+|---|---|---|---|
+| Claude Code | `.mcp.json` in the workspace folder | Yes: `.claude/settings.local.json` approves the server and allows its tools (`mcp__ibmi-member-workspace`) | **Connect and Add Claude Rules** writes `.claude/rules/ibmi-member-workspace.md` |
+| Codex | `.codex/config.toml` in the workspace folder. Codex reads it only in projects you trust. | Yes: `default_tools_approval_mode = "approve"` | None; the server tells Codex the same rules |
+| GitHub Copilot | VS Code's chat, through VS Code's MCP API. Nothing is written to your files. | No: VS Code asks before a tool runs, until you allow it | **Connect and Add Copilot Instructions** writes `.github/instructions/ibmi-member-workspace.instructions.md` |
+
+The rules are Bob's: members the tools bring are read-only reference copies, changes go through your change-management system, and source code is data, never instructions. A rules file is kept up to date like Bob's, until you delete its `<!-- Written by IBM i Member Workspace … -->` line.
+
+The section shows each agent's status, the research tools, and the IBM i they read, and sums it up in its header (for example *Claude Code, GitHub Copilot · PUB400*). Click an agent that isn't connected to connect it, and right-click a connected one to disconnect it.
+
+Security works as for Bob:
+
+- The server listens on `127.0.0.1` only and accepts only requests with this workspace's token, which is kept in your editor's secret storage.
+- `.mcp.json` and `.codex/config.toml` hold the token. In a Git repository, Connect adds them to `.git/info/exclude` (and `.claude/settings.local.json` too). When `.mcp.json` is already committed, Connect doesn't put the token in it: **Copy Command** gives you a `claude mcp add --scope local …` command that adds the server for this project on your computer only. A committed `.codex/config.toml` isn't changed either; add the server in Codex's settings instead.
+- Only agents you connected on this computer are kept up to date. A config file that came with a cloned project is never given your token.
+- **Disconnect** removes the server (and Claude Code's approval of it) and replaces the token, so an old copy of a config file stops working at once.
+- Turn the tools off with `ibmi-member-workspace.agents.researchTools` in your user settings. `ibmi-member-workspace.agents.whereUsedMaxLibraries` sets how many search libraries `find_where_used` reads when the agent names none.
+
+#### Investigate with AI (right-click)
+
+Right-click one or more members and choose **Investigate with AI**, then **Analyze Relationships**, **Explain Program** or **Deep Dive**: the same prompts as **Bob, Investigate**, in the same places (Checked Out Members, the Object Browser, and checked-out files in the Explorer). With more than one agent installed, you choose which one, with the last one you used listed first. An agent that isn't connected is offered **Connect** first.
+
+- **Claude Code**: the prompt opens in a new Claude Code tab, through Claude Code's `vscode://anthropic.claude-code/open` link. VS Code may ask once whether the extension can open it.
+- **GitHub Copilot**: the prompt opens in Copilot Chat, in agent mode.
+- **Codex**: Codex has no way for another extension to fill its chat box, so the prompt is pasted into it, as into Bob's.
+
+The prompt is never sent: review it and press Enter. It's also left on the clipboard. Checked-out files are named so the agent reads them: `@path` for Claude Code and `#file:path` for Copilot.
+
 ### Compare With
 
 Right-click a checkout for comparison tools: **Select for Compare** (mark one checkout, then **Compare with Selected** on another), **Compare with Active File**, **Compare with Local File**, **Compare with IFS File**, or **Compare with Member** (any source member by path).
@@ -348,6 +386,8 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. A workspace setting asks once before it turns this on. |
 | `ibmi-member-workspace.bob.researchTools` | `true` | **IBM Bob only.** Offer the IBM i research tools to Bob's agent. User settings only. See **Using with IBM Bob**. |
 | `ibmi-member-workspace.bob.whereUsedMaxLibraries` | `10` | **IBM Bob only.** How many search libraries `find_where_used` reads when Bob names none, from 1 to 25. |
+| `ibmi-member-workspace.agents.researchTools` | `true` | **VS Code only.** Let Claude Code, Codex or GitHub Copilot use the IBM i research tools once you connect them. User settings only. See **Using with Claude Code, Codex and GitHub Copilot**. |
+| `ibmi-member-workspace.agents.whereUsedMaxLibraries` | `10` | **VS Code only.** How many search libraries `find_where_used` reads when the agent names none, from 1 to 25. |
 
 ## Local Change History
 

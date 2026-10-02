@@ -209,6 +209,22 @@ export class GitService {
     return this.gitProblem ?? undefined;
   }
 
+  /**
+   * Whether `file` (relative to `folder`) is committed in the repository holding `folder`: true or
+   * false, or undefined when that can't be told (Git is missing, or `folder` isn't in a repository).
+   */
+  async isTracked(folder: string, file: string): Promise<boolean | undefined> {
+    if (!(await this.checkGitAvailable())) {
+      return undefined;
+    }
+    const result = await this.run(folder, ["ls-files", "--error-unmatch", "--", file], { logFailure: false });
+    if (result.ok) {
+      return true;
+    }
+    // Exit status 1: not tracked. Anything else (128: not a repository) can't tell.
+    return result.code === 1 ? false : undefined;
+  }
+
   async isExactRepository(folder: string): Promise<boolean> {
     return (await this.checkExactRepository(folder)).ok;
   }
