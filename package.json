@@ -1092,7 +1092,7 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "The release `&RELEASE` stands for in the change-management checkout command, for example `CRETE/IESCORP/BASE` (Rocket LMI's group/application/release). It's filled in at each checkout, where you can change it for that checkout and make the new one the default. User settings only."
+          "markdownDescription": "The release `&RELEASE` stands for in the change-management checkout command, for example `MYGROUP/MYAPP/BASE` (Rocket LMI's group/application/release). It's filled in at each checkout, where you can change it for that checkout and make the new one the default. User settings only."
         },
         "ibmi-member-workspace.dependencies.searchScope": {
           "type": "string",

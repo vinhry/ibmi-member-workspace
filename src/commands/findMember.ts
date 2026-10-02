@@ -83,7 +83,7 @@ export function registerFindMemberCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand("ibmi-member-workspace.findMember", async () => {
       const typed = await vscode.window.showInputBox({
         title: "Find Member",
-        prompt: "Member or program name, with * for any characters (for example VU0005CC, ORD* or *ENT)",
+        prompt: "Member or program name, with * for any characters (for example ORD100C, ORD* or *ENT)",
         value: provider.current?.search.byText === false ? provider.current.search.input : undefined,
         ignoreFocusOut: true,
         validateInput: (value) => memberPatternProblem(value),

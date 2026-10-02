@@ -216,7 +216,7 @@ A list shows what was found, grouped into copybooks, called programs, referenced
 
 Set `ibmi-member-workspace.changeManagement.checkoutCommand` in your user settings to the CL command that checks a member out in your change-management system. Then you can find a program and check it out for change without leaving VS Code or IBM Bob:
 
-- **Find Member**, the panel below Checked Out Members: click **Find Member…** (the search button in its title bar, or the Command Palette) and type a member or program name, with `*` for any characters (`VU0005CC`, `ORD*`).
+- **Find Member**, the panel below Checked Out Members: click **Find Member…** (the search button in its title bar, or the Command Palette) and type a member or program name, with `*` for any characters (`ORD100C`, `ORD*`).
   - It searches the libraries of your search scope (see **Finding the source**). **Search in Other Libraries…** in its title bar runs the search again elsewhere, for example in your production source libraries or all user libraries.
   - For a program whose source member has another name, the member it was compiled from is found too. When nothing has the name, the panel offers to search member text or all user libraries.
   - The results stay in the panel, marked when already checked out, so you can act on them one after another. Click one to read it. Right-click one or more for **Check Out Through Change Management…** (also the button on each result), **Bring for Reference**, or **Check Out for Change Here** (for members already in your development library).
@@ -240,8 +240,8 @@ The command can use these placeholders, named as in Code for IBM i actions:
 | `&OPENMBR` | the member |
 | `&EXT` | its source type |
 | `&DEVLIB` | the development library you name |
-| `&PROJECT` | the change-management project (task) you name, for example `MOD054937` |
-| `&RELEASE` | the release, filled in from `ibmi-member-workspace.changeManagement.release` (for example `CRETE/IESCORP/BASE`) and changeable at each checkout |
+| `&PROJECT` | the change-management project (task) you name, for example `PRJ001234` |
+| `&RELEASE` | the release, filled in from `ibmi-member-workspace.changeManagement.release` (for example `MYGROUP/MYAPP/BASE`) and changeable at each checkout |
 | `&USER` | the user profile Code for IBM i is connected with, for example as the developer |
 
 For example, Rocket LMI's checkout command, with your usual group, application and release in its own setting:
@@ -249,7 +249,7 @@ For example, Rocket LMI's checkout command, with your usual group, application a
 ```jsonc
 "ibmi-member-workspace.changeManagement.checkoutCommand":
   "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(&RELEASE)",
-"ibmi-member-workspace.changeManagement.release": "CRETE/IESCORP/BASE"
+"ibmi-member-workspace.changeManagement.release": "MYGROUP/MYAPP/BASE"
 ```
 
 When you check out with a different release, you're asked afterwards whether to make it your default. A release is one to three IBM i names joined by `/`.
@@ -425,7 +425,7 @@ Local Change History does not upload members to IBM i and does not send files to
 
 ### Set Up
 
-Run **IBM i Member Workspace: Set Up Local Change History**, or enable `ibmi-member-workspace.gitIntegration` in VS Code Settings. When the setting comes from a workspace's `.vscode/settings.json` rather than from you, the extension asks once before turning it on for that workspace. The selected folder (for example, `checkout`) is the **checkout container**. Each system working directory (for example, `checkout/alex.acklie.com`) is its own Git repository. If that directory already holds a repository the extension didn't create, it asks before using it; a repository you choose is used without changing its commits, branches, configuration, or remotes. If Git does not already know your name and email, the extension asks for them and saves them only in that system repository. Automatic checkpoints are never signed, so a global `commit.gpgsign` setting can't block them.
+Run **IBM i Member Workspace: Set Up Local Change History**, or enable `ibmi-member-workspace.gitIntegration` in VS Code Settings. When the setting comes from a workspace's `.vscode/settings.json` rather than from you, the extension asks once before turning it on for that workspace. The selected folder (for example, `checkout`) is the **checkout container**. Each system working directory (for example, `checkout/myhost.example.com`) is its own Git repository. If that directory already holds a repository the extension didn't create, it asks before using it; a repository you choose is used without changing its commits, branches, configuration, or remotes. If Git does not already know your name and email, the extension asks for them and saves them only in that system repository. Automatic checkpoints are never signed, so a global `commit.gpgsign` setting can't block them.
 
 Git commands run by the extension never run Git hooks or an fsmonitor command, and never use a bare repository found in the checkout folder, so files placed in the checkout folder (for example, by cloning a project into it) can't make Git run programs.
 

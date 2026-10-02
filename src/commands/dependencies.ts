@@ -707,7 +707,7 @@ export async function changeThroughChangeManagement(ctx: CommandContext, system:
         title: "Change-Management Checkout: Release",
         prompt: usualRelease
           ? "The release to check out from (&RELEASE). Change it for this checkout if needed."
-          : "The release to check out from (&RELEASE), for example CRETE/IESCORP/BASE",
+          : "The release to check out from (&RELEASE), for example MYGROUP/MYAPP/BASE",
         value: usualRelease,
         ignoreFocusOut: true,
         validateInput: (value) => releaseProblem(value.trim()),

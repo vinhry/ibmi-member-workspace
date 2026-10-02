@@ -13,7 +13,7 @@ import {
 
 describe("memberPatternProblem", () => {
   it("accepts IBM i names with wildcards", () => {
-    for (const input of ["VU0005CC", "ord*", "*ENT", " $ORD#1 ", "A*B"]) {
+    for (const input of ["ORD100C", "ord*", "*ENT", " $ORD#1 ", "A*B"]) {
       assert.equal(memberPatternProblem(input), undefined, input);
     }
   });
@@ -62,9 +62,9 @@ describe("orderFound", () => {
 describe("addToHistory", () => {
   it("puts the newest search first, moving a repeated one to the top", () => {
     let history = addToHistory([], { input: "ord*", byText: false });
-    history = addToHistory(history, { input: "VU0005CC", byText: false });
+    history = addToHistory(history, { input: "ORD100C", byText: false });
     history = addToHistory(history, { input: "ORD*", byText: false });
-    assert.deepEqual(history, [{ input: "ORD*", byText: false }, { input: "VU0005CC", byText: false }]);
+    assert.deepEqual(history, [{ input: "ORD*", byText: false }, { input: "ORD100C", byText: false }]);
   });
 
   it("keeps a name search, a text search and another scope apart", () => {
@@ -88,10 +88,10 @@ describe("describeSearch and foundMemberInfo", () => {
   it("labels a search and turns a found member into a checkout's names", () => {
     assert.equal(describeSearch({ input: "ord*", byText: false }), "ORD*");
     assert.equal(describeSearch({ input: "order", byText: true }), 'text "ORDER"');
-    assert.deepEqual(foundMemberInfo({ library: "PROD", sourceFile: "QCLLESRC", member: "SY0204AC", sourceType: "CLLE" }), {
+    assert.deepEqual(foundMemberInfo({ library: "PROD", sourceFile: "QCLLESRC", member: "ORDENT", sourceType: "CLLE" }), {
       library: "PROD",
       sourceFile: "QCLLESRC",
-      memberName: "SY0204AC",
+      memberName: "ORDENT",
       extension: "clle",
     });
   });

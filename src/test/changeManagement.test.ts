@@ -22,14 +22,14 @@ function deps(overrides: Partial<ChangeCheckoutDeps> = {}) {
   const confirmed: string[][] = [];
   const value: ChangeCheckoutDeps = {
     askDevLibrary: async () => "devlib",
-    askProject: async () => "mod054937",
-    askRelease: async () => "crete/iescorp/base",
+    askProject: async () => "prj001234",
+    askRelease: async () => "mygroup/myapp/base",
     confirm: async (commands) => {
       confirmed.push(commands);
       return true;
     },
     connectedSystem: () => "PUB400",
-    currentUser: () => "mneukirc",
+    currentUser: () => "devuser",
     runCommand: async (command) => {
       ran.push(command);
     },
@@ -171,14 +171,14 @@ describe("runChangeManagementCheckout", () => {
 });
 
 describe("&PROJECT and &USER", () => {
-  const LMI = "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(CRETE/IESCORP/BASE)";
+  const LMI = "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(MYGROUP/MYAPP/BASE)";
 
   it("fills in Rocket LMI's ACMSCHKOUT with the project asked for and the connection's user", async () => {
     let asked = 0;
-    const { deps: d, ran, confirmed } = deps({ askProject: async () => { asked++; return " mod054937 "; } });
-    const result = await runChangeManagementCheckout([member("VU0005CC", "clle")], "PUB400", LMI, d);
+    const { deps: d, ran, confirmed } = deps({ askProject: async () => { asked++; return " prj001234 "; } });
+    const result = await runChangeManagementCheckout([member("ORD100C", "clle")], "PUB400", LMI, d);
     assert.equal(asked, 1);
-    assert.deepEqual(confirmed, [["ACMSLIB/ACMSCHKOUT OBJ((QRPGLESRC (VU0005CC))) PROJECT(MOD054937) DVP(MNEUKIRC) REL(CRETE/IESCORP/BASE)"]]);
+    assert.deepEqual(confirmed, [["ACMSLIB/ACMSCHKOUT OBJ((QRPGLESRC (ORD100C))) PROJECT(PRJ001234) DVP(DEVUSER) REL(MYGROUP/MYAPP/BASE)"]]);
     assert.deepEqual(ran, confirmed[0]);
     assert.equal(result?.succeeded.length, 1);
   });
@@ -218,14 +218,14 @@ describe("&PROJECT and &USER", () => {
 describe("commandFailureMessages", () => {
   it("puts the cause before the messages that only say the command failed, each once", () => {
     const output = [
-      "CMS1234: Project NGUV7234 is not open for release CRETE/IESCORP/BASE.",
+      "CMS1234: Project PRJ001234 is not open for release MYGROUP/MYAPP/BASE.",
       "CMS9913: Program ACMSCHKOUT ended ABNORMALLY.  The highest CMSnnnn message severity was 30.",
       "SQL0443: Trigger program or external routine detected an error.",
       "SQL0443: Trigger program or external routine detected an error.",
       "",
     ].join("\r\n");
     assert.deepEqual(commandFailureMessages(output), [
-      "CMS1234: Project NGUV7234 is not open for release CRETE/IESCORP/BASE.",
+      "CMS1234: Project PRJ001234 is not open for release MYGROUP/MYAPP/BASE.",
       "CMS9913: Program ACMSCHKOUT ended ABNORMALLY.  The highest CMSnnnn message severity was 30.",
       "SQL0443: Trigger program or external routine detected an error.",
     ]);
@@ -239,10 +239,10 @@ describe("commandFailureMessages", () => {
 
 describe("a command split over lines", () => {
   it("is run as one line, its line breaks joined with spaces", () => {
-    const template = "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR)))\r\n   PROJECT(&PROJECT) DVP(&USER)\n REL(CRETE/IESCORP/BASE)\n";
+    const template = "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR)))\r\n   PROJECT(&PROJECT) DVP(&USER)\n REL(MYGROUP/MYAPP/BASE)\n";
     assert.equal(
-      expandCheckoutCommand(template, member("SY0204AC"), "DEVLIB", { project: "NGUV7234", user: "VNGUYEN" }),
-      "ACMSLIB/ACMSCHKOUT OBJ((QRPGLESRC (SY0204AC))) PROJECT(NGUV7234) DVP(VNGUYEN) REL(CRETE/IESCORP/BASE)"
+      expandCheckoutCommand(template, member("ORDENT"), "DEVLIB", { project: "PRJ001234", user: "DEVUSER" }),
+      "ACMSLIB/ACMSCHKOUT OBJ((QRPGLESRC (ORDENT))) PROJECT(PRJ001234) DVP(DEVUSER) REL(MYGROUP/MYAPP/BASE)"
     );
   });
 });
@@ -251,10 +251,10 @@ describe("&RELEASE", () => {
   const LMI = "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(&RELEASE)";
 
   it("fills in the release given for this checkout, and reports it", async () => {
-    const { deps: d, confirmed } = deps({ askRelease: async () => " crete/iescorp/new " });
-    const result = await runChangeManagementCheckout([member("SY0204AC")], "PUB400", LMI, d);
-    assert.deepEqual(confirmed, [["ACMSLIB/ACMSCHKOUT OBJ((QRPGLESRC (SY0204AC))) PROJECT(MOD054937) DVP(MNEUKIRC) REL(CRETE/IESCORP/NEW)"]]);
-    assert.equal(result?.release, "CRETE/IESCORP/NEW");
+    const { deps: d, confirmed } = deps({ askRelease: async () => " mygroup/myapp/next " });
+    const result = await runChangeManagementCheckout([member("ORDENT")], "PUB400", LMI, d);
+    assert.deepEqual(confirmed, [["ACMSLIB/ACMSCHKOUT OBJ((QRPGLESRC (ORDENT))) PROJECT(PRJ001234) DVP(DEVUSER) REL(MYGROUP/MYAPP/NEXT)"]]);
+    assert.equal(result?.release, "MYGROUP/MYAPP/NEXT");
   });
 
   it("asks for a release only when the command uses it", async () => {
@@ -272,7 +272,7 @@ describe("&RELEASE", () => {
   });
 
   it("accepts one to three IBM i names joined by /", () => {
-    for (const value of ["CRETE/IESCORP/BASE", "BASE", "A/B"]) {
+    for (const value of ["MYGROUP/MYAPP/BASE", "BASE", "A/B"]) {
       assert.equal(releaseProblem(value), undefined, value);
     }
     for (const value of ["A/B/C/D", "A//B", "A B", "A)", "", "/BASE"]) {

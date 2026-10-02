@@ -27,13 +27,13 @@ const IBMI_NAME = /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/i;
 
 /**
  * Why a release can't go in a command, or undefined when it can: one to three IBM i names joined by
- * "/", as Rocket LMI names a release (group/application/release, for example CRETE/IESCORP/BASE).
+ * "/", as Rocket LMI names a release (group/application/release, for example MYGROUP/MYAPP/BASE).
  */
 export function releaseProblem(value: string): string | undefined {
   const parts = value.split("/");
   return parts.length <= 3 && parts.every((part) => IBMI_NAME.test(part))
     ? undefined
-    : `"${value}" is not a valid release: use up to three IBM i names joined by /, for example CRETE/IESCORP/BASE.`;
+    : `"${value}" is not a valid release: use up to three IBM i names joined by /, for example MYGROUP/MYAPP/BASE.`;
 }
 
 /** Whether `template` uses the placeholder `name` (for example "PROJECT"), in any case. */
