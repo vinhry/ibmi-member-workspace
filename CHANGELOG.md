@@ -1,6 +1,6 @@
 # Change Log
 
-## 1.7.14 - 2026-10-02
+## 1.8.0 - 2026-10-02
 
 - **The change-management checkout command can name the project and the developer.** `ibmi-member-workspace.changeManagement.checkoutCommand` now accepts `&PROJECT`, the project (task) you name each time, with the last one filled in, and `&USER`, the user profile Code for IBM i is connected with. For example, Rocket LMI's `ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(...)` now runs without editing the setting for each change. Only valid IBM i names are filled in. The README also explains why to call the change-management command directly rather than through a wrapper program.
 
