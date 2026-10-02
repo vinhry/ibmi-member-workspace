@@ -81,14 +81,16 @@ function mcpApi(): McpApi | undefined {
 }
 
 /**
- * The research tools for VS Code's AI agents: Claude Code, Codex and GitHub Copilot get what IBM
- * Bob's agent gets in Bob. Connect adds the local MCP server to the agent (Claude Code's `.mcp.json`,
- * Codex's `.codex/config.toml`, or VS Code's chat for Copilot), and "Investigate with AI" puts a
- * ready-made prompt in the agent's chat. Called only outside IBM Bob.
+ * The research tools for AI agents other than Bob's: Claude Code, Codex and (in VS Code) GitHub
+ * Copilot get what IBM Bob's agent gets in Bob. Connect adds the local MCP server to the agent
+ * (Claude Code's `.mcp.json`, Codex's `.codex/config.toml`, or VS Code's chat for Copilot), and
+ * "Investigate with AI" puts a ready-made prompt in the agent's chat. In Bob this runs next to Bob's
+ * own integration, with its own server and token.
  */
-export function registerAgentCommands(ctx: CommandContext): void {
+export function registerAgentCommands(ctx: CommandContext, { inBob }: { inBob: boolean }): void {
   const { context, log, gitService } = ctx;
-  const api = mcpApi();
+  // Copilot is VS Code's chat; Bob's chat is Bob's agent.
+  const api = inBob ? undefined : mcpApi();
   const version = String(context.extension.packageJSON.version ?? "");
 
   const enabled = () =>
@@ -421,7 +423,7 @@ export function registerAgentCommands(ctx: CommandContext): void {
     vscode.commands.registerCommand("ibmi-member-workspace.agents.disconnect", disconnect)
   );
 
-  registerInvestigateWithAi(ctx, { available, connections, enabled });
+  registerInvestigateWithAi(ctx, { available, connections, enabled }, inBob);
 }
 
 /** Writes an agent's rules file unless the user edited it; one this extension wrote is brought up to date. */
@@ -513,12 +515,15 @@ function refreshRules(root: string, agent: AgentId, log: vscode.OutputChannel): 
  */
 function registerInvestigateWithAi(
   ctx: CommandContext,
-  state: { available(): AgentId[]; connections(): AgentConnection[]; enabled(): boolean }
+  state: { available(): AgentId[]; connections(): AgentConnection[]; enabled(): boolean },
+  inBob: boolean
 ): void {
   const { context, log } = ctx;
 
-  // The Explorer menu shows only on checked-out files.
-  trackCheckoutPaths(ctx);
+  // The Explorer menu shows only on checked-out files. In Bob, Bob, Investigate keeps that key already.
+  if (!inBob) {
+    trackCheckoutPaths(ctx);
+  }
 
   const investigate = (kind: BobPromptKind) => async (arg: unknown, all?: unknown[]) => {
     const found = investigatedMembers(ctx, arg, all);

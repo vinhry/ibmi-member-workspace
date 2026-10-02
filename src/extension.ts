@@ -256,15 +256,15 @@ export async function activate(
   registerSourceDiagnostics(context, service);
   registerBackgroundRefresh(ctx);
 
-  // In IBM Bob, Bob's agent uses the research tools; elsewhere, Claude Code, Codex and GitHub Copilot can.
+  // In IBM Bob, Bob's agent uses the research tools, and so can Claude Code and Codex; in VS Code,
+  // Claude Code, Codex and GitHub Copilot can.
   const inBob = isBobProduct(vscode.env.appName, vscode.env.uriScheme);
   void vscode.commands.executeCommand("setContext", "ibmi-member-workspace:isBobIde", inBob);
   if (inBob) {
     log.appendLine(`[bob] Running in ${vscode.env.appName}`);
     registerBobCommands(ctx);
-  } else {
-    registerAgentCommands(ctx);
   }
+  registerAgentCommands(ctx, { inBob });
 
   void offerCheckoutFolderSetup(ctx).catch((err) => {
     log.appendLine(`[setup] Could not show checkout folder setup: ${errorMessage(err)}`);

@@ -77,7 +77,7 @@
         {
           "id": "ibmi-member-workspace.agentsView",
           "name": "AI Research Tools",
-          "when": "!ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable",
+          "when": "ibmi-member-workspace:agentAvailable",
           "icon": "resources/checkout.svg",
           "initialSize": 1
         },
@@ -111,12 +111,12 @@
       {
         "view": "ibmi-member-workspace.agentsView",
         "contents": "Let Claude Code, Codex or GitHub Copilot research your IBM i programs: what a program uses, what uses it, file layouts and source. The tools only read the IBM i.\n[Connect an AI Agent](command:ibmi-member-workspace.agents.connect)",
-        "when": "!ibmi-member-workspace:isBobIde && config.ibmi-member-workspace.agents.researchTools"
+        "when": "config.ibmi-member-workspace.agents.researchTools"
       },
       {
         "view": "ibmi-member-workspace.agentsView",
         "contents": "The IBM i research tools for AI agents are turned off in your user settings.\n[Open Settings](command:workbench.action.openSettings?%5B%22ibmi-member-workspace.agents.researchTools%22%5D)",
-        "when": "!ibmi-member-workspace:isBobIde && !config.ibmi-member-workspace.agents.researchTools"
+        "when": "!config.ibmi-member-workspace.agents.researchTools"
       },
       {
         "view": "ibmi-member-workspace.checkoutView",
@@ -479,11 +479,11 @@
         },
         {
           "command": "ibmi-member-workspace.agents.connect",
-          "when": "!ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable"
+          "when": "ibmi-member-workspace:agentAvailable"
         },
         {
           "command": "ibmi-member-workspace.agents.disconnect",
-          "when": "!ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable"
+          "when": "ibmi-member-workspace:agentAvailable"
         },
         {
           "command": "ibmi-member-workspace.checkoutMember",
@@ -642,7 +642,7 @@
         },
         {
           "command": "ibmi-member-workspace.agents.disconnect",
-          "when": "view == ibmi-member-workspace.agentsView && viewItem == agentConnection && !ibmi-member-workspace:isBobIde",
+          "when": "view == ibmi-member-workspace.agentsView && viewItem == agentConnection",
           "group": "agents@1"
         },
         {
@@ -652,7 +652,7 @@
         },
         {
           "submenu": "ibmi-member-workspace.agentsInvestigate",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && ibmi-member-workspace:agentAvailable",
           "group": "0_bob@1"
         },
         {
@@ -662,7 +662,7 @@
         },
         {
           "submenu": "ibmi-member-workspace.agentsInvestigate",
-          "when": "view == objectBrowser && viewItem =~ /^member/ && !ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable",
+          "when": "view == objectBrowser && viewItem =~ /^member/ && ibmi-member-workspace:agentAvailable",
           "group": "ibmiCheckout@2"
         },
         {
@@ -824,7 +824,7 @@
         },
         {
           "submenu": "ibmi-member-workspace.agentsInvestigate",
-          "when": "!ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable && resourcePath in ibmi-member-workspace:checkoutPaths",
+          "when": "ibmi-member-workspace:agentAvailable && resourcePath in ibmi-member-workspace:checkoutPaths",
           "group": "0_bob@1"
         }
       ],
@@ -886,17 +886,17 @@
         },
         {
           "command": "ibmi-member-workspace.agents.refreshStatus",
-          "when": "view == ibmi-member-workspace.agentsView && !ibmi-member-workspace:isBobIde",
+          "when": "view == ibmi-member-workspace.agentsView",
           "group": "navigation@0"
         },
         {
           "command": "ibmi-member-workspace.agents.connect",
-          "when": "view == ibmi-member-workspace.agentsView && !ibmi-member-workspace:isBobIde",
+          "when": "view == ibmi-member-workspace.agentsView",
           "group": "agents@1"
         },
         {
           "command": "ibmi-member-workspace.agents.disconnect",
-          "when": "view == ibmi-member-workspace.agentsView && !ibmi-member-workspace:isBobIde",
+          "when": "view == ibmi-member-workspace.agentsView",
           "group": "agents@2"
         },
         {
@@ -973,17 +973,17 @@
       "ibmi-member-workspace.agentsInvestigate": [
         {
           "command": "ibmi-member-workspace.agents.analyzeRelationships",
-          "when": "!ibmi-member-workspace:isBobIde",
+          "when": "ibmi-member-workspace:agentAvailable",
           "group": "agents@1"
         },
         {
           "command": "ibmi-member-workspace.agents.explainProgram",
-          "when": "!ibmi-member-workspace:isBobIde",
+          "when": "ibmi-member-workspace:agentAvailable",
           "group": "agents@2"
         },
         {
           "command": "ibmi-member-workspace.agents.deepDive",
-          "when": "!ibmi-member-workspace:isBobIde",
+          "when": "ibmi-member-workspace:agentAvailable",
           "group": "agents@3"
         }
       ]
@@ -1058,14 +1058,14 @@
           "type": "boolean",
           "scope": "application",
           "default": true,
-          "markdownDescription": "**VS Code only.** Let Claude Code, Codex or GitHub Copilot use IBM i research tools: what a program uses, what uses it, file layouts and source, through a local MCP server that only this computer can reach. Nothing runs until you connect an agent with **Connect an AI Agent to IBM i Research Tools**. Members an agent looks at are brought as read-only reference copies. Only user settings are read, so a workspace can't turn it on."
+          "markdownDescription": "**VS Code and IBM Bob** (GitHub Copilot in VS Code only). Let Claude Code, Codex or GitHub Copilot use IBM i research tools: what a program uses, what uses it, file layouts and source, through a local MCP server that only this computer can reach. Nothing runs until you connect an agent with **Connect an AI Agent to IBM i Research Tools**. Members an agent looks at are brought as read-only reference copies. Only user settings are read, so a workspace can't turn it on."
         },
         "ibmi-member-workspace.agents.whereUsedMaxLibraries": {
           "type": "integer",
           "default": 10,
           "minimum": 1,
           "maximum": 25,
-          "markdownDescription": "**VS Code only.** How many search libraries the `find_where_used` research tool reads when the agent doesn't name any, from 1 to 25. Each library runs `DSPPGMREF` over every program in it, one library after another, so more libraries take longer."
+          "markdownDescription": "**Claude Code, Codex and GitHub Copilot.** How many search libraries the `find_where_used` research tool reads when the agent doesn't name any, from 1 to 25. Each library runs `DSPPGMREF` over every program in it, one library after another, so more libraries take longer."
         },
         "ibmi-member-workspace.dependencies.suggestAfterCheckout": {
           "type": "boolean",

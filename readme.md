@@ -282,7 +282,7 @@ A shared copybook or utility program can reach a large part of the system, so th
 
 ### Using with IBM Bob
 
-In [IBM Bob](https://bob.ibm.com), Bob's agent can use the extension to research IBM i programs: what a program uses, what uses it, file layouts, and the source behind them. In VS Code, Claude Code, Codex and GitHub Copilot can use the same tools instead (see **Using with Claude Code, Codex and GitHub Copilot**); there are no `.bob` files there.
+In [IBM Bob](https://bob.ibm.com), Bob's agent can use the extension to research IBM i programs: what a program uses, what uses it, file layouts, and the source behind them. Claude Code and Codex can use the same tools in Bob too, and GitHub Copilot in VS Code (see **Using with Claude Code, Codex and GitHub Copilot**). In VS Code there are no `.bob` files.
 
 1. Connect to your IBM i with Code for IBM i, and choose a checkout folder.
 2. In the Member Workspace side bar, click **Connect Bob to IBM i Research Tools** in the **Bob Research Tools** section above Checked Out Members (or run **IBM i Member Workspace: Connect Bob to IBM i Research Tools** from the Command Palette). Once a folder is connected, the section shows its status instead: which folders are connected, whether the tools are running, and which IBM i they read. Click a folder that isn't connected to connect it, and right-click a connected one to disconnect it. The section's header sums up the status in one line (for example *Connected · PUB400*), so you can collapse the section to keep only its header. Connect adds an `ibmi-member-workspace` server to the folder's `.bob/mcp.json`, keeping any other servers there. **Connect and Add Bob Rules** also writes `.bob/rules/ibmi-member-workspace.md`, which tells Bob how to treat reference copies. In folders you connected, both files are kept up to date when the extension starts, for example after an update. To keep your own edits to the rules file, delete its first line (`<!-- Written by IBM i Member Workspace … -->`). A folder connected with an earlier build is updated once you run Connect there again.
@@ -330,7 +330,9 @@ The tools are available while the extension is running: once you open the Member
 
 ### Using with Claude Code, Codex and GitHub Copilot
 
-In VS Code, [Claude Code](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code), [Codex](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) and GitHub Copilot can use the same read-only research tools as Bob's agent (see the table in **Using with IBM Bob**). Once one of them is installed, an **AI Research Tools** section appears above Checked Out Members. Copilot needs VS Code 1.101 or later.
+[Claude Code](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code), [Codex](https://marketplace.visualstudio.com/items?itemName=openai.chatgpt) and GitHub Copilot can use the same read-only research tools as Bob's agent (see the table in **Using with IBM Bob**). Claude Code and Codex work in VS Code and in IBM Bob; GitHub Copilot works in VS Code 1.101 or later. Once one of them is installed, an **AI Research Tools** section appears above Checked Out Members (in Bob, below Bob Research Tools).
+
+In Bob, they run next to Bob's agent: Bob keeps its own `.bob/mcp.json`, server and token, and **Bob, Investigate** works as before. Disconnecting Claude Code or Codex never disconnects Bob.
 
 1. Connect to your IBM i with Code for IBM i, and choose a checkout folder.
 2. Click **Connect an AI Agent** in the **AI Research Tools** section (or run **IBM i Member Workspace: Connect an AI Agent to IBM i Research Tools**) and choose the agent. The extension opens no port in VS Code until you connect one.
@@ -358,9 +360,9 @@ Security works as for Bob:
 
 #### Investigate with AI (right-click)
 
-Right-click one or more members and choose **Investigate with AI**, then **Analyze Relationships**, **Explain Program** or **Deep Dive**: the same prompts as **Bob, Investigate**, in the same places (Checked Out Members, the Object Browser, and checked-out files in the Explorer). With more than one agent installed, you choose which one, with the last one you used listed first. An agent that isn't connected is offered **Connect** first.
+Right-click one or more members and choose **Investigate with AI** (in Bob, next to **Bob, Investigate**), then **Analyze Relationships**, **Explain Program** or **Deep Dive**: the same prompts as **Bob, Investigate**, in the same places (Checked Out Members, the Object Browser, and checked-out files in the Explorer). With more than one agent installed, you choose which one, with the last one you used listed first. An agent that isn't connected is offered **Connect** first.
 
-- **Claude Code**: the prompt opens in a new Claude Code tab, through Claude Code's `vscode://anthropic.claude-code/open` link. VS Code may ask once whether the extension can open it.
+- **Claude Code**: the prompt opens in a new Claude Code tab, through Claude Code's `vscode://anthropic.claude-code/open` link (in Bob, through Bob's own link scheme). The editor may ask once whether the extension can open it.
 - **GitHub Copilot**: the prompt opens in Copilot Chat, in agent mode.
 - **Codex**: Codex has no way for another extension to fill its chat box, so the prompt is pasted into it, as into Bob's.
 
@@ -403,8 +405,8 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. A workspace setting asks once before it turns this on. |
 | `ibmi-member-workspace.bob.researchTools` | `true` | **IBM Bob only.** Offer the IBM i research tools to Bob's agent. User settings only. See **Using with IBM Bob**. |
 | `ibmi-member-workspace.bob.whereUsedMaxLibraries` | `10` | **IBM Bob only.** How many search libraries `find_where_used` reads when Bob names none, from 1 to 25. |
-| `ibmi-member-workspace.agents.researchTools` | `true` | **VS Code only.** Let Claude Code, Codex or GitHub Copilot use the IBM i research tools once you connect them. User settings only. See **Using with Claude Code, Codex and GitHub Copilot**. |
-| `ibmi-member-workspace.agents.whereUsedMaxLibraries` | `10` | **VS Code only.** How many search libraries `find_where_used` reads when the agent names none, from 1 to 25. |
+| `ibmi-member-workspace.agents.researchTools` | `true` | Let Claude Code, Codex (VS Code and IBM Bob) or GitHub Copilot (VS Code) use the IBM i research tools once you connect them. User settings only. See **Using with Claude Code, Codex and GitHub Copilot**. |
+| `ibmi-member-workspace.agents.whereUsedMaxLibraries` | `10` | **Claude Code, Codex and GitHub Copilot.** How many search libraries `find_where_used` reads when the agent names none, from 1 to 25. |
 
 ## Local Change History
 

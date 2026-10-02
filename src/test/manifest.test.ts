@@ -192,7 +192,7 @@ describe("extension manifest", () => {
     }
   });
 
-  it("puts the AI Research Tools view, shown only outside IBM Bob with an agent installed, above Checked Out Members", () => {
+  it("puts the AI Research Tools view, shown with an agent installed (in VS Code and IBM Bob), above Checked Out Members", () => {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
       contributes: {
         commands: Array<{ command: string }>;
@@ -204,13 +204,13 @@ describe("extension manifest", () => {
     const views = manifest.contributes.views["ibmi-member-workspace"];
     const agentsView = views.find((view) => view.id === "ibmi-member-workspace.agentsView");
     const checkoutView = views.find((view) => view.id === "ibmi-member-workspace.checkoutView");
-    assert.equal(agentsView?.when, "!ibmi-member-workspace:isBobIde && ibmi-member-workspace:agentAvailable");
+    assert.equal(agentsView?.when, "ibmi-member-workspace:agentAvailable");
     assert.ok((agentsView?.initialSize ?? 0) > 0 && (agentsView?.initialSize ?? 0) < (checkoutView?.initialSize ?? 0));
 
     const welcome = manifest.contributes.viewsWelcome.filter((item) => item.view === "ibmi-member-workspace.agentsView");
     assert.deepEqual(welcome.map((item) => item.when), [
-      "!ibmi-member-workspace:isBobIde && config.ibmi-member-workspace.agents.researchTools",
-      "!ibmi-member-workspace:isBobIde && !config.ibmi-member-workspace.agents.researchTools",
+      "config.ibmi-member-workspace.agents.researchTools",
+      "!config.ibmi-member-workspace.agents.researchTools",
     ]);
     const commands = manifest.contributes.commands.map(({ command }) => command);
     for (const { contents } of welcome) {
