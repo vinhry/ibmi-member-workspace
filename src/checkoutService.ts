@@ -27,6 +27,7 @@ import {
   uploadMemberContentWithDates,
   sourceDatesEnabled,
   sourceFileLayout,
+  memberChangeStamps,
   getSystemName,
 } from "./codeForIBMi";
 import { CheckoutCancelledError, LocalFileMissingError, ReferenceCopyError, errorMessage } from "./errors";
@@ -52,6 +53,7 @@ import { assertNoLinkBelow } from "./localPath";
 import { GitIntegrationState, gitIntegrationState } from "./workspaceSettings";
 import { CheckoutIndexStore, IndexStorage } from "./checkoutIndexStore";
 import { SourceLayout, SourceProblem, describeProblem, sourceProblems, summarizeProblems } from "./sourceCheck";
+import { RefreshPlan, groupBySourceFile, planRefresh } from "./remoteStamps";
 
 /** workspaceState key: the user turned on Local Change History in this workspace. */
 const GIT_INTEGRATION_CONFIRMED = "gitIntegrationConfirmed";
@@ -768,6 +770,7 @@ export class CheckoutService implements vscode.Disposable {
     const localUri = vscode.Uri.file(entry.localPath);
     await vscode.workspace.fs.writeFile(localUri, Buffer.from(content, "utf-8"));
     this.setBaseline(entry, hashContent(content));
+    delete entry.remoteSeen;
     entry.lastCheckedAt = new Date().toISOString();
     entry.status = "merged";
     await this.persist();
@@ -1041,7 +1044,11 @@ export class CheckoutService implements vscode.Disposable {
     return entry;
   }
 
-  async refreshRemoteStatus(entry: CheckedOutMember): Promise<RemoteStatus> {
+  /**
+   * Compares the local copy, the remote member and the baseline. `stamp` is the member's change stamp,
+   * read before the download; it is recorded so a quick refresh can skip the member while it's unchanged.
+   */
+  async refreshRemoteStatus(entry: CheckedOutMember, stamp?: string): Promise<RemoteStatus> {
     this.assertConnectedTo(entry.system);
     await this.assertEntryInActiveWorkItem(entry);
     const localUri = vscode.Uri.file(entry.localPath);
@@ -1071,9 +1078,59 @@ export class CheckoutService implements vscode.Disposable {
 
     entry.status = status;
     entry.lastCheckedAt = new Date().toISOString();
+    if (stamp !== undefined) {
+      entry.remoteSeen = { stamp, hash: remoteHash };
+    }
     await this.persist();
 
     return status;
+  }
+
+  /**
+   * Like {@link refreshRemoteStatus} for a member the catalog says is unchanged on the IBM i since its
+   * last full comparison: only the local copy is read, and `remoteHash` stands for the remote.
+   */
+  private async refreshFromSeen(entry: CheckedOutMember, remoteHash: string): Promise<RemoteStatus> {
+    await this.assertEntryInActiveWorkItem(entry);
+    const localHash = hashContent(await this.readLocal(vscode.Uri.file(entry.localPath)));
+    const status = classifyStatus(localHash, remoteHash, entry.remoteHashAtCheckout);
+    this.adoptNextBaseline(entry, localHash, remoteHash);
+    this.log.appendLine(
+      `[refresh] ${entry.library}/${entry.sourceFile}/${entry.memberName}  unchanged on the IBM i` +
+      `  local=${localHash.substring(0, 12)}  → ${status}`
+    );
+    entry.status = status;
+    entry.lastCheckedAt = new Date().toISOString();
+    await this.persist();
+    return status;
+  }
+
+  /**
+   * Splits `entries` into members to download and members unchanged on the IBM i, with one catalog
+   * query per source file. A source file whose query fails is compared in full.
+   */
+  private async planQuickRefresh(entries: CheckedOutMember[]): Promise<RefreshPlan<CheckedOutMember>> {
+    const plan: RefreshPlan<CheckedOutMember> = { download: [], unchanged: [] };
+    const system = getSystemName();
+    for (const group of groupBySourceFile(entries)) {
+      const sameSystem = group.entries.filter((entry) => system && systemKey(entry.system) === systemKey(system));
+      let stamps: Map<string, string> | undefined;
+      if (sameSystem.length > 0) {
+        try {
+          stamps = await memberChangeStamps(group.library, group.sourceFile, sameSystem.map((entry) => entry.memberName));
+        } catch (err) {
+          this.log.appendLine(
+            `[refresh] Could not read the change times of ${group.library}/${group.sourceFile}; comparing its members in full: ${errorMessage(err)}`
+          );
+        }
+      }
+      const groupPlan = planRefresh(sameSystem, stamps);
+      // Members of another system are downloaded, so refreshRemoteStatus refuses them as before.
+      const others = group.entries.filter((entry) => !sameSystem.includes(entry)).map((entry) => ({ entry }));
+      plan.download.push(...groupPlan.download, ...others);
+      plan.unchanged.push(...groupPlan.unchanged);
+    }
+    return plan;
   }
 
   recheckout(entry: CheckedOutMember): Promise<void> {
@@ -1102,6 +1159,7 @@ export class CheckoutService implements vscode.Disposable {
     }
 
     this.setBaseline(entry, hashContent(content));
+    delete entry.remoteSeen;
     entry.checkedOutAt = new Date().toISOString();
     entry.lastCheckedAt = entry.checkedOutAt;
     entry.status = "in-sync";
@@ -1215,6 +1273,8 @@ export class CheckoutService implements vscode.Disposable {
     }
 
     this.setBaseline(entry, after.baseline);
+    // The upload changed the member's stamp; the next refresh compares it in full.
+    delete entry.remoteSeen;
     entry.lastCheckedAt = new Date().toISOString();
     entry.status = after.status;
     await this.persist();
@@ -1244,7 +1304,7 @@ export class CheckoutService implements vscode.Disposable {
         e.library.toUpperCase() === library.toUpperCase() &&
         e.sourceFile.toUpperCase() === sourceFile.toUpperCase()
     );
-    return this.refreshEntries(entries, progress, token);
+    return this.refreshEntries(entries, progress, token, { quick: true });
   }
 
   async refreshAllRemoteStatus(
@@ -1256,25 +1316,42 @@ export class CheckoutService implements vscode.Disposable {
       return emptyTally();
     }
 
-    return this.refreshEntries(this.getEntriesForSystem(system), progress, token);
+    return this.refreshEntries(this.getEntriesForSystem(system), progress, token, { quick: true });
   }
 
+  /**
+   * Refreshes each entry's status. `quick` first asks the catalog which members changed on the IBM i
+   * since their last full comparison and downloads only those; the rest only have their local copy read.
+   */
   async refreshEntries(
     entries: CheckedOutMember[],
     progress?: RefreshProgress,
-    token?: vscode.CancellationToken
+    token?: vscode.CancellationToken,
+    { quick = false }: { quick?: boolean } = {}
   ): Promise<RefreshTally> {
     const tally = emptyTally();
 
     await this.runBatch(async () => {
-      for (let i = 0; i < entries.length; i++) {
+      const plan: RefreshPlan<CheckedOutMember> = quick
+        ? await this.planQuickRefresh(entries)
+        : { download: entries.map((entry) => ({ entry })), unchanged: [] };
+      if (quick) {
+        this.log.appendLine(
+          `[refresh] ${plan.unchanged.length} of ${entries.length} member(s) unchanged on the IBM i since they were last compared`
+        );
+      }
+      const steps: Array<{ entry: CheckedOutMember; run: () => Promise<RemoteStatus> }> = [
+        ...plan.unchanged.map(({ entry, hash }) => ({ entry, run: () => this.refreshFromSeen(entry, hash) })),
+        ...plan.download.map(({ entry, stamp }) => ({ entry, run: () => this.refreshRemoteStatus(entry, stamp) })),
+      ];
+      for (let i = 0; i < steps.length; i++) {
         if (token?.isCancellationRequested) {
           break;
         }
-        const entry = entries[i];
-        progress?.report({ message: `${entry.memberName} (${i + 1}/${entries.length})` });
+        const { entry, run } = steps[i];
+        progress?.report({ message: `${entry.memberName} (${i + 1}/${steps.length})` });
         try {
-          const result = await this.refreshRemoteStatus(entry);
+          const result = await run();
           switch (result) {
             case "in-sync":
               tally.inSync++;
@@ -1293,7 +1370,7 @@ export class CheckoutService implements vscode.Disposable {
           tally.errors++;
           this.log.appendLine(`[refresh] Error for ${formatMemberPath(entry)}: ${errorMessage(err)}`);
         }
-        progress?.report({ increment: 100 / entries.length });
+        progress?.report({ increment: 100 / steps.length });
       }
     });
 

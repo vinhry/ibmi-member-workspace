@@ -98,9 +98,22 @@ Compares your local file, the live remote content, and the remote content as it 
 - **Remote changed** — the member changed on the IBM i but your local copy is untouched (safe to re-checkout)
 - **Conflict** — changed both locally *and* on the IBM i (re-checkout would discard your edits — review with Merge Back first)
 
-Local edits update the status to **Modified** automatically, whether you save in VS Code or another tool (an AI assistant, a script, git) writes the file. Saving the remote member from VS Code (from **Show Diff** or **Open Remote File**) also re-checks it. Changes made on the IBM i itself are only detected by a refresh.
+Local edits update the status to **Modified** automatically, whether you save in VS Code or another tool (an AI assistant, a script, git) writes the file. Saving the remote member from VS Code (from **Show Diff** or **Open Remote File**) also re-checks it. Changes made on the IBM i itself are detected by a refresh, which can also run in the background (see **Background Refresh**).
 
 Refresh per member (inline icon or context menu, with a prompt to Re-checkout or review the diff when the remote has changed), per source file group, or for every checkout at once from the panel toolbar. Bulk refreshes show per-member progress and can be cancelled.
+
+Refreshing a source file group or every checkout is quick: one query per source file asks the IBM i which members changed since they were last compared, and only those are downloaded. For the others, only the local copy is read. Refreshing one member, or a selection of members, always downloads and compares each one. Whatever a refresh found, an upload always checks the member on the IBM i first.
+
+A badge on the Member Workspace icon shows how many members changed on the IBM i, with or without local changes, as of their last refresh.
+
+#### Background Refresh
+
+To keep the status current without refreshing yourself, turn on either or both in your user settings:
+
+- `ibmi-member-workspace.backgroundRefresh.onConnect`: refresh when Code for IBM i connects.
+- `ibmi-member-workspace.backgroundRefresh.intervalMinutes`: refresh every so many minutes while connected (at least 5). `0`, the default, turns it off.
+
+A background refresh is the quick refresh above, with its progress in the status bar. It waits while a checkout, upload or another refresh is running. When a member you changed locally turns out to have changed on the IBM i too, a notification offers **Merge Back**. Both settings are read from user settings only, so a workspace can't make the extension query your IBM i.
 
 ### Dependencies (Read-Only Reference Copies)
 
@@ -317,6 +330,8 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.dependencies.transitive.maxMembers` | `50` | How many members **Find All Dependencies** lists before asking whether to keep going (5 to 500). |
 | `ibmi-member-workspace.dependencies.crossReferences` | `[]` | Cross-reference tool queries (Abstract, Pathfinder, MDXREF…). User settings only. See **Dependencies**. |
 | `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. User settings only. See **Upload on Save**. |
+| `ibmi-member-workspace.backgroundRefresh.onConnect` | `false` | Refresh the remote status of your checkouts when Code for IBM i connects. User settings only. See **Background Refresh**. |
+| `ibmi-member-workspace.backgroundRefresh.intervalMinutes` | `0` | Refresh the remote status of your checkouts every this many minutes while connected (at least 5); `0` turns it off. User settings only. |
 | `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. A workspace setting asks once before it turns this on. |
 | `ibmi-member-workspace.bob.researchTools` | `true` | **IBM Bob only.** Offer the IBM i research tools to Bob's agent. User settings only. See **Using with IBM Bob**. |
 | `ibmi-member-workspace.bob.whereUsedMaxLibraries` | `10` | **IBM Bob only.** How many search libraries `find_where_used` reads when Bob names none, from 1 to 25. |

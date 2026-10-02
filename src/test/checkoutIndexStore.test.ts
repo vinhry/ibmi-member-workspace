@@ -187,6 +187,16 @@ describe("CheckoutIndexStore", () => {
     assert.equal(other.sourceLayout, undefined);
   });
 
+  it("keeps what quick refresh last saw of a member across a save and load", async () => {
+    const h = harness();
+    h.store.index = v3Index("PROG");
+    h.store.index.systems.SYS.workItems.workspace[0].remoteSeen = { stamp: "2026-10-01|t|12|900", hash: "abc" };
+    await h.store.save();
+    const reloaded = harness(h.storage);
+    await reloaded.store.load();
+    assert.deepEqual(reloaded.store.index.systems.SYS.workItems.workspace[0].remoteSeen, { stamp: "2026-10-01|t|12|900", hash: "abc" });
+  });
+
   it("writes through a temp file and renames it into place", async () => {
     const h = harness();
     h.store.index = v3Index("PROG");

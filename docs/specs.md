@@ -108,3 +108,20 @@ Lines longer than the source file holds, and characters the member's CCSID can't
 - `src/test/uploadFlow.test.ts`: problems ask first (also when quiet), Upload Anyway carries through a remote-change prompt, an upload already chosen anyway skips the check.
 - `src/test/checkoutIndexStore.test.ts`: `sourceLayout` survives a save and load.
 - README "Checks Before Uploading".
+
+### 7. Quick refresh, background refresh and the view badge (shipped in 1.7.11)
+
+Refresh downloaded every member's full source, one at a time, and changes made on the IBM i were only found by a refresh the user ran.
+
+- `memberChangeStamps` (`src/codeForIBMi.ts`) reads `LAST_CHANGE_TIMESTAMP`, `LAST_SOURCE_UPDATE_TIMESTAMP`, `NUMBER_ROWS` and `DATA_SIZE` from `QSYS2.SYSPARTITIONSTAT`, 100 members per statement; `changeStamp` (`src/remoteStamps.ts`) joins them.
+- A checkout's `remoteSeen` (`{ stamp, hash }`) is recorded by a full comparison that had a stamp, read before the download. Upload, Merge Back and Re-checkout clear it; a new checkout starts without it.
+- `planRefresh` skips a member only when its current stamp equals `remoteSeen.stamp` and its baseline has `hashVersion: 2`; its status is then `classifyStatus(local, remoteSeen.hash, baseline)`. A member missing from the catalog, or a source file whose query fails, is compared in full.
+- `CheckoutService.refreshEntries(..., { quick })`: Refresh All and the source-file Refresh are quick; single-member and selection refreshes, and the upload's own remote check, stay full.
+- Settings `backgroundRefresh.onConnect` (boolean) and `backgroundRefresh.intervalMinutes` (0 = off, clamped to 5–240), both `"scope": "application"`. `src/commands/backgroundRefresh.ts` runs a quick refresh with window progress, skips while `isBusy()` or a run is going, and notifies about members that newly became conflicts.
+- `treeView.badge` counts remote-changed and conflict members of the connected system (`remoteChangeBadge`).
+
+**Validation**
+- `src/test/remoteStamps.test.ts`: `changeStamp`, grouping, every `planRefresh` case, the interval clamp, `newlyChanged`, the badge.
+- `src/test/checkoutIndexStore.test.ts`: `remoteSeen` survives a save and load.
+- `manifest.test.ts`: both settings are application-scoped.
+- README "Refresh Remote Status" and "Background Refresh".

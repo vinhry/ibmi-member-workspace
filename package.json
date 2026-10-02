@@ -726,6 +726,20 @@
           "default": "off",
           "markdownDescription": "Upload a checked-out member to the IBM i when you save it in the editor. Only saves with local changes upload, and a member changed on the IBM i since checkout always asks before it is overwritten. Files changed by other tools are never uploaded automatically. Only user settings are read, so a workspace can't turn it on."
         },
+        "ibmi-member-workspace.backgroundRefresh.onConnect": {
+          "type": "boolean",
+          "scope": "application",
+          "default": false,
+          "markdownDescription": "Refresh the remote status of your checked-out members when Code for IBM i connects. Only members changed on the IBM i since they were last compared are downloaded. Only user settings are read, so a workspace can't turn it on."
+        },
+        "ibmi-member-workspace.backgroundRefresh.intervalMinutes": {
+          "type": "integer",
+          "scope": "application",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 240,
+          "markdownDescription": "Refresh the remote status of your checked-out members every this many minutes while connected (at least 5). `0` turns it off. Only members changed on the IBM i since they were last compared are downloaded. Only user settings are read, so a workspace can't turn it on."
+        },
         "ibmi-member-workspace.gitIntegration": {
           "type": "boolean",
           "default": false,

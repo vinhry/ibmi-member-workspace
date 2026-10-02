@@ -7,6 +7,7 @@ import {
   SourceLocation,
   objectKey,
 } from "./dependencySources";
+import { changeStamp } from "./remoteStamps";
 import { SourceLayout, layoutFromColumn } from "./sourceCheck";
 import { CheckedOutMember, buildLocalFileName } from "./types";
 import { Snapshot, SnapshotStore } from "./whereUsedSnapshot";
@@ -197,6 +198,33 @@ export async function findSourceMembers(
     })));
   }
   return rows;
+}
+
+/**
+ * The change stamps (see `changeStamp`) of `members` of one source file, keyed by member name. A
+ * member that doesn't exist has none.
+ */
+export async function memberChangeStamps(
+  library: string,
+  sourceFile: string,
+  members: readonly string[]
+): Promise<Map<string, string>> {
+  const connection = requireConnection();
+  const stamps = new Map<string, string>();
+  for (let i = 0; i < members.length; i += MEMBERS_PER_LOOKUP) {
+    const chunk = members.slice(i, i + MEMBERS_PER_LOOKUP).map((member) => member.toUpperCase());
+    const rows = await connection.runSQL(
+      "SELECT RTRIM(SYSTEM_TABLE_MEMBER) AS MEMBER, VARCHAR(LAST_CHANGE_TIMESTAMP) AS CHANGED, " +
+      "VARCHAR(LAST_SOURCE_UPDATE_TIMESTAMP) AS SOURCE_UPDATED, NUMBER_ROWS AS MEMBER_ROWS, DATA_SIZE AS MEMBER_SIZE " +
+      "FROM QSYS2.SYSPARTITIONSTAT WHERE SYSTEM_TABLE_SCHEMA = ? AND SYSTEM_TABLE_NAME = ? " +
+      `AND SYSTEM_TABLE_MEMBER IN (${chunk.map(() => "?").join(", ")})`,
+      { bindings: [library.toUpperCase(), sourceFile.toUpperCase(), ...chunk] }
+    );
+    for (const row of rows) {
+      stamps.set(String(row.MEMBER).toUpperCase(), changeStamp(row));
+    }
+  }
+  return stamps;
 }
 
 function requireConnection(): IBMi {

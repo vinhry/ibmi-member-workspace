@@ -1,3 +1,4 @@
+import type { RemoteSeen } from "./remoteStamps";
 import type { SourceLayout } from "./sourceCheck";
 
 export interface CheckedOutMember {
@@ -22,6 +23,8 @@ export interface CheckedOutMember {
   uploadOnSave?: "off" | "ask" | "silent";
   /** The source file's line length and CCSID, read at checkout; absent for checkouts made before 1.7.10. */
   sourceLayout?: SourceLayout;
+  /** The member's change stamp and hash at its last full comparison, for quick refresh; cleared by writes to it. */
+  remoteSeen?: RemoteSeen;
   status: CheckoutStatus;
 }
 

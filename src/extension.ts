@@ -22,6 +22,7 @@ import { registerCompareCommands } from "./commands/compare";
 import { registerDependencyCommands } from "./commands/dependencies";
 import { offerLegacyRepositoryRepair, registerGitCommands } from "./commands/git";
 import { registerAutoUpload } from "./commands/autoUpload";
+import { registerBackgroundRefresh } from "./commands/backgroundRefresh";
 import { registerBobCommands } from "./commands/bob";
 import { registerSyncCommands } from "./commands/sync";
 import { registerViewCommands } from "./commands/view";
@@ -247,6 +248,7 @@ export async function activate(
   registerViewCommands(ctx);
   registerGitCommands(ctx);
   registerSourceDiagnostics(context, service);
+  registerBackgroundRefresh(ctx);
 
   // Bob's agent is the only user of the research tools; VS Code gets neither the server nor its commands.
   const inBob = isBobProduct(vscode.env.appName, vscode.env.uriScheme);
