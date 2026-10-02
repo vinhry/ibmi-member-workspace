@@ -144,6 +144,17 @@
         "category": "IBM i Member Workspace"
       },
       {
+        "command": "ibmi-member-workspace.findMember",
+        "title": "Find Member…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(search-fuzzy)"
+      },
+      {
+        "command": "ibmi-member-workspace.checkoutThroughChangeManagement",
+        "title": "Check Out Through Change Management…",
+        "category": "IBM i Member Workspace"
+      },
+      {
         "command": "ibmi-member-workspace.toggleAutoUpload",
         "title": "Change Upload on Save",
         "category": "IBM i Member Workspace"
@@ -436,6 +447,14 @@
           "when": "false"
         },
         {
+          "command": "ibmi-member-workspace.findMember",
+          "when": "code-for-ibmi:connected"
+        },
+        {
+          "command": "ibmi-member-workspace.checkoutThroughChangeManagement",
+          "when": "false"
+        },
+        {
           "command": "ibmi-member-workspace.checkoutAllMembers",
           "when": "false"
         },
@@ -573,6 +592,11 @@
           "group": "ibmiCheckout@1"
         },
         {
+          "command": "ibmi-member-workspace.checkoutThroughChangeManagement",
+          "when": "view == objectBrowser && viewItem =~ /^member/",
+          "group": "ibmiCheckout@3"
+        },
+        {
           "command": "ibmi-member-workspace.checkoutAllMembers",
           "when": "view == objectBrowser && (viewItem == SPF || (viewItem == SPF_readonly && config.ibmi-member-workspace.allowCheckoutFromProtectedFilter))",
           "group": "ibmiCheckout@1"
@@ -641,6 +665,11 @@
           "command": "ibmi-member-workspace.findAllDependencies",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/ && !listMultiSelection",
           "group": "0_bob@3"
+        },
+        {
+          "command": "ibmi-member-workspace.checkoutThroughChangeManagement",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
+          "group": "0_bob@4"
         },
         {
           "command": "ibmi-member-workspace.copyMemberPath",
@@ -768,6 +797,11 @@
         },
         {
           "command": "ibmi-member-workspace.refreshView",
+          "when": "view == ibmi-member-workspace.checkoutView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "ibmi-member-workspace.findMember",
           "when": "view == ibmi-member-workspace.checkoutView",
           "group": "navigation@2"
         },

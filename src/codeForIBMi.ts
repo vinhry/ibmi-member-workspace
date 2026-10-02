@@ -435,13 +435,17 @@ export interface SourceMemberMatch extends SourceMemberRow {
  */
 export async function searchSourceMembers(
   pattern: string,
-  libraries: string[],
+  libraries: string[] | undefined,
   options: { sourceType?: string; sourceFile?: string; text?: string; limit: number }
 ): Promise<SourceMemberMatch[]> {
-  if (libraries.length === 0) {
+  if (libraries?.length === 0) {
     return [];
   }
-  const bindings = [...libraries, pattern.trim().toUpperCase().replace(/\*/g, "%")];
+  // Without libraries, every user library is read, which can take a while.
+  const libraryFilter = libraries
+    ? `AND SYSTEM_TABLE_SCHEMA IN (${libraries.map(() => "?").join(", ")}) `
+    : `AND ${USER_LIBRARIES_ONLY} `;
+  const bindings = [...(libraries ?? []), pattern.trim().toUpperCase().replace(/\*/g, "%")];
   let filters = "";
   if (options.sourceType) {
     filters += " AND UPPER(SOURCE_TYPE) = ?";
@@ -461,7 +465,7 @@ export async function searchSourceMembers(
     "COALESCE(RTRIM(CAST(PARTITION_TEXT AS VARCHAR(50))), '') AS TEXT, " +
     "COALESCE(VARCHAR_FORMAT(LAST_SOURCE_UPDATE_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'), '') AS LAST_CHANGED " +
     "FROM QSYS2.SYSPARTITIONSTAT WHERE SOURCE_TYPE IS NOT NULL " +
-    `AND SYSTEM_TABLE_SCHEMA IN (${libraries.map(() => "?").join(", ")}) ` +
+    libraryFilter +
     `AND SYSTEM_TABLE_MEMBER LIKE ?${filters} ` +
     `ORDER BY SYSTEM_TABLE_MEMBER, SYSTEM_TABLE_SCHEMA FETCH FIRST ${Math.max(1, Math.floor(options.limit))} ROWS ONLY`,
     { bindings }

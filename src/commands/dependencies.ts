@@ -11,6 +11,7 @@ import {
   connectedUser,
   runClCommand,
   runCrossReferenceQuery,
+  searchSourceMembers,
   sqlServicesAvailable,
 } from "../codeForIBMi";
 import {
@@ -34,6 +35,7 @@ import {
   createCrossReferenceProvider,
   createProgramReferencesProvider,
   createSourceScanProvider,
+  objectKey,
   parseCrossReferenceConfigs,
   runProviders,
   selectProviders,
@@ -43,10 +45,11 @@ import { WalkLimitReached, WalkUnresolved, mergeOutcomes, walkDependencies } fro
 import { ChangeCheckoutResult, nameValueProblem, runChangeManagementCheckout } from "../changeManagement";
 import { errorMessage } from "../errors";
 import { readCheckoutText } from "../localPath";
-import { MemberInfo } from "../memberInfo";
-import { resolveMember } from "../prompts";
+import type { BrowserNode, MemberInfo } from "../memberInfo";
+import { FoundMember, isWildcard, memberPattern, memberPatternProblem, orderFound } from "../memberSearch";
+import { resolveMember, resolveMemberSelections } from "../prompts";
 import { CheckedOutMember, TreeItemType, formatMemberPath, systemKey } from "../types";
-import { checkoutMembersBatch } from "./checkout";
+import { checkoutMembersBatch, memberInfoOf } from "./checkout";
 import { CommandContext } from "./context";
 import { ensureWorkItemForCheckout } from "./git";
 
@@ -138,8 +141,192 @@ export function registerDependencyCommands(ctx: CommandContext): void {
           await reviewAllDependencies(ctx, entry);
         }
       }
+    ),
+    vscode.commands.registerCommand("ibmi-member-workspace.findMember", () => findMember(ctx)),
+    vscode.commands.registerCommand(
+      "ibmi-member-workspace.checkoutThroughChangeManagement",
+      async (arg: unknown, all?: unknown[]) => {
+        const system = getSystemName();
+        if (!system) {
+          vscode.window.showWarningMessage("Connect to an IBM i first.");
+          return;
+        }
+        const members = selectedMembers(ctx, arg, all);
+        if (members.length > 0) {
+          await changeThroughChangeManagement(ctx, system, members);
+        }
+      }
     )
   );
+}
+
+/** The members a right-click stands for: Object Browser members, or Checked Out Members items. */
+function selectedMembers(ctx: CommandContext, arg: unknown, all?: unknown[]): MemberInfo[] {
+  if ((arg as { kind?: unknown } | undefined)?.kind === "member") {
+    return resolveMemberSelections(ctx.service, arg as TreeItemType, all as TreeItemType[] | undefined).map(({ entry }) => ({
+      library: entry.library,
+      sourceFile: entry.sourceFile,
+      memberName: entry.memberName,
+      extension: entry.extension,
+    }));
+  }
+  const nodes = all && all.length > 1 ? all : [arg];
+  return nodes.flatMap((node) => {
+    const info = memberInfoOf(node as BrowserNode);
+    return info ? [info] : [];
+  });
+}
+
+type FoundItem = vscode.QuickPickItem & { member: MemberInfo };
+
+/**
+ * Find Member: searches source members by name (or the source of a program by that name, or member
+ * text) in the search scope, then checks the chosen ones out through change management, brings them
+ * as reference copies, or checks them out for change.
+ */
+async function findMember(ctx: CommandContext, input?: string, override?: SearchScopeKind, byText = false): Promise<void> {
+  const system = getSystemName();
+  if (!system) {
+    vscode.window.showWarningMessage("Connect to an IBM i first: Find Member searches its source files.");
+    return;
+  }
+  const typed = input ?? await vscode.window.showInputBox({
+    title: "Find Member",
+    prompt: "Member or program name, with * for any characters (for example VU0005CC, ORD* or *ENT)",
+    ignoreFocusOut: true,
+    validateInput: (value) => memberPatternProblem(value),
+  });
+  if (!typed) {
+    return;
+  }
+  const scope = searchScope(ctx, override);
+  const pattern = memberPattern(typed);
+  const libraries = scope.kind === "everywhere" ? undefined : scope.libraries;
+  let found: FoundMember[];
+  try {
+    found = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Finding ${pattern} in ${describeScope(scope)}…` },
+      () => byText ? searchByText(typed, libraries) : searchByName(ctx, pattern, libraries, scope.libraries)
+    );
+  } catch (err) {
+    vscode.window.showErrorMessage(`Could not search for ${pattern}: ${errorMessage(err)}`);
+    return;
+  }
+  found = orderFound(found, { pattern, libraries: scope.libraries });
+
+  if (found.length === 0) {
+    const searchText = "Search Member Text";
+    const everywhere = "Search All User Libraries";
+    const choice = await vscode.window.showInformationMessage(
+      byText
+        ? `No member text contains "${typed.trim()}" in ${describeScope(scope)}.`
+        : `No source member or program named ${pattern} in ${describeScope(scope)}.`,
+      ...(byText ? [] : [searchText]),
+      ...(scope.kind === "everywhere" ? [] : [everywhere])
+    );
+    if (choice === searchText) {
+      await findMember(ctx, typed, override, true);
+    } else if (choice === everywhere) {
+      await findMember(ctx, typed, "everywhere", byText);
+    }
+    return;
+  }
+
+  const items: FoundItem[] = found.map((member) => {
+    const entry = ctx.service.findEntry(system, member.library, member.sourceFile, member.member);
+    const state = entry ? (entry.kind === "reference" ? "reference copy" : "checked out") : undefined;
+    return {
+      label: member.member,
+      description: [`${member.library}/${member.sourceFile}`, member.sourceType, state].filter(Boolean).join(" · "),
+      detail: [member.via, member.text, member.lastChanged && `changed ${member.lastChanged}`].filter(Boolean).join(" · ") || undefined,
+      member: {
+        library: member.library,
+        sourceFile: member.sourceFile,
+        memberName: member.member,
+        extension: member.sourceType.toLowerCase() || "mbr",
+      },
+    };
+  });
+  const outcome = await pickDependencies(
+    items,
+    `Find Member · ${capitalize(describeScope(scope))}`,
+    "Choose the members to check out"
+  );
+  if (outcome === "changeScope") {
+    const kind = await pickSearchScope(ctx, scope);
+    if (kind) {
+      await findMember(ctx, typed, kind, byText);
+    }
+    return;
+  }
+  const members = (outcome ?? []).map((item) => item.member);
+  if (members.length === 0) {
+    return;
+  }
+
+  const count = members.length === 1 ? `${members[0].library}/${members[0].sourceFile}(${members[0].memberName})` : `${members.length} members`;
+  const change = "Check Out Through Change Management…";
+  const reference = "Bring for Reference";
+  const direct = "Check Out for Change Here";
+  const choice = await vscode.window.showInformationMessage(
+    `Check out ${count}?`,
+    {
+      modal: true,
+      detail: "To change a production member, check it out through your change-management system (for example, Rocket LMI): " +
+        "its development library's copy is then checked out here. Reference copies are read-only. " +
+        "Check out for change here only members already in your development library.",
+    },
+    change,
+    reference,
+    direct
+  );
+  if (choice === change) {
+    await changeThroughChangeManagement(ctx, system, members);
+    return;
+  }
+  if ((choice !== reference && choice !== direct) || !(await ensureWorkItemForCheckout(ctx, system))) {
+    return;
+  }
+  await checkoutMembersBatch(ctx.service, system, members, ctx.log, { reference: choice === reference });
+}
+
+/**
+ * Source members named `pattern`; for a name without wildcards, also the member the program of that
+ * name was compiled from, which may have another name.
+ */
+async function searchByName(
+  ctx: CommandContext,
+  pattern: string,
+  libraries: string[] | undefined,
+  programLibraries: string[]
+): Promise<FoundMember[]> {
+  const rows = await searchSourceMembers(pattern, libraries, { limit: 200 });
+  const found: FoundMember[] = rows.map((row) => ({ ...row }));
+  if (isWildcard(pattern)) {
+    return found;
+  }
+  try {
+    const program = await findCompiledObject(pattern, programLibraries);
+    if (program) {
+      const sources = await objectSources([{ library: program.library, name: program.name, type: program.type, kind: "program" }]);
+      const source = sources.get(objectKey({ library: program.library, name: program.name, type: program.type }));
+      if (source) {
+        const [row] = await searchSourceMembers(source.member, [source.library], { sourceFile: source.sourceFile, limit: 1 });
+        if (row) {
+          found.push({ ...row, via: `source of program ${program.library}/${program.name}` });
+        }
+      }
+    }
+  } catch (err) {
+    ctx.log.appendLine(`[find member] Could not look up program ${pattern}: ${errorMessage(err)}`);
+  }
+  return found;
+}
+
+/** Source members whose text (description) contains `text`. */
+async function searchByText(text: string, libraries: string[] | undefined): Promise<FoundMember[]> {
+  const rows = await searchSourceMembers("*", libraries, { text: text.trim(), limit: 200 });
+  return rows.map((row) => ({ ...row }));
 }
 
 /**
@@ -422,18 +609,18 @@ async function pickAndBring(
  * The dependency list, with a title button to search in another scope. Resolves with the chosen
  * items, "changeScope", or undefined when dismissed.
  */
-function pickDependencies(
-  items: DependencyItem[],
+function pickDependencies<T extends vscode.QuickPickItem>(
+  items: T[],
   title: string,
   placeholder: string
-): Promise<readonly DependencyItem[] | "changeScope" | undefined> {
+): Promise<readonly T[] | "changeScope" | undefined> {
   return new Promise((resolve) => {
-    const quickPick = vscode.window.createQuickPick<DependencyItem>();
+    const quickPick = vscode.window.createQuickPick<T>();
     const scopeButton: vscode.QuickInputButton = {
       iconPath: new vscode.ThemeIcon("library"),
       tooltip: "Search in Other Libraries…",
     };
-    let result: readonly DependencyItem[] | "changeScope" | undefined;
+    let result: readonly T[] | "changeScope" | undefined;
     quickPick.items = items;
     quickPick.selectedItems = items.filter((item) => item.picked);
     quickPick.canSelectMany = true;

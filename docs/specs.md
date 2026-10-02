@@ -150,3 +150,15 @@ In VS Code, the agents of Claude Code (`anthropic.claude-code`), Codex (`openai.
 - `src/test/agentFiles.test.ts`: the moved helpers, the frontmatter marker, the JSON merge.
 - `src/test/bobPrompts.test.ts`, `src/test/bobMcpTools.test.ts`, `src/test/manifest.test.ts`: mention styles, the setting the tools name, the view, welcome content, provider id and application scope. Bob's tests pass unchanged.
 - README "Using with Claude Code, Codex and GitHub Copilot".
+
+### 10. Find Member and Check Out Through Change Management (shipped in 1.8.0)
+
+Users found a program on the IBM i, checked it out with LMI, then found the development copy in the Object Browser. Now it all starts in VS Code or Bob.
+
+- `ibmi-member-workspace.findMember` (Checked Out Members title bar, Command Palette): a name or pattern (`memberPatternProblem`, `src/memberSearch.ts`), searched with `searchSourceMembers` in `searchScope(ctx)`'s libraries (all user libraries when the scope is everywhere). A name without wildcards also finds its program (`findCompiledObject`) and the member it was compiled from (`objectSources`). Nothing found offers member-text search and All User Libraries. Results (`orderFound`: exact name, scope order, name) are picked with the dependency list's scope button. Then **Check Out Through Change Management…** (`changeThroughChangeManagement`), **Bring for Reference**, or **Check Out for Change Here**.
+- `ibmi-member-workspace.checkoutThroughChangeManagement` on Object Browser members (any `member*` item, protected filters too) and Checked Out Members items.
+
+**Validation**
+- `src/test/memberSearch.test.ts`: pattern checks, normalizing, ordering and dedupe.
+- `manifest.test.ts`: commands match their registrations.
+- README "Running Your Change-Management Checkout".

@@ -3,6 +3,7 @@
 ## 1.8.0 - 2026-10-02
 
 - **The change-management checkout command can name the project and the developer.** `ibmi-member-workspace.changeManagement.checkoutCommand` now accepts `&PROJECT`, the project (task) you name each time, with the last one filled in, and `&USER`, the user profile Code for IBM i is connected with. For example, Rocket LMI's `ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(...)` now runs without editing the setting for each change. Only valid IBM i names are filled in. The README also explains why to call the change-management command directly rather than through a wrapper program.
+- **Find a program and check it out through change management, without a 5250 session.** **Find Member…** (a search button in the Checked Out Members title bar) finds source members by name or pattern in your search scope, or in other libraries from the list's title bar. It also finds the member a program was compiled from, and searches member text when nothing has that name. Choose **Check Out Through Change Management…** to run your checkout command (for example Rocket LMI's `ACMSCHKOUT`) and then check out the development library's copy here, ready to change. **Check Out Through Change Management…** is also on the right-click menu of Object Browser members and of Checked Out Members.
 
 ## 1.7.13 - 2026-10-02
 
