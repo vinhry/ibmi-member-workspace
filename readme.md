@@ -106,6 +106,19 @@ Refreshing a source file group or every checkout is quick: one query per source 
 
 A badge on the Member Workspace icon shows how many members changed on the IBM i, with or without local changes, as of their last refresh.
 
+#### Status in the Explorer
+
+Checked-out files also show their status in VS Code's Explorer, on editor tabs and in Checked Out Members:
+
+| Badge | Meaning |
+|---|---|
+| **↑** | Local changes not yet uploaded |
+| **↓** | Changed on the IBM i; your local copy has no changes |
+| **!** | Changed in both places (a conflict): review it with Merge Back |
+| **RO** | Read-only reference copy |
+
+Members in sync show nothing. Hover over a file for details. The badges are arrows rather than letters because, with Local Change History on, Git marks the same files with its own letters.
+
 #### Background Refresh
 
 To keep the status current without refreshing yourself, turn on either or both in your user settings:

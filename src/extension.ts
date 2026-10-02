@@ -9,6 +9,7 @@ import { errorMessage } from "./errors";
 import { ProviderAvailabilityCache } from "./dependencySources";
 import { LocalFileWatcher } from "./localFileWatcher";
 import { registerSourceDiagnostics } from "./sourceDiagnostics";
+import { CheckoutDecorations } from "./checkoutDecorations";
 import { extractMemberInfo } from "./memberInfo";
 import { CheckedOutMember, formatMemberPath, isDefaultWorkItem } from "./types";
 import {
@@ -50,6 +51,8 @@ export async function activate(
 
   const treeProvider = new CheckoutTreeProvider(service);
   context.subscriptions.push(treeProvider);
+  const decorations = new CheckoutDecorations(service);
+  context.subscriptions.push(decorations, vscode.window.registerFileDecorationProvider(decorations));
   const mergeHandler = new MergeHandler();
 
   const treeView = vscode.window.createTreeView("ibmi-member-workspace.checkoutView", {

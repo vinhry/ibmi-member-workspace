@@ -125,3 +125,12 @@ Refresh downloaded every member's full source, one at a time, and changes made o
 - `src/test/checkoutIndexStore.test.ts`: `remoteSeen` survives a save and load.
 - `manifest.test.ts`: both settings are application-scoped.
 - README "Refresh Remote Status" and "Background Refresh".
+
+### 8. Status badges in the Explorer (shipped in 1.7.12)
+
+- `decorationFor(entry)` (`src/statusDecorations.ts`, vscode-free): `↑` modified, `↓` remote changed, `!` conflict, `RO` for any reference copy, nothing otherwise. Arrows, because Git decorates the same files with letters when Local Change History is on. Badges stay within VS Code's two-character limit.
+- `CheckoutDecorations` (`src/checkoutDecorations.ts`) is a `FileDecorationProvider` for `file` URIs of checkouts, refired on every `service.onDidChange`.
+
+**Validation**
+- `src/test/statusDecorations.test.ts`: each status, reference copies, badge length.
+- README "Status in the Explorer".
