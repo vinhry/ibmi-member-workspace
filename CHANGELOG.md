@@ -1,5 +1,11 @@
 # Change Log
 
+## 1.7.11 - 2026-10-02
+
+- **Quicker refresh.** **Refresh All Remote Status** and refreshing a source file group now ask the IBM i, with one query per source file, which members changed since they were last compared, and download only those. The others only have their local copy read, so refreshing hundreds of unchanged members takes seconds. Refreshing one member, or a selection, still downloads and compares each one, and an upload still always checks the member on the IBM i first.
+- **Background refresh, if you want it.** Two new user settings refresh your checkouts' status quietly: `ibmi-member-workspace.backgroundRefresh.onConnect` when Code for IBM i connects, and `ibmi-member-workspace.backgroundRefresh.intervalMinutes` every so many minutes (at least 5). Both are off by default. When a member you changed locally turns out to have changed on the IBM i too, a notification offers **Merge Back**.
+- A badge on the Member Workspace icon shows how many members changed on the IBM i, with or without local changes.
+
 ## 1.7.10 - 2026-10-02
 
 - **Checks before uploading.** Upload to IBM i and upload on save now check the local copy for lines longer than the source file holds, and for characters the member's CCSID can't store, such as the typographic quotes, dashes and ellipses that word processors and AI tools add. Until now the IBM i cut these lines off or replaced these characters, and you found out only afterwards. You're now asked to **Upload Anyway** or **Show Problems** first, even when upload on save is `silent`. A multi-member upload skips those members and lists them in the output panel.
