@@ -21,18 +21,27 @@ const entry: CheckedOutMember = {
 function fakeDeps(options: {
   results: Array<UploadResult | Error>;
   remoteChoice?: "overwrite" | "diff";
+  sourceChoice?: "upload";
   mergeBack?: boolean;
 }) {
   const calls: string[] = [];
   const results = [...options.results];
   const deps: UploadFlowDeps = {
     upload: async (_member, uploadOptions) => {
-      calls.push(uploadOptions?.overwriteRemoteChanges ? "upload(overwrite)" : "upload");
+      const flags = [
+        uploadOptions?.overwriteRemoteChanges && "overwrite",
+        uploadOptions?.ignoreSourceProblems && "anyway",
+      ].filter(Boolean);
+      calls.push(flags.length > 0 ? `upload(${flags.join(",")})` : "upload");
       const result = results.shift();
       if (result instanceof Error) {
         throw result;
       }
       return result ?? "failed";
+    },
+    resolveSourceProblems: async (_member, quiet) => {
+      calls.push(quiet ? "resolveSourceProblems(quiet)" : "resolveSourceProblems");
+      return options.sourceChoice;
     },
     resolveRemoteChange: async () => {
       calls.push("resolveRemoteChange");
@@ -100,6 +109,47 @@ describe("runUploadFlow", () => {
     const { deps, calls } = fakeDeps({ results: ["failed"] });
     assert.equal(await runUploadFlow(entry, deps), "failed");
     assert.deepEqual(calls, ["upload", "notifyFailed"]);
+  });
+
+  it("uploads text the member can't hold only after the user chooses to", async () => {
+    const { deps, calls } = fakeDeps({ results: ["source-problems", "uploaded"], sourceChoice: "upload" });
+    assert.equal(await runUploadFlow(entry, deps), "uploaded");
+    assert.deepEqual(calls, ["upload", "resolveSourceProblems", "upload(anyway)", "notifyUploaded"]);
+  });
+
+  it("leaves the member alone when the user doesn't upload text it can't hold", async () => {
+    const { deps, calls } = fakeDeps({ results: ["source-problems"] });
+    assert.equal(await runUploadFlow(entry, deps), "source-problems");
+    assert.deepEqual(calls, ["upload", "resolveSourceProblems"]);
+  });
+
+  it("still asks about text the member can't hold during a quiet automatic upload", async () => {
+    const { deps, calls } = fakeDeps({ results: ["source-problems"] });
+    assert.equal(await runUploadFlow(entry, deps, { quiet: true }), "source-problems");
+    assert.deepEqual(calls, ["upload", "resolveSourceProblems(quiet)"]);
+  });
+
+  it("keeps uploading anyway when it then asks about remote changes", async () => {
+    const { deps, calls } = fakeDeps({
+      results: ["source-problems", "remote-changed", "uploaded"],
+      sourceChoice: "upload",
+      remoteChoice: "overwrite",
+    });
+    assert.equal(await runUploadFlow(entry, deps), "uploaded");
+    assert.deepEqual(calls, [
+      "upload",
+      "resolveSourceProblems",
+      "upload(anyway)",
+      "resolveRemoteChange",
+      "upload(overwrite,anyway)",
+      "notifyUploaded",
+    ]);
+  });
+
+  it("skips the check for an upload the user already chose to make anyway", async () => {
+    const { deps, calls } = fakeDeps({ results: ["uploaded"] });
+    assert.equal(await runUploadFlow(entry, deps, { ignoreSourceProblems: true }), "uploaded");
+    assert.deepEqual(calls, ["upload(anyway)", "notifyUploaded"]);
   });
 
   it("reports an upload error", async () => {

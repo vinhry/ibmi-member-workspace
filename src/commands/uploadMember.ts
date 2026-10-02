@@ -2,24 +2,60 @@ import * as vscode from "vscode";
 import { CheckoutService } from "../checkoutService";
 import { errorMessage } from "../errors";
 import { MergeHandler } from "../mergeHandler";
+import { summarizeProblems } from "../sourceCheck";
+import { showSourceProblems } from "../sourceDiagnostics";
 import { CheckedOutMember, formatMemberPath } from "../types";
 import { UploadFlowOutcome, runUploadFlow } from "../uploadFlow";
 
 /**
  * Uploads one checkout with the same prompts for the Upload command and upload
- * on save: changes made on the IBM i are never overwritten without asking.
- * `quiet` reports success in the status bar instead of a notification.
+ * on save: changes made on the IBM i, and text the member can't hold, are never
+ * uploaded without asking. `quiet` reports success in the status bar instead of
+ * a notification, and doesn't wait for an answer about text the member can't hold.
  */
 export function uploadWithConflictHandling(
   service: CheckoutService,
   mergeHandler: MergeHandler,
   entry: CheckedOutMember,
   log: vscode.OutputChannel,
-  { quiet = false }: { quiet?: boolean } = {}
+  { quiet = false, ignoreSourceProblems = false }: { quiet?: boolean; ignoreSourceProblems?: boolean } = {}
 ): Promise<UploadFlowOutcome> {
   const memberPath = formatMemberPath(entry);
   return runUploadFlow(entry, {
     upload: (member, options) => service.uploadToRemote(member, options),
+
+    resolveSourceProblems: async (member, isQuiet) => {
+      const found = await service.sourceProblemsOf(member);
+      const summary = found && found.problems.length > 0
+        ? summarizeProblems(found.problems, found.layout)
+        : "it has text the member can't hold";
+      const detail = "On the IBM i, what doesn't fit on a line is cut off and those characters are replaced. " +
+        "Show Problems marks them in the editor.";
+      const showProblems = () => showSourceProblems(member, found?.problems[0]);
+      if (isQuiet) {
+        // An automatic upload doesn't wait: a notification left unanswered would hold up the next save's upload.
+        void vscode.window.showWarningMessage(`Not uploaded ${memberPath}: ${summary}. ${detail}`, "Show Problems", "Upload Anyway")
+          .then(async (choice) => {
+            if (choice === "Show Problems") {
+              await showProblems();
+            } else if (choice === "Upload Anyway") {
+              await uploadWithConflictHandling(service, mergeHandler, member, log, { ignoreSourceProblems: true });
+            }
+          })
+          .then(undefined, (err) => log.appendLine(`[upload] ${memberPath}: ${errorMessage(err)}`));
+        return undefined;
+      }
+      const choice = await vscode.window.showWarningMessage(
+        `Upload ${memberPath}? ${summary}.`,
+        { modal: true, detail },
+        "Upload Anyway",
+        "Show Problems"
+      );
+      if (choice === "Show Problems") {
+        await showProblems();
+      }
+      return choice === "Upload Anyway" ? "upload" : undefined;
+    },
 
     resolveRemoteChange: async () => {
       const choice = await vscode.window.showWarningMessage(
@@ -59,5 +95,5 @@ export function uploadWithConflictHandling(
         vscode.window.showErrorMessage(`Upload failed: ${errorMessage(error)}`);
       }
     },
-  }, { quiet });
+  }, { quiet, ignoreSourceProblems });
 }

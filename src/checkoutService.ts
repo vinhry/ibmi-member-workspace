@@ -26,6 +26,7 @@ import {
   uploadMemberContent,
   uploadMemberContentWithDates,
   sourceDatesEnabled,
+  sourceFileLayout,
   getSystemName,
 } from "./codeForIBMi";
 import { CheckoutCancelledError, LocalFileMissingError, ReferenceCopyError, errorMessage } from "./errors";
@@ -50,12 +51,20 @@ import { RepositoryTrust } from "./repositoryTrust";
 import { assertNoLinkBelow } from "./localPath";
 import { GitIntegrationState, gitIntegrationState } from "./workspaceSettings";
 import { CheckoutIndexStore, IndexStorage } from "./checkoutIndexStore";
+import { SourceLayout, SourceProblem, describeProblem, sourceProblems, summarizeProblems } from "./sourceCheck";
 
 /** workspaceState key: the user turned on Local Change History in this workspace. */
 const GIT_INTEGRATION_CONFIRMED = "gitIntegrationConfirmed";
 
-/** "uploaded-altered": uploaded, but the IBM i stored content that differs from the local copy. */
-export type UploadResult = "uploaded" | "uploaded-altered" | "failed" | "remote-changed";
+/**
+ * "uploaded-altered": uploaded, but the IBM i stored content that differs from the local copy.
+ * "source-problems": not uploaded, because the local copy has lines too long for the source file or
+ * characters its CCSID can't store.
+ */
+export type UploadResult = "uploaded" | "uploaded-altered" | "failed" | "remote-changed" | "source-problems";
+
+/** Problems listed in the output panel per member; the editor shows them all. */
+const LOGGED_PROBLEMS = 10;
 
 type RefreshProgress = vscode.Progress<{ message?: string; increment?: number }>;
 
@@ -95,6 +104,8 @@ export class CheckoutService implements vscode.Disposable {
   private inFlight = 0;
   /** Work item the user confirmed for checkouts this session, per system. */
   private readonly confirmedWorkItems = new Map<string, string>();
+  /** Source file layouts read this connection, by SYSTEM/LIBRARY/FILE; a batch reads each file once. */
+  private readonly sourceLayouts = new Map<string, Promise<SourceLayout | undefined>>();
 
   private readonly _onDidChange = new vscode.EventEmitter<void>();
   readonly onDidChange = this._onDidChange.event;
@@ -951,6 +962,7 @@ export class CheckoutService implements vscode.Disposable {
       memberName
     );
 
+    const sourceLayout = await this.lookupSourceLayout(system, library, sourceFile) ?? existing?.sourceLayout;
     const entry: CheckedOutMember = {
       id: buildCheckoutId(system, library, sourceFile, memberName),
       system,
@@ -964,6 +976,7 @@ export class CheckoutService implements vscode.Disposable {
       ...(reference ? { kind: "reference" as const } : {}),
       // A re-download keeps the member's own upload-on-save choice.
       ...(!reference && existing?.uploadOnSave ? { uploadOnSave: existing.uploadOnSave } : {}),
+      ...(sourceLayout ? { sourceLayout } : {}),
       status: "checked-out",
     };
 
@@ -1045,6 +1058,8 @@ export class CheckoutService implements vscode.Disposable {
 
     const status = classifyStatus(localHash, remoteHash, entry.remoteHashAtCheckout);
     this.adoptNextBaseline(entry, localHash, remoteHash);
+    // Read again in case the source file changed; one query per source file per connection.
+    await this.fillSourceLayout(entry, { replace: true });
 
     this.log.appendLine(
       `[refresh] ${entry.library}/${entry.sourceFile}/${entry.memberName}` +
@@ -1107,6 +1122,8 @@ export class CheckoutService implements vscode.Disposable {
     entry: CheckedOutMember,
     options?: {
       overwriteRemoteChanges?: boolean;
+      /** Uploads even when the local copy has text the source member can't hold. */
+      ignoreSourceProblems?: boolean;
       /** Collects the path for one checkpoint after a batch instead of saving one per member. */
       deferCheckpointTo?: string[];
     }
@@ -1116,7 +1133,7 @@ export class CheckoutService implements vscode.Disposable {
 
   private async uploadToRemoteNow(
     entry: CheckedOutMember,
-    options?: { overwriteRemoteChanges?: boolean; deferCheckpointTo?: string[] }
+    options?: { overwriteRemoteChanges?: boolean; ignoreSourceProblems?: boolean; deferCheckpointTo?: string[] }
   ): Promise<UploadResult> {
     assertEditable(entry);
     this.assertConnectedTo(entry.system);
@@ -1126,6 +1143,15 @@ export class CheckoutService implements vscode.Disposable {
     const localUri = vscode.Uri.file(entry.localPath);
     const localContent = await this.readLocal(localUri);
     const localHash = hashContent(localContent);
+
+    if (!options?.ignoreSourceProblems) {
+      const layout = await this.sourceLayoutFor(entry);
+      const problems = layout ? sourceProblems(localContent, layout) : [];
+      if (layout && problems.length > 0) {
+        this.logSourceProblems(entry, layout, problems);
+        return "source-problems";
+      }
+    }
 
     if (!options?.overwriteRemoteChanges) {
       const remoteContent = await downloadMemberContent(
@@ -1320,6 +1346,78 @@ export class CheckoutService implements vscode.Disposable {
     this.logGitFailure(result);
 
     await this.forgetEntries(entries);
+  }
+
+  /**
+   * The line length and CCSID of the checkout's source file: the stored ones, or else read from the
+   * IBM i (and stored) while connected to its system. Undefined when they can't be known.
+   */
+  async sourceLayoutFor(entry: CheckedOutMember): Promise<SourceLayout | undefined> {
+    const stored = this.findEntryById(entry.id) ?? entry;
+    if (!stored.sourceLayout && await this.fillSourceLayout(stored)) {
+      await this.persist();
+    }
+    return stored.sourceLayout;
+  }
+
+  /** What in the checkout's local file its source member can't hold; undefined when its layout isn't known. */
+  async sourceProblemsOf(
+    entry: CheckedOutMember
+  ): Promise<{ layout: SourceLayout; problems: SourceProblem[] } | undefined> {
+    const layout = await this.sourceLayoutFor(entry);
+    if (!layout) {
+      return undefined;
+    }
+    this.assertLocalPathSafe(entry.localPath);
+    return { layout, problems: sourceProblems(await this.readLocal(vscode.Uri.file(entry.localPath)), layout) };
+  }
+
+  /** Forgets the source file layouts read so far; a reconnect may reach a changed file or another system. */
+  clearSourceLayouts(): void {
+    this.sourceLayouts.clear();
+  }
+
+  /**
+   * Reads the layout while connected to the checkout's system: only a missing one, or also a stored
+   * one with `replace`. True when one was found; a failed read keeps the stored one. The caller persists.
+   */
+  private async fillSourceLayout(entry: CheckedOutMember, { replace = false } = {}): Promise<boolean> {
+    const system = getSystemName();
+    if ((entry.sourceLayout && !replace) || !system || systemKey(system) !== systemKey(entry.system)) {
+      return false;
+    }
+    const layout = await this.lookupSourceLayout(entry.system, entry.library, entry.sourceFile);
+    if (layout) {
+      entry.sourceLayout = layout;
+    }
+    return layout !== undefined;
+  }
+
+  /** The layout of a source file of the connected `system`, read once per connection. A failed read isn't kept. */
+  private lookupSourceLayout(system: string, library: string, sourceFile: string): Promise<SourceLayout | undefined> {
+    const key = `${systemKey(system)}/${library.toUpperCase()}/${sourceFile.toUpperCase()}`;
+    let layout = this.sourceLayouts.get(key);
+    if (!layout) {
+      layout = sourceFileLayout(library, sourceFile).catch((err) => {
+        this.sourceLayouts.delete(key);
+        this.log.appendLine(
+          `[check] Could not read the line length and CCSID of ${library}/${sourceFile}; its members aren't checked before upload: ${errorMessage(err)}`
+        );
+        return undefined;
+      });
+      this.sourceLayouts.set(key, layout);
+    }
+    return layout;
+  }
+
+  private logSourceProblems(entry: CheckedOutMember, layout: SourceLayout, problems: SourceProblem[]): void {
+    this.log.appendLine(`[upload] ${formatMemberPath(entry)} not uploaded: ${summarizeProblems(problems, layout)}`);
+    for (const problem of problems.slice(0, LOGGED_PROBLEMS)) {
+      this.log.appendLine(`  line ${problem.line + 1}: ${describeProblem(problem, layout)}`);
+    }
+    if (problems.length > LOGGED_PROBLEMS) {
+      this.log.appendLine(`  and ${problems.length - LOGGED_PROBLEMS} more; see the Problems view`);
+    }
   }
 
   /**

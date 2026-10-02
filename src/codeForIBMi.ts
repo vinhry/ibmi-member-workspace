@@ -7,6 +7,7 @@ import {
   SourceLocation,
   objectKey,
 } from "./dependencySources";
+import { SourceLayout, layoutFromColumn } from "./sourceCheck";
 import { CheckedOutMember, buildLocalFileName } from "./types";
 import { Snapshot, SnapshotStore } from "./whereUsedSnapshot";
 
@@ -239,6 +240,19 @@ export async function libraryExists(library: string): Promise<boolean> {
     { bindings: [library, library] }
   );
   return rows.length > 0;
+}
+
+/**
+ * The line length and CCSID of a source file's SRCDTA column. Undefined for a file without one, which
+ * isn't a source physical file.
+ */
+export async function sourceFileLayout(library: string, sourceFile: string): Promise<SourceLayout | undefined> {
+  const [row] = await requireConnection().runSQL(
+    "SELECT LENGTH, CCSID FROM QSYS2.SYSCOLUMNS " +
+    "WHERE SYSTEM_TABLE_SCHEMA = ? AND SYSTEM_TABLE_NAME = ? AND SYSTEM_COLUMN_NAME = 'SRCDTA'",
+    { bindings: [library.toUpperCase(), sourceFile.toUpperCase()] }
+  );
+  return row ? layoutFromColumn(row.LENGTH, row.CCSID) : undefined;
 }
 
 /** The first *PGM or *SRVPGM named `name` in `libraries`, in order. Libraries that can't be read are skipped. */

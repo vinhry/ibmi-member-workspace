@@ -81,6 +81,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
             let succeeded = 0;
             let altered = 0;
             let skipped = 0;
+            let withProblems = 0;
             let references = 0;
             let errors = 0;
             let cancelled = false;
@@ -111,6 +112,9 @@ export function registerSyncCommands(ctx: CommandContext): void {
                     log.appendLine(
                       `[upload] Skipped ${formatMemberPath(entry)}: changed on the IBM i since checkout — review it with Merge Back`
                     );
+                  } else if (result === "source-problems") {
+                    // CheckoutService logged which lines.
+                    withProblems++;
                   } else {
                     errors++;
                     log.appendLine(`[upload] Failed for ${formatMemberPath(entry)}`);
@@ -133,19 +137,22 @@ export function registerSyncCommands(ctx: CommandContext): void {
               vscode.window.showInformationMessage(
                 `Upload cancelled. ${succeeded}/${selections.length} member(s) uploaded before cancelling.`
               );
-            } else if (errors > 0 || skipped > 0 || altered > 0 || references > 0) {
+            } else if (errors > 0 || skipped > 0 || withProblems > 0 || altered > 0 || references > 0) {
               const alteredText = altered > 0
                 ? ` ${altered} differ on the IBM i from the local copy (e.g. truncated lines).`
                 : "";
               const skippedText = skipped > 0
                 ? ` ${skipped} skipped because they changed on the IBM i since checkout.`
                 : "";
+              const problemText = withProblems > 0
+                ? ` ${withProblems} skipped because they have lines too long for their source file or characters the IBM i can't store; upload them one at a time to see why.`
+                : "";
               const referenceText = references > 0
                 ? ` ${references} skipped because they are read-only reference copies.`
                 : "";
               const errorText = errors > 0 ? ` ${errors} error(s).` : "";
               vscode.window.showWarningMessage(
-                `Uploaded ${succeeded}/${selections.length} member(s) to IBM i.${alteredText}${skippedText}${referenceText}${errorText} See IBM i Member Workspace output panel.`
+                `Uploaded ${succeeded}/${selections.length} member(s) to IBM i.${alteredText}${skippedText}${problemText}${referenceText}${errorText} See IBM i Member Workspace output panel.`
               );
               log.show();
             } else {

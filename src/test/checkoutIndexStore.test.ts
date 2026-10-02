@@ -175,6 +175,18 @@ describe("CheckoutIndexStore", () => {
     assert.equal(other.uploadOnSave, undefined);
   });
 
+  it("keeps a checkout's source file layout across a save and load", async () => {
+    const h = harness();
+    h.store.index = v3Index("PROG", "OTHER");
+    h.store.index.systems.SYS.workItems.workspace[0].sourceLayout = { dataLength: 80, ccsid: 37 };
+    await h.store.save();
+    const reloaded = harness(h.storage);
+    await reloaded.store.load();
+    const [prog, other] = reloaded.store.index.systems.SYS.workItems.workspace;
+    assert.deepEqual(prog.sourceLayout, { dataLength: 80, ccsid: 37 });
+    assert.equal(other.sourceLayout, undefined);
+  });
+
   it("writes through a temp file and renames it into place", async () => {
     const h = harness();
     h.store.index = v3Index("PROG");

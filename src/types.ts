@@ -1,3 +1,5 @@
+import type { SourceLayout } from "./sourceCheck";
+
 export interface CheckedOutMember {
   id: string;
   system: string;
@@ -18,6 +20,8 @@ export interface CheckedOutMember {
   kind?: "reference";
   /** Upload on save for this member only, instead of the `autoUploadOnSave` setting. */
   uploadOnSave?: "off" | "ask" | "silent";
+  /** The source file's line length and CCSID, read at checkout; absent for checkouts made before 1.7.10. */
+  sourceLayout?: SourceLayout;
   status: CheckoutStatus;
 }
 

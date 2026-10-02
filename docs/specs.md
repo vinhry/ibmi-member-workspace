@@ -94,3 +94,17 @@ Users reported that Find Dependencies, with no search libraries set, searched be
 - `src/test/dependencyResolve.test.ts`: `searchScopeFrom`, `scopeReferences` (including resolving to the in-scope copy), `librariesToSearch`, outside ranking, `isIbmLibrary`.
 - `src/test/dependencySources.test.ts`: DSPPGMREF tries `*ALLUSR` only for `everywhere`.
 
+### 6. Checks before upload (shipped in 1.7.10)
+
+Lines longer than the source file holds, and characters the member's CCSID can't store, used to be found only after an upload, through the read-back "IBM i copy differs" warning.
+
+- `src/sourceCheck.ts` (vscode-free): `sourceProblems(content, layout)` reads the text as upload sends it (no BOM, CRLF or trailing blanks). A line is too long when its characters (code points, without trailing blanks) exceed `dataLength`. A character is flagged only for the Latin-1 EBCDIC CCSIDs (37, 273, 277, 278, 280, 284, 285, 297, 500, 871, 1047) above U+00FF, and for 1140–1149 the same with € allowed and ¤ not. Other CCSIDs check length only. `asciiReplacement` spells typographic characters in plain text.
+- The layout (`SRCDTA` length and CCSID from `QSYS2.SYSCOLUMNS`, `sourceFileLayout` in `src/codeForIBMi.ts`) is stored on the checkout as `sourceLayout`: read at checkout, re-read at refresh, and read at upload when missing. Reads are cached per source file per connection; a failed read skips the checks.
+- `CheckoutService.uploadToRemote` returns `"source-problems"` before its remote check, unless `ignoreSourceProblems`. `runUploadFlow` asks through `resolveSourceProblems` (a modal; for quiet automatic uploads a notification that isn't waited for) and uploads again with `ignoreSourceProblems` on **Upload Anyway**. Batch upload skips and counts those members; the service logs up to 10 problems each.
+- `src/sourceDiagnostics.ts` shows the problems as warnings on editable checkouts and offers quick fixes that replace typographic characters.
+
+**Validation**
+- `src/test/sourceCheck.test.ts`: the length boundary, BOM/CRLF/trailing blanks, astral characters, CCSID 37 vs 1140 vs Unicode and unknown CCSIDs, replacements, messages, `layoutFromColumn`.
+- `src/test/uploadFlow.test.ts`: problems ask first (also when quiet), Upload Anyway carries through a remote-change prompt, an upload already chosen anyway skips the check.
+- `src/test/checkoutIndexStore.test.ts`: `sourceLayout` survives a save and load.
+- README "Checks Before Uploading".

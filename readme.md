@@ -52,6 +52,19 @@ Before uploading, the extension checks whether the member has changed on the IBM
 
 After uploading, the member is read back from the IBM i. If what was stored differs from your local file (for example, a line longer than the record length was truncated), you're warned and the checkout stays **Modified** so you can review it with Merge Back.
 
+#### Checks Before Uploading
+
+Before uploading, the local copy is checked for text the member can't hold:
+
+- **Lines that are too long.** A source file holds a fixed number of characters per line (80 for a source file created with `RCDLEN(92)`), and the IBM i cuts off the rest of a longer line. Trailing blanks don't count.
+- **Characters the member's CCSID can't store.** Typographic quotes (“ ”), dashes (– —) and ellipses (…), which word processors and AI tools often add, can't be stored in CCSID 37, for example, and the IBM i replaces them. Characters are checked for the common single-byte EBCDIC CCSIDs (37, 273, 277, 278, 280, 284, 285, 297, 500, 871, 1047, and 1140 to 1149). For other CCSIDs, only the line length is checked.
+
+When either is found, you're asked to **Upload Anyway** or **Show Problems**. With upload on save, a notification asks instead, so it doesn't hold up your next save. In a multi-member upload, those members are skipped and listed in the IBM i Member Workspace output panel.
+
+The same problems are underlined in the editor as you type, and listed in the Problems view. For typographic characters, the light bulb offers to replace them with plain text (`'`, `"`, `-`, `...`), one at a time or all at once in the file. Read-only reference copies aren't checked.
+
+The source file's line length and CCSID are read when you check out a member and kept with the checkout, so the checks also work offline. For a member checked out with an earlier version, they're read at its next refresh or upload.
+
 ### Upload on Save
 
 Set `ibmi-member-workspace.autoUploadOnSave` in your user settings to upload a checked-out member whenever you save it in the editor. Only user settings are read, so a workspace's `.vscode/settings.json` can't turn it on:
@@ -60,7 +73,7 @@ Set `ibmi-member-workspace.autoUploadOnSave` in your user settings to upload a c
 - **`ask`**: after each save, a notification asks **Upload**, **Always Upload** (switches to `silent`), or **Not Now**.
 - **`silent`**: upload without asking. Success shows briefly in the status bar.
 
-Upload on save uses the same checks and messages as **Upload to IBM i**. If the member changed on the IBM i since checkout, you're always asked to **Overwrite Anyway** or **Show Diff**, even in `silent` mode. A save is skipped when:
+Upload on save uses the same checks and messages as **Upload to IBM i**. If the member changed on the IBM i since checkout, you're always asked to **Overwrite Anyway** or **Show Diff**, even in `silent` mode. Lines too long for the source file and characters it can't store always ask too (see **Checks Before Uploading**). A save is skipped when:
 
 - it has no local changes (for example, saving an unchanged file);
 - Code for IBM i is not connected to the checkout's system, or the connection is read-only;

@@ -8,6 +8,7 @@ import { getSystemName, onConnectionChange, resetWhereUsedSnapshots } from "./co
 import { errorMessage } from "./errors";
 import { ProviderAvailabilityCache } from "./dependencySources";
 import { LocalFileWatcher } from "./localFileWatcher";
+import { registerSourceDiagnostics } from "./sourceDiagnostics";
 import { extractMemberInfo } from "./memberInfo";
 import { CheckedOutMember, formatMemberPath, isDefaultWorkItem } from "./types";
 import {
@@ -120,6 +121,7 @@ export async function activate(
     // A reconnect may reach a different system, or one whose tools changed; QTEMP starts empty.
     dependencyAvailability.reset();
     resetWhereUsedSnapshots();
+    service.clearSourceLayouts();
     treeProvider.refresh();
     const system = getSystemName();
     if (system && service.gitIntegrationOn()) {
@@ -244,6 +246,7 @@ export async function activate(
   registerDependencyCommands(ctx);
   registerViewCommands(ctx);
   registerGitCommands(ctx);
+  registerSourceDiagnostics(context, service);
 
   // Bob's agent is the only user of the research tools; VS Code gets neither the server nor its commands.
   const inBob = isBobProduct(vscode.env.appName, vscode.env.uriScheme);
