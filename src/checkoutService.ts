@@ -20,6 +20,8 @@ import {
   sanitizeSystemName,
   startWorkItemState,
   systemKey,
+  TrackedGroup,
+  trackedGroups,
 } from "./types";
 import {
   downloadMemberContent,
@@ -823,9 +825,43 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   hasEntries(): boolean {
-    return Object.values(this.index.systems).some((state) =>
-      Object.values(state.workItems).some((entries) => entries.length > 0)
-    );
+    return trackedGroups(this.index).length > 0;
+  }
+
+  /** Where checkouts are still tracked: every work item of every system, not only what the view shows. */
+  trackedGroups(): TrackedGroup[] {
+    return trackedGroups(this.index);
+  }
+
+  /** How many tracked checkouts, in every work item of every system, have changes not sent to the IBM i. */
+  async countLocalChangesEverywhere(): Promise<number> {
+    const all = [
+      ...Object.values(this.index.systems).flatMap((state) => Object.values(state.workItems).flat()),
+      ...Object.values(this.index.unassignedWorkItems).flat(),
+    ];
+    let changed = 0;
+    for (const entry of all) {
+      if (await this.hasLocalChanges(entry).catch(() => false)) {
+        changed++;
+      }
+    }
+    return changed;
+  }
+
+  /**
+   * Stops tracking every checkout, in every work item of every system, to change the checkout
+   * folder. Local files and Local Change History are left as they are.
+   */
+  async forgetAllEntries(): Promise<void> {
+    for (const state of Object.values(this.index.systems)) {
+      for (const workItem of Object.keys(state.workItems)) {
+        state.workItems[workItem] = [];
+      }
+    }
+    for (const workItem of Object.keys(this.index.unassignedWorkItems)) {
+      this.index.unassignedWorkItems[workItem] = [];
+    }
+    await this.persist();
   }
 
   getCheckoutRoot(): vscode.Uri | undefined {

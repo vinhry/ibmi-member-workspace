@@ -2,8 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   CheckedOutMember,
+  CheckoutIndex,
   SystemCheckoutState,
   buildCheckoutId,
+  describeTrackedGroup,
   isReferenceCopy,
   memberNameProblem,
   moveEntriesState,
@@ -11,6 +13,7 @@ import {
   sanitizeSystemName,
   startWorkItemState,
   storedEntryFor,
+  trackedGroups,
 } from "../types";
 
 describe("parseCheckoutIndex", () => {
@@ -314,5 +317,30 @@ describe("work item state", () => {
     );
     moveEntriesState(value, new Set([buildCheckoutId("SYS", "LIB", "QRPGLESRC", "ONE")]), "workspace", "NEW");
     assert.deepEqual(value.workItems.NEW.map((entry) => entry.memberName), ["ONE"]);
+  });
+});
+
+describe("trackedGroups", () => {
+  const entry = { id: "X" } as unknown as CheckedOutMember;
+  it("finds checkouts in every work item of every system, including ones the view doesn't show", () => {
+    const index: CheckoutIndex = {
+      version: 3,
+      systems: {
+        PUB400: { system: "PUB400", directory: "PUB400", activeWorkItem: "TICKET-2", workItems: { workspace: [entry, entry], "TICKET-2": [] } },
+        OTHER: { system: "OTHER", directory: "OTHER", activeWorkItem: "workspace", workItems: { "TICKET-1": [entry] } },
+      },
+      unassignedWorkItems: { OLD: [entry] },
+    };
+    const groups = trackedGroups(index);
+    assert.deepEqual(groups, [
+      { system: "PUB400", workItem: "workspace", count: 2 },
+      { system: "OTHER", workItem: "TICKET-1", count: 1 },
+      { system: "", workItem: "OLD", count: 1 },
+    ]);
+    assert.deepEqual(groups.map(describeTrackedGroup), ["2 in no work item on PUB400", "1 in work item TICKET-1 on OTHER", "1 in work item OLD"]);
+  });
+
+  it("finds nothing when every work item is empty", () => {
+    assert.deepEqual(trackedGroups({ version: 3, systems: {}, unassignedWorkItems: { A: [] } }), []);
   });
 });

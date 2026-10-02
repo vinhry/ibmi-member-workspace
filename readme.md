@@ -20,7 +20,7 @@ Before the first checkout in each VS Code workspace, choose a visible local fold
 2. When prompted, select **Choose Folder**, or run **IBM i Member Workspace: Configure Checkout Folder** from the Command Palette.
 3. Select the directory that should contain checked-out members for this workspace.
 
-The folder selection and checkout index are private to the current VS Code workspace and are not written to `.vscode/settings.json`. To change the folder later, first merge or discard every tracked checkout, then run **Configure Checkout Folder** again.
+The folder selection and checkout index are private to the current VS Code workspace and are not written to `.vscode/settings.json`. To change the folder later, run **Configure Checkout Folder** again. If members are still tracked, in any work item or on any IBM i system, you're told where they are and how many have changes not sent to the IBM i. You can then stop tracking them and choose the new folder: their files stay in the old folder, and Local Change History keeps its checkpoints. To keep them tracked instead, merge or discard them first.
 
 ## Features
 

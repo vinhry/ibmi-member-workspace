@@ -213,6 +213,37 @@ function isSystemCheckoutState(value: unknown): value is SystemCheckoutState {
     Object.values(state.workItems).every(Array.isArray);
 }
 
+/** Checkouts tracked in one work item of one system ("" for work items not tied to a system yet). */
+export interface TrackedGroup {
+  system: string;
+  workItem: string;
+  count: number;
+}
+
+/** Every work item, on every system, that still tracks checkouts, including ones not shown as Git branches. */
+export function trackedGroups(index: CheckoutIndex): TrackedGroup[] {
+  const groups: TrackedGroup[] = [];
+  for (const state of Object.values(index.systems)) {
+    for (const [workItem, entries] of Object.entries(state.workItems)) {
+      if (entries.length > 0) {
+        groups.push({ system: state.system, workItem, count: entries.length });
+      }
+    }
+  }
+  for (const [workItem, entries] of Object.entries(index.unassignedWorkItems)) {
+    if (entries.length > 0) {
+      groups.push({ system: "", workItem, count: entries.length });
+    }
+  }
+  return groups;
+}
+
+/** A tracked group in words, e.g. "3 in no work item on PUB400". */
+export function describeTrackedGroup(group: TrackedGroup): string {
+  const where = isDefaultWorkItem(group.workItem) ? "no work item" : `work item ${group.workItem}`;
+  return `${group.count} in ${where}${group.system ? ` on ${group.system}` : ""}`;
+}
+
 export function systemKey(system: string): string {
   return system.toLocaleUpperCase("en-US");
 }
