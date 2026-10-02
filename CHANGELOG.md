@@ -1,5 +1,11 @@
 # Change Log
 
+## 1.7.13 - 2026-10-02
+
+- **Claude Code, Codex and GitHub Copilot can research your IBM i programs**, as IBM Bob's agent does in Bob. In VS Code, a new **AI Research Tools** section above Checked Out Members connects an agent to the same read-only research tools: what a program uses, what uses it, file layouts, and the source behind them. Claude Code gets the server in the workspace's `.mcp.json`, Codex in `.codex/config.toml`, and Copilot through VS Code's chat (VS Code 1.101 or later), with no file. Connect lets Claude Code and Codex use the tools without asking, and can add the same rules Bob gets. The token is kept out of Git, a committed `.mcp.json` is never given it, and Disconnect replaces it. Nothing runs until you connect an agent. See **Using with Claude Code, Codex and GitHub Copilot** in the README.
+- **Investigate with AI.** Right-click members for **Analyze Relationships**, **Explain Program** or **Deep Dive**, the same prompts as **Bob, Investigate**. The prompt opens in Claude Code, Copilot Chat or Codex, ready for you to review and send.
+- In IBM Bob, everything works as before.
+
 ## 1.7.12 - 2026-10-02
 
 - **Status in the Explorer.** Checked-out files now show their sync status in VS Code's Explorer, on editor tabs and in Checked Out Members: **↑** for local changes not yet uploaded, **↓** for a member changed on the IBM i, **!** for a conflict, and **RO** for a read-only reference copy. Members in sync show nothing. Hover over a file for details.
