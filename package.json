@@ -915,11 +915,6 @@
           "group": "navigation@2"
         },
         {
-          "command": "ibmi-member-workspace.findMember",
-          "when": "view == ibmi-member-workspace.checkoutView",
-          "group": "navigation@2"
-        },
-        {
           "command": "ibmi-member-workspace.expandAll",
           "when": "view == ibmi-member-workspace.checkoutView",
           "group": "navigation@3"

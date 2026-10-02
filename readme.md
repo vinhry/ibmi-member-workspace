@@ -216,7 +216,7 @@ A list shows what was found, grouped into copybooks, called programs, referenced
 
 Set `ibmi-member-workspace.changeManagement.checkoutCommand` in your user settings to the CL command that checks a member out in your change-management system. Then you can find a program and check it out for change without leaving VS Code or IBM Bob:
 
-- **Find Member**, the panel below Checked Out Members: click **Find Member…** (the search button in its title bar or in Checked Out Members', or the Command Palette) and type a member or program name, with `*` for any characters (`VU0005CC`, `ORD*`).
+- **Find Member**, the panel below Checked Out Members: click **Find Member…** (the search button in its title bar, or the Command Palette) and type a member or program name, with `*` for any characters (`VU0005CC`, `ORD*`).
   - It searches the libraries of your search scope (see **Finding the source**). **Search in Other Libraries…** in its title bar runs the search again elsewhere, for example in your production source libraries or all user libraries.
   - For a program whose source member has another name, the member it was compiled from is found too. When nothing has the name, the panel offers to search member text or all user libraries.
   - The results stay in the panel, marked when already checked out, so you can act on them one after another. Click one to read it. Right-click one or more for **Check Out Through Change Management…** (also the button on each result), **Bring for Reference**, or **Check Out for Change Here** (for members already in your development library).
