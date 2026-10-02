@@ -91,6 +91,25 @@ export function expandCheckoutCommand(
     .replace(PLACEHOLDER, (_match, name: string) => values[name.toUpperCase() as keyof typeof values].toUpperCase());
 }
 
+/**
+ * Messages that only say a command failed (LMI's "ended abnormally", SQL's "external routine detected
+ * an error" from the SQL job the command ran in, CL's "errors occurred"); the cause is in the others.
+ */
+const GENERIC_FAILURES = /^(CMS9913|SQL0443|CPF9999|CPF0001|CPF9898)\b/;
+/** Messages of a failed command reported at most. */
+const MAX_FAILURE_MESSAGES = 10;
+
+/**
+ * The messages to report for a failed command, from its output: each once, the specific ones before
+ * the generic ones that only say it failed, so the cause is never cut off.
+ */
+export function commandFailureMessages(output: string): string[] {
+  const lines = [...new Set(output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))];
+  const generic = lines.filter((line) => GENERIC_FAILURES.test(line));
+  const specific = lines.filter((line) => !GENERIC_FAILURES.test(line));
+  return [...specific, ...generic].slice(0, MAX_FAILURE_MESSAGES);
+}
+
 export interface ChangeCheckoutDeps {
   /** Asks for the development library; undefined when cancelled. */
   askDevLibrary(): Promise<string | undefined>;

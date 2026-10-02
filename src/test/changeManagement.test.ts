@@ -4,6 +4,7 @@ import {
   ChangeCheckoutDeps,
   ChangeMember,
   checkoutTemplateProblem,
+  commandFailureMessages,
   expandCheckoutCommand,
   runChangeManagementCheckout,
 } from "../changeManagement";
@@ -209,5 +210,27 @@ describe("&PROJECT and &USER", () => {
   it("still refuses placeholders it doesn't know", () => {
     assert.match(checkoutTemplateProblem("X P(&TASK) D(&DEVELOPER)") ?? "", /&TASK, &DEVELOPER/);
     assert.equal(checkoutTemplateProblem(LMI), undefined);
+  });
+});
+
+describe("commandFailureMessages", () => {
+  it("puts the cause before the messages that only say the command failed, each once", () => {
+    const output = [
+      "CMS1234: Project NGUV7234 is not open for release CRETE/IESCORP/BASE.",
+      "CMS9913: Program ACMSCHKOUT ended ABNORMALLY.  The highest CMSnnnn message severity was 30.",
+      "SQL0443: Trigger program or external routine detected an error.",
+      "SQL0443: Trigger program or external routine detected an error.",
+      "",
+    ].join("\r\n");
+    assert.deepEqual(commandFailureMessages(output), [
+      "CMS1234: Project NGUV7234 is not open for release CRETE/IESCORP/BASE.",
+      "CMS9913: Program ACMSCHKOUT ended ABNORMALLY.  The highest CMSnnnn message severity was 30.",
+      "SQL0443: Trigger program or external routine detected an error.",
+    ]);
+  });
+
+  it("keeps at most 10 messages", () => {
+    const output = Array.from({ length: 15 }, (_, i) => `CMS10${String(i).padStart(2, "0")}: message ${i}`).join("\n");
+    assert.equal(commandFailureMessages(output).length, 10);
   });
 });

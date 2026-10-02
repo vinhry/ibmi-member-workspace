@@ -7,6 +7,7 @@ import {
   SourceLocation,
   objectKey,
 } from "./dependencySources";
+import { commandFailureMessages } from "./changeManagement";
 import { changeStamp } from "./remoteStamps";
 import { SourceLayout, layoutFromColumn } from "./sourceCheck";
 import { CheckedOutMember, buildLocalFileName } from "./types";
@@ -242,13 +243,41 @@ function requireConnection(): IBMi {
 
 /**
  * Runs a CL command in the connection's ILE environment (its library list applies). Throws with
- * the last job messages when the command fails.
+ * all its messages (the cause first, see `commandFailureMessages`) when the command fails.
  */
 export async function runClCommand(command: string): Promise<void> {
-  const result = await requireConnection().runCommand({ command, environment: "ile" });
+  const connection = requireConnection();
+  // The IBM i's clock, to read only the job log messages this command adds.
+  const [started] = await connection.runSQL("VALUES VARCHAR(CURRENT TIMESTAMP)").catch(() => []);
+  const since = started ? String(Object.values(started)[0] ?? "") : "";
+  const result = await connection.runCommand({ command, environment: "ile" });
   if (result.code !== 0) {
-    const messages = (result.stderr || result.stdout).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    throw new Error(messages.slice(-3).join(" ") || `The command ended with code ${result.code}.`);
+    const messages = commandFailureMessages(
+      [await jobLogSince(since), result.stderr, result.stdout].filter(Boolean).join("\n")
+    );
+    throw new Error(messages.join(" ") || `The command ended with code ${result.code}.`);
+  }
+}
+
+/**
+ * Diagnostic and error messages in the SQL job's log since `since`. A command run in that job (as
+ * through QCMDEXC) leaves its cause there, e.g. Rocket LMI's CMSnnnn messages before its generic
+ * CMS9913. Empty when the job log can't be read.
+ */
+async function jobLogSince(since: string): Promise<string> {
+  if (!since) {
+    return "";
+  }
+  try {
+    const rows = await requireConnection().runSQL(
+      "SELECT MESSAGE_ID, MESSAGE_TEXT FROM TABLE(QSYS2.JOBLOG_INFO('*')) X " +
+      "WHERE MESSAGE_TIMESTAMP >= TIMESTAMP(?) AND MESSAGE_ID IS NOT NULL " +
+      "AND (SEVERITY >= 20 OR MESSAGE_ID LIKE 'CMS%') ORDER BY ORDINAL_POSITION",
+      { bindings: [since] }
+    );
+    return rows.map((row) => `${String(row.MESSAGE_ID).trim()}: ${String(row.MESSAGE_TEXT ?? "").trim()}`).join("\n");
+  } catch {
+    return "";
   }
 }
 
