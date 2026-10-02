@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.8.1 - 2026-10-02
+
+- Fix: **Configure Checkout Folder** refused to change the folder while members were tracked, even when Checked Out Members showed none. They were in another work item (such as members checked out without one), or on another IBM i system. It now says where they are and how many have unsent changes, and offers **Stop Tracking and Change Folder**. Their files stay where they are.
+
 ## 1.8.0 - 2026-10-02
 
 - **The change-management checkout command can name the project and the developer.** `ibmi-member-workspace.changeManagement.checkoutCommand` now accepts `&PROJECT`, the project (task) you name each time, with the last one filled in, and `&USER`, the user profile Code for IBM i is connected with. For example, Rocket LMI's `ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(...)` now runs without editing the setting for each change. Only valid IBM i names are filled in. The README also explains why to call the change-management command directly rather than through a wrapper program.
@@ -7,7 +11,6 @@
 - **Claude Code and Codex in IBM Bob.** In Bob, the **AI Research Tools** section and **Investigate with AI** now offer Claude Code and Codex too, next to Bob's own agent, which works as before. Each keeps its own server and token, so disconnecting one never disconnects Bob. GitHub Copilot stays VS Code only.
 - **A usual release you can change per checkout.** The change-management checkout command can use `&RELEASE`, filled in from the new `ibmi-member-workspace.changeManagement.release` setting (for example `MYGROUP/MYAPP/BASE`). At each checkout the release is shown, already filled in, so you can change it for that checkout, and a different release you used can become the default with **Make Default**.
 - In Settings, the change-management checkout command now has a full-width box that wraps, so you can review the whole command. Line breaks you add are joined with spaces when it runs.
-- Fix: **Configure Checkout Folder** refused to change the folder while members were tracked, even when Checked Out Members showed none. They were in another work item (such as members checked out without one), or on another IBM i system. It now says where they are and how many have unsent changes, and offers **Stop Tracking and Change Folder**. Their files stay where they are.
 - Fix: a checkout could hang at "Checking out…" until you disconnected, when the IBM i didn't answer a request (a busy or stuck connection, or a locked member). Every download now stops with a message after 2 minutes, and **Cancel** stops the member being downloaded at once, without writing anything. Checking out a single member now shows its progress, with Cancel. A wait of more than 10 seconds is noted in the output panel, and a change-management command that runs more than 5 minutes stops with a hint to look for a job waiting for a reply.
 - Fix: when the change-management checkout command failed, only its last three messages were shown, which for Rocket LMI are just "ACMSCHKOUT ended ABNORMALLY" (CMS9913) and SQL0443. The message that says why is now shown first, including messages the command left in the job log.
 
