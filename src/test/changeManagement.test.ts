@@ -234,3 +234,13 @@ describe("commandFailureMessages", () => {
     assert.equal(commandFailureMessages(output).length, 10);
   });
 });
+
+describe("a command split over lines", () => {
+  it("is run as one line, its line breaks joined with spaces", () => {
+    const template = "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR)))\r\n   PROJECT(&PROJECT) DVP(&USER)\n REL(CRETE/IESCORP/BASE)\n";
+    assert.equal(
+      expandCheckoutCommand(template, member("SY0204AC"), "DEVLIB", { project: "NGUV7234", user: "VNGUYEN" }),
+      "ACMSLIB/ACMSCHKOUT OBJ((QRPGLESRC (SY0204AC))) PROJECT(NGUV7234) DVP(VNGUYEN) REL(CRETE/IESCORP/BASE)"
+    );
+  });
+});

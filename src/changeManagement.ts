@@ -88,6 +88,8 @@ export function expandCheckoutCommand(
   };
   return template
     .trim()
+    // The setting is edited in a multi-line box; a command is one line.
+    .replace(/\s*\r?\n\s*/g, " ")
     .replace(PLACEHOLDER, (_match, name: string) => values[name.toUpperCase() as keyof typeof values].toUpperCase());
 }
 
