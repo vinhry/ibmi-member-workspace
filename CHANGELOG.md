@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.7.12 - 2026-10-02
+
+- **Status in the Explorer.** Checked-out files now show their sync status in VS Code's Explorer, on editor tabs and in Checked Out Members: **↑** for local changes not yet uploaded, **↓** for a member changed on the IBM i, **!** for a conflict, and **RO** for a read-only reference copy. Members in sync show nothing. Hover over a file for details.
+
 ## 1.7.11 - 2026-10-02
 
 - **Quicker refresh.** **Refresh All Remote Status** and refreshing a source file group now ask the IBM i, with one query per source file, which members changed since they were last compared, and download only those. The others only have their local copy read, so refreshing hundreds of unchanged members takes seconds. Refreshing one member, or a selection, still downloads and compares each one, and an upload still always checks the member on the IBM i first.
