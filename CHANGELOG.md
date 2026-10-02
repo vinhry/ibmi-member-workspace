@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.7.14 - 2026-10-02
+
+- **The change-management checkout command can name the project and the developer.** `ibmi-member-workspace.changeManagement.checkoutCommand` now accepts `&PROJECT`, the project (task) you name each time, with the last one filled in, and `&USER`, the user profile Code for IBM i is connected with. For example, Rocket LMI's `ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(...)` now runs without editing the setting for each change. Only valid IBM i names are filled in. The README also explains why to call the change-management command directly rather than through a wrapper program.
+
 ## 1.7.13 - 2026-10-02
 
 - **Claude Code, Codex and GitHub Copilot can research your IBM i programs**, as IBM Bob's agent does in Bob. In VS Code, a new **AI Research Tools** section above Checked Out Members connects an agent to the same read-only research tools: what a program uses, what uses it, file layouts, and the source behind them. Claude Code gets the server in the workspace's `.mcp.json`, Codex in `.codex/config.toml`, and Copilot through VS Code's chat (VS Code 1.101 or later), with no file. Connect lets Claude Code and Codex use the tools without asking, and can add the same rules Bob gets. The token is kept out of Git, a committed `.mcp.json` is never given it, and Disconnect replaces it. Nothing runs until you connect an agent. See **Using with Claude Code, Codex and GitHub Copilot** in the README.
