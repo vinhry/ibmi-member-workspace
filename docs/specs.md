@@ -42,6 +42,7 @@ Find Dependencies and Find All Dependencies read COBOL members (`cblle`, `sqlcbl
 - The expanded commands are shown in a modal and run only on **Run**. They run through `runClCommand` (`src/codeForIBMi.ts`, `runCommand` with the ILE environment), and a failure carries the last job messages.
 - A different connected system refuses the run before confirming, and each remaining member after it.
 - **Check Out from DEVLIB** checks out `DEVLIB/<same file>(<same member>)` through `checkoutMembersBatch` as editable checkouts.
+- Since 1.8.0: `&RELEASE` is asked after the project, only when used, pre-filled from `changeManagement.release` (application scope, read from user settings), validated by `releaseProblem` (one to three IBM i names joined by `/`). A release that differs from the setting is offered as the new default (**Make Default** writes the user setting).
 - Since 1.7.14: `&PROJECT` is asked after the development library, only when the template uses it, pre-filled from `workspaceState` (`changeManagement.lastProject`, saved on Run). `&USER` is the connection's `currentUser`. Both must be IBM i names (`nameValueProblem`); a template using `&USER` with no known user is refused. The shop's command is Rocket LMI's `ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(group/app/release)`, called directly rather than through its wrapper `UT0179BC`, whose `MONMSG CMS9913` would hide a failure.
 
 **Validation**

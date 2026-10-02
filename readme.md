@@ -226,7 +226,7 @@ Set `ibmi-member-workspace.changeManagement.checkoutCommand` in your user settin
 
 Each of them then:
 
-1. asks for the development library the members go to, and the project (task) when the command uses `&PROJECT` (the last ones you used are filled in);
+1. asks for the development library the members go to, the project (task) when the command uses `&PROJECT` (the last ones you used are filled in), and the release when it uses `&RELEASE` (your usual release is filled in; change it for this checkout if needed);
 2. shows the exact command for each member and runs them only when you choose **Run**;
 3. runs each command on the IBM i, with the connection's library list. A failed member is reported with the IBM i's message and doesn't stop the others. Nothing runs while a different IBM i is connected;
 4. offers **Check Out from DEVLIB**, which checks out the development library's copies here, ready to change.
@@ -241,14 +241,18 @@ The command can use these placeholders, named as in Code for IBM i actions:
 | `&EXT` | its source type |
 | `&DEVLIB` | the development library you name |
 | `&PROJECT` | the change-management project (task) you name, for example `MOD054937` |
+| `&RELEASE` | the release, filled in from `ibmi-member-workspace.changeManagement.release` (for example `CRETE/IESCORP/BASE`) and changeable at each checkout |
 | `&USER` | the user profile Code for IBM i is connected with, for example as the developer |
 
-For example, Rocket LMI's checkout command, with your own release, application and group:
+For example, Rocket LMI's checkout command, with your usual group, application and release in its own setting:
 
 ```jsonc
 "ibmi-member-workspace.changeManagement.checkoutCommand":
-  "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(CRETE/IESCORP/BASE)"
+  "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(&RELEASE)",
+"ibmi-member-workspace.changeManagement.release": "CRETE/IESCORP/BASE"
 ```
+
+When you check out with a different release, you're asked afterwards whether to make it your default. A release is one to three IBM i names joined by `/`.
 
 To try it, first run the command once yourself (in a 5250 session, or Code for IBM i's terminal) on a test member and project, to check its parameters and your authority. Then use **Find Member…** on that member, choose **Check Out Through Change Management…**, check the command shown, and choose **Run**. The output panel shows each command run (`[change management]`), and your change-management system and development library should show the member checked out. **Check Out from DEVLIB** then puts it in Checked Out Members, ready to change. A command that fails is reported with the IBM i's message, and nothing is checked out here.
 

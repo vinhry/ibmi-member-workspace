@@ -16,14 +16,25 @@ export interface ChangeMember {
 
 /**
  * Placeholders a template may use: the member's, named as in Code for IBM i actions, plus &DEVLIB
- * and &PROJECT (asked when the command runs) and &USER (the connection's user profile).
+ * &PROJECT and &RELEASE (asked when the command runs) and &USER (the connection's user profile).
  */
-export const CHECKOUT_COMMAND_PLACEHOLDERS = ["OPENLIB", "OPENSPF", "OPENMBR", "EXT", "DEVLIB", "PROJECT", "USER"] as const;
+export const CHECKOUT_COMMAND_PLACEHOLDERS = ["OPENLIB", "OPENSPF", "OPENMBR", "EXT", "DEVLIB", "PROJECT", "RELEASE", "USER"] as const;
 
 const PLACEHOLDER = /&([A-Z][A-Z0-9_]*)/gi;
 
 /** An IBM i name, as `memberNameProblem` checks them: nothing that could end a parameter or quote. */
 const IBMI_NAME = /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/i;
+
+/**
+ * Why a release can't go in a command, or undefined when it can: one to three IBM i names joined by
+ * "/", as Rocket LMI names a release (group/application/release, for example CRETE/IESCORP/BASE).
+ */
+export function releaseProblem(value: string): string | undefined {
+  const parts = value.split("/");
+  return parts.length <= 3 && parts.every((part) => IBMI_NAME.test(part))
+    ? undefined
+    : `"${value}" is not a valid release: use up to three IBM i names joined by /, for example CRETE/IESCORP/BASE.`;
+}
 
 /** Whether `template` uses the placeholder `name` (for example "PROJECT"), in any case. */
 export function usesPlaceholder(template: string, name: string): boolean {
@@ -61,7 +72,7 @@ export function expandCheckoutCommand(
   template: string,
   member: ChangeMember,
   devLibrary: string,
-  { project, user }: { project?: string; user?: string } = {}
+  { project, user, release }: { project?: string; user?: string; release?: string } = {}
 ): string {
   const needed = (name: string, label: string, value: string | undefined) =>
     !usesPlaceholder(template, name)
@@ -73,7 +84,12 @@ export function expandCheckoutCommand(
     memberNameProblem(member) ??
     memberNameProblem({ ...member, library: devLibrary }) ??
     needed("PROJECT", "project", project) ??
-    needed("USER", "user profile", user);
+    needed("USER", "user profile", user) ??
+    (!usesPlaceholder(template, "RELEASE")
+      ? undefined
+      : release
+        ? releaseProblem(release)
+        : "The command uses &RELEASE, but no release is known.");
   if (problem) {
     throw new Error(problem);
   }
@@ -84,6 +100,7 @@ export function expandCheckoutCommand(
     EXT: member.extension,
     DEVLIB: devLibrary,
     PROJECT: project ?? "",
+    RELEASE: release ?? "",
     USER: user ?? "",
   };
   return template
@@ -118,6 +135,8 @@ export interface ChangeCheckoutDeps {
   /** Asks for the change-management project (&PROJECT), only when the template uses it; undefined when cancelled. */
   askProject(): Promise<string | undefined>;
   /** Shows the exact commands and asks to run them. */
+  /** Asks for the release (&RELEASE), pre-filled with the usual one, only when the template uses it; undefined when cancelled. */
+  askRelease(): Promise<string | undefined>;
   confirm(commands: string[], devLibrary: string, project?: string): Promise<boolean>;
   connectedSystem(): string | undefined;
   /** The connection's user profile, for &USER. */
@@ -129,6 +148,8 @@ export interface ChangeCheckoutDeps {
 
 export interface ChangeCheckoutResult {
   devLibrary: string;
+  /** The release the commands used, when the template has &RELEASE. */
+  release?: string;
   succeeded: ChangeMember[];
   failed: Array<{ member: ChangeMember; command: string; error: string }>;
 }
@@ -167,10 +188,17 @@ export async function runChangeManagementCheckout(
       return undefined;
     }
   }
+  let release: string | undefined;
+  if (usesPlaceholder(template, "RELEASE")) {
+    release = (await deps.askRelease())?.trim().toUpperCase();
+    if (!release) {
+      return undefined;
+    }
+  }
   const user = usesPlaceholder(template, "USER") ? deps.currentUser()?.trim().toUpperCase() : undefined;
   const planned = members.map((member) => ({
     member,
-    command: expandCheckoutCommand(template, member, devLibrary, { project, user }),
+    command: expandCheckoutCommand(template, member, devLibrary, { project, user, release }),
   }));
   const refused = refusal(deps.connectedSystem(), system);
   if (refused) {
@@ -180,7 +208,7 @@ export async function runChangeManagementCheckout(
     return undefined;
   }
 
-  const result: ChangeCheckoutResult = { devLibrary, succeeded: [], failed: [] };
+  const result: ChangeCheckoutResult = { devLibrary, ...(release ? { release } : {}), succeeded: [], failed: [] };
   for (const { member, command } of planned) {
     // The confirmation leaves time to connect elsewhere; these commands belong to `system`.
     const error = refusal(deps.connectedSystem(), system);

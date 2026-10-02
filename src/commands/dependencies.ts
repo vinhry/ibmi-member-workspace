@@ -40,7 +40,7 @@ import {
   summarizeRun,
 } from "../dependencySources";
 import { WalkLimitReached, WalkUnresolved, mergeOutcomes, walkDependencies } from "../dependencyWalk";
-import { ChangeCheckoutResult, nameValueProblem, runChangeManagementCheckout } from "../changeManagement";
+import { ChangeCheckoutResult, nameValueProblem, releaseProblem, runChangeManagementCheckout } from "../changeManagement";
 import { errorMessage } from "../errors";
 import { readCheckoutText } from "../localPath";
 import type { BrowserNode, MemberInfo } from "../memberInfo";
@@ -664,6 +664,7 @@ const LAST_DEV_LIBRARY = "changeManagement.lastDevLibrary";
 const LAST_PROJECT = "changeManagement.lastProject";
 
 const CHECKOUT_COMMAND_SETTING = "changeManagement.checkoutCommand";
+const RELEASE_SETTING = "changeManagement.release";
 
 /**
  * "I Need to Change Some…": runs the change-management checkout command when one is set, then
@@ -677,6 +678,11 @@ export async function changeThroughChangeManagement(ctx: CommandContext, system:
     await showChangeGuide(members);
     return;
   }
+
+  // The usual release, from user settings only, like the command it goes into.
+  const usualRelease = (vscode.workspace
+    .getConfiguration("ibmi-member-workspace")
+    .inspect<string>(RELEASE_SETTING)?.globalValue ?? "").trim().toUpperCase();
 
   let result: ChangeCheckoutResult | undefined;
   try {
@@ -696,6 +702,15 @@ export async function changeThroughChangeManagement(ctx: CommandContext, system:
         value: ctx.context.workspaceState.get<string>(LAST_PROJECT) ?? "",
         ignoreFocusOut: true,
         validateInput: (value) => nameValueProblem("project", value.trim()),
+      }),
+      askRelease: async () => vscode.window.showInputBox({
+        title: "Change-Management Checkout: Release",
+        prompt: usualRelease
+          ? "The release to check out from (&RELEASE). Change it for this checkout if needed."
+          : "The release to check out from (&RELEASE), for example CRETE/IESCORP/BASE",
+        value: usualRelease,
+        ignoreFocusOut: true,
+        validateInput: (value) => releaseProblem(value.trim()),
       }),
       confirm: async (commands, devLibrary, project) => {
         await ctx.context.workspaceState.update(LAST_DEV_LIBRARY, devLibrary);
@@ -728,7 +743,22 @@ export async function changeThroughChangeManagement(ctx: CommandContext, system:
     return;
   }
 
-  const { devLibrary, succeeded, failed } = result;
+  const { devLibrary, succeeded, failed, release } = result;
+  if (release && release !== usualRelease) {
+    const makeDefault = "Make Default";
+    void vscode.window
+      .showInformationMessage(
+        usualRelease
+          ? `Make ${release} your default release instead of ${usualRelease}?`
+          : `Make ${release} your default release?`,
+        makeDefault
+      )
+      .then(async (choice) => {
+        if (choice === makeDefault) {
+          await vscode.workspace.getConfiguration("ibmi-member-workspace").update(RELEASE_SETTING, release, vscode.ConfigurationTarget.Global);
+        }
+      });
+  }
   if (failed.length > 0) {
     const names = failed.map(({ member, error }) => `${member.memberName} (${error})`).join(", ");
     void vscode.window

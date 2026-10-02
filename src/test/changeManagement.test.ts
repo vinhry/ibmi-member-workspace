@@ -5,6 +5,7 @@ import {
   ChangeMember,
   checkoutTemplateProblem,
   commandFailureMessages,
+  releaseProblem,
   expandCheckoutCommand,
   runChangeManagementCheckout,
 } from "../changeManagement";
@@ -22,6 +23,7 @@ function deps(overrides: Partial<ChangeCheckoutDeps> = {}) {
   const value: ChangeCheckoutDeps = {
     askDevLibrary: async () => "devlib",
     askProject: async () => "mod054937",
+    askRelease: async () => "crete/iescorp/base",
     confirm: async (commands) => {
       confirmed.push(commands);
       return true;
@@ -242,5 +244,39 @@ describe("a command split over lines", () => {
       expandCheckoutCommand(template, member("SY0204AC"), "DEVLIB", { project: "NGUV7234", user: "VNGUYEN" }),
       "ACMSLIB/ACMSCHKOUT OBJ((QRPGLESRC (SY0204AC))) PROJECT(NGUV7234) DVP(VNGUYEN) REL(CRETE/IESCORP/BASE)"
     );
+  });
+});
+
+describe("&RELEASE", () => {
+  const LMI = "ACMSLIB/ACMSCHKOUT OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(&RELEASE)";
+
+  it("fills in the release given for this checkout, and reports it", async () => {
+    const { deps: d, confirmed } = deps({ askRelease: async () => " crete/iescorp/new " });
+    const result = await runChangeManagementCheckout([member("SY0204AC")], "PUB400", LMI, d);
+    assert.deepEqual(confirmed, [["ACMSLIB/ACMSCHKOUT OBJ((QRPGLESRC (SY0204AC))) PROJECT(MOD054937) DVP(MNEUKIRC) REL(CRETE/IESCORP/NEW)"]]);
+    assert.equal(result?.release, "CRETE/IESCORP/NEW");
+  });
+
+  it("asks for a release only when the command uses it", async () => {
+    let asked = 0;
+    const { deps: d } = deps({ askRelease: async () => { asked++; return "BASE"; } });
+    const result = await runChangeManagementCheckout([member("ORD100")], "PUB400", TEMPLATE, d);
+    assert.equal(asked, 0);
+    assert.equal(result?.release, undefined);
+  });
+
+  it("runs nothing when the release prompt is cancelled", async () => {
+    const { deps: d, ran } = deps({ askRelease: async () => undefined });
+    assert.equal(await runChangeManagementCheckout([member("ORD100")], "PUB400", LMI, d), undefined);
+    assert.deepEqual(ran, []);
+  });
+
+  it("accepts one to three IBM i names joined by /", () => {
+    for (const value of ["CRETE/IESCORP/BASE", "BASE", "A/B"]) {
+      assert.equal(releaseProblem(value), undefined, value);
+    }
+    for (const value of ["A/B/C/D", "A//B", "A B", "A)", "", "/BASE"]) {
+      assert.ok(releaseProblem(value), value);
+    }
   });
 });
