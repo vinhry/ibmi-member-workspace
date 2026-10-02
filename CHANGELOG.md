@@ -1,5 +1,10 @@
 # Change Log
 
+## 1.7.10 - 2026-10-02
+
+- **Checks before uploading.** Upload to IBM i and upload on save now check the local copy for lines longer than the source file holds, and for characters the member's CCSID can't store, such as the typographic quotes, dashes and ellipses that word processors and AI tools add. Until now the IBM i cut these lines off or replaced these characters, and you found out only afterwards. You're now asked to **Upload Anyway** or **Show Problems** first, even when upload on save is `silent`. A multi-member upload skips those members and lists them in the output panel.
+- The same problems are underlined in the editor as you type and listed in the Problems view. A quick fix replaces typographic characters with plain text, one at a time or all at once. The line length and CCSID are read when you check out a member and kept with the checkout, so the checks also work offline. For members checked out with an earlier version, they're read at the next refresh or upload.
+
 ## 1.7.9 - 2026-09-30
 
 - Fix: **Re-checkout** from a Refresh notification could overwrite local edits. The notification that says your local copy has no changes (or that the local file no longer exists) can stay open while you keep working, so edits saved in the meantime were replaced without a warning. Re-checkout now checks the local copy again first, and if it has changes that aren't on the IBM i, asks before discarding them and suggests Merge Back instead.
