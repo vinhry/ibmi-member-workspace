@@ -1,5 +1,10 @@
 # Change Log
 
+## 1.8.3 - 2026-10-06
+
+- **Check in through change management.** Set `ibmi-member-workspace.changeManagement.checkinCommand` (user settings only) to the CL command that checks a member in to your change-management system, for example Rocket LMI's `ACMSLIB/ACMSCHKIN OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(&RELEASE)`. Then right-click checked-out members for **Check In Through Change Management…**, or choose **Check In…** on the message after an upload. The exact commands are shown before they run. The project and release are suggested from the checkout when it was made with **Check Out Through Change Management…** here, otherwise the last ones you used. A member with changes not yet uploaded is refused with an **Upload to IBM i** button, and reference copies are never checked in. After a successful check-in you're asked whether to **Discard Checkout** (delete the local copy and stop tracking it) or **Keep** it. The command can use `&DEVLIB` (the library the member is checked out in), `&OPENSPF`, `&OPENMBR`, `&EXT`, `&OPENLIB` (the library it was checked out from, asked when it isn't known), `&PROJECT`, `&RELEASE` and `&USER`. See **Running Your Change-Management Check-In** in the README.
+- The README's Settings table now lists the change-management settings.
+
 ## 1.8.2 - 2026-10-06
 
 - Fix: **Find Member** treated `_` in a name as "any one character", so `ORD_HDR` also found `ORD1HDR`, and `%` or `_` typed in a member-text search matched anything. Both are now looked for literally. `*` (and `%`) in a name still stand for any characters.
