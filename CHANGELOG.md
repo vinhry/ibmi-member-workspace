@@ -1,5 +1,15 @@
 # Change Log
 
+## 1.8.6 - 2026-10-06
+
+- **Four more research tools for Bob, Claude Code, Codex and GitHub Copilot**, all read-only:
+  - `compare_checkout` shows how a checked-out member differs from its copy on the IBM i, as a line-by-line diff, with its sync status.
+  - `describe_object` describes a program or service program: ILE or OPM, text, owner, when it was created and last used, the source it was compiled from, its activation group, adopted authority, entry module, and the modules and service programs bound into it.
+  - `read_job_log` reads the recent messages of the job the extension runs commands in, or of a job you name (for example your interactive job), so an agent can see why a command or compile failed.
+  - `sample_file_data` returns the first rows of a file or table (10 by default, at most 100) so an agent can see what the data looks like. Rows can hold business data, so it stays off until you turn on `ibmi-member-workspace.researchTools.allowDataSamples` (user settings only).
+  
+  The rules files written for Bob and the agents mention the new tools; a folder you connected gets the update when the extension starts.
+
 ## 1.8.5 - 2026-10-06
 
 - **Check Out All Members, and checkouts of several members, are faster.** Members are now downloaded four at a time instead of one after another, so a source file of a few hundred members takes a fraction of the time. The progress shows how many are done, Cancel still stops the downloads under way, and the result is the same: the same members and one checkpoint. Reference copies brought by Find Dependencies and the AI research tools are downloaded the same way.
