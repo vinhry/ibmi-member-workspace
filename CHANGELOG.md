@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.8.5 - 2026-10-06
+
+- **Check Out All Members, and checkouts of several members, are faster.** Members are now downloaded four at a time instead of one after another, so a source file of a few hundred members takes a fraction of the time. The progress shows how many are done, Cancel still stops the downloads under way, and the result is the same: the same members and one checkpoint. Reference copies brought by Find Dependencies and the AI research tools are downloaded the same way.
+
 ## 1.8.4 - 2026-10-06
 
 - **Members deleted on the IBM i are shown as such.** When a checked-out member no longer exists on the IBM i (deleted, renamed or moved), Refresh now marks it **deleted on IBM i**, with a ✕ badge in the Explorer and in Checked Out Members, instead of reporting an error every time. Your local copy is left as it is. The message offers **Remove from Checkouts** (the file stays on disk) or **Keep**. Upload, Merge Back, Run Action and Check In aren't offered for such a member, and an upload or re-checkout that finds the member gone says so; upload on save skips it. If the member comes back, the next Refresh shows its usual status again. The refresh summary, background refresh and the Member Workspace badge count these members. A member that can't be downloaded for another reason (a busy or dropped connection) is still reported as an error, not as deleted: the IBM i's catalog decides.
