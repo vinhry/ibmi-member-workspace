@@ -697,7 +697,7 @@
         },
         {
           "command": "ibmi-member-workspace.mergeBack",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout-(?!remote-missing)/ && !listMultiSelection",
           "group": "inline@2"
         },
         {
@@ -717,17 +717,17 @@
         },
         {
           "command": "ibmi-member-workspace.mergeBack",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout-(?!remote-missing)/ && !listMultiSelection",
           "group": "2_merge@1"
         },
         {
           "command": "ibmi-member-workspace.uploadToRemote",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout-(?!remote-missing)/",
           "group": "2_merge@2"
         },
         {
           "command": "ibmi-member-workspace.runAction",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout-(?!remote-missing)/",
           "group": "2_merge@3"
         },
         {
@@ -762,7 +762,7 @@
         },
         {
           "command": "ibmi-member-workspace.checkinThroughChangeManagement",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout-(?!remote-missing)/",
           "group": "0_bob@5"
         },
         {
@@ -772,7 +772,7 @@
         },
         {
           "command": "ibmi-member-workspace.commitNow",
-          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/ && !listMultiSelection && config.ibmi-member-workspace.gitIntegration",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout-(?!remote-missing)/ && !listMultiSelection && config.ibmi-member-workspace.gitIntegration",
           "group": "2_merge@4"
         },
         {

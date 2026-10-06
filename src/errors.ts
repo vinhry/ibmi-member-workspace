@@ -14,6 +14,14 @@ export class LocalFileMissingError extends Error {
   }
 }
 
+/** Thrown when a checkout's member no longer exists on the IBM i (deleted, renamed or moved). */
+export class RemoteMemberMissingError extends Error {
+  constructor(memberPath: string) {
+    super(`${memberPath} no longer exists on the IBM i.`);
+    this.name = "RemoteMemberMissingError";
+  }
+}
+
 /** Thrown when an action that writes to the IBM i is attempted on a read-only reference copy. */
 export class ReferenceCopyError extends Error {
   constructor(memberPath: string) {

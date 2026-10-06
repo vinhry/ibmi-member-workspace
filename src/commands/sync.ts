@@ -1,11 +1,12 @@
 import * as vscode from "vscode";
 import { CheckoutService } from "../checkoutService";
 import { getSystemName, memberUri, sourceDatesEnabled } from "../codeForIBMi";
-import { LocalFileMissingError, errorMessage } from "../errors";
+import { LocalFileMissingError, RemoteMemberMissingError, errorMessage } from "../errors";
 import { mergeDocumentKey } from "../mergeHandler";
 import { countLocalChanges, resolveMember, resolveMemberSelections, saveDirtyLocalFiles } from "../prompts";
 import { CheckedOutMember, RefreshTally, TreeItemType, formatMemberPath, isReferenceCopy } from "../types";
 import { CommandContext } from "./context";
+import { reportRemoteMissing } from "./remoteMissing";
 import { offerCheckin, uploadWithConflictHandling } from "./uploadMember";
 
 export function registerSyncCommands(ctx: CommandContext): void {
@@ -83,6 +84,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
             let skipped = 0;
             let withProblems = 0;
             let references = 0;
+            let missing = 0;
             let errors = 0;
             let cancelled = false;
             const uploaded: string[] = [];
@@ -122,7 +124,12 @@ export function registerSyncCommands(ctx: CommandContext): void {
                     log.appendLine(`[upload] Failed for ${formatMemberPath(entry)}`);
                   }
                 } catch (err) {
-                  errors++;
+                  if (err instanceof RemoteMemberMissingError) {
+                    // The service marked it; the local copy is kept.
+                    missing++;
+                  } else {
+                    errors++;
+                  }
                   log.appendLine(`[upload] Error for ${formatMemberPath(entry)}: ${errorMessage(err)}`);
                 }
               }
@@ -139,7 +146,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
               vscode.window.showInformationMessage(
                 `Upload cancelled. ${succeeded}/${selections.length} member(s) uploaded before cancelling.`
               );
-            } else if (errors > 0 || skipped > 0 || withProblems > 0 || altered > 0 || references > 0) {
+            } else if (errors > 0 || skipped > 0 || withProblems > 0 || altered > 0 || references > 0 || missing > 0) {
               const alteredText = altered > 0
                 ? ` ${altered} differ on the IBM i from the local copy (e.g. truncated lines).`
                 : "";
@@ -152,9 +159,12 @@ export function registerSyncCommands(ctx: CommandContext): void {
               const referenceText = references > 0
                 ? ` ${references} skipped because they are read-only reference copies.`
                 : "";
+              const missingText = missing > 0
+                ? ` ${missing} no longer exist on the IBM i; their local copies are kept.`
+                : "";
               const errorText = errors > 0 ? ` ${errors} error(s).` : "";
               vscode.window.showWarningMessage(
-                `Uploaded ${succeeded}/${selections.length} member(s) to IBM i.${alteredText}${skippedText}${problemText}${referenceText}${errorText} See IBM i Member Workspace output panel.`
+                `Uploaded ${succeeded}/${selections.length} member(s) to IBM i.${alteredText}${skippedText}${problemText}${referenceText}${missingText}${errorText} See IBM i Member Workspace output panel.`
               );
               log.show();
             } else {
@@ -256,7 +266,9 @@ export function registerSyncCommands(ctx: CommandContext): void {
             const result = await service.refreshRemoteStatus(entry);
             const memberPath = formatMemberPath(entry);
 
-            if (isReferenceCopy(entry) && result !== "in-sync") {
+            if (result === "remote-missing") {
+              await reportRemoteMissing(service, [entry]);
+            } else if (isReferenceCopy(entry) && result !== "in-sync") {
               const choice = await vscode.window.showInformationMessage(
                 `The reference copy of ${memberPath} differs from the IBM i.`,
                 "Update Reference Copy"
@@ -312,6 +324,8 @@ export function registerSyncCommands(ctx: CommandContext): void {
           } catch (err) {
             if (err instanceof LocalFileMissingError) {
               await handleMissingLocalFile(service, entry);
+            } else if (err instanceof RemoteMemberMissingError) {
+              await reportRemoteMissing(service, [entry]);
             } else {
               vscode.window.showErrorMessage(
                 `Refresh failed: ${errorMessage(err)}`
@@ -447,12 +461,13 @@ function showRefreshSummary(
   cancelled: boolean
 ): void {
   const prefix = scope ? `${scope}: ` : "";
-  const { inSync, modified, remoteChanged, conflict, errors } = tally;
+  const { inSync, modified, remoteChanged, conflict, remoteMissing, errors } = tally;
   const counts = [
     inSync > 0 && `${inSync} in sync`,
     modified > 0 && `${modified} with local changes`,
     remoteChanged > 0 && `${remoteChanged} changed on the IBM i`,
     conflict > 0 && `${conflict} in conflict`,
+    remoteMissing > 0 && `${remoteMissing} deleted on the IBM i`,
     errors > 0 && `${errors} error(s)`,
   ]
     .filter(Boolean)
@@ -462,11 +477,13 @@ function showRefreshSummary(
     vscode.window.showInformationMessage(
       `${prefix}Refresh cancelled${counts ? ` — ${counts}` : ""}.`
     );
-  } else if (errors > 0 || conflict > 0) {
-    const hint = errors > 0
-      ? " See IBM i Member Workspace output panel."
-      : " Review conflicts with Merge Back.";
-    vscode.window.showWarningMessage(`${prefix}Refresh complete: ${counts}.${hint}`);
+  } else if (errors > 0 || conflict > 0 || remoteMissing > 0) {
+    const hints = [
+      errors > 0 && " See IBM i Member Workspace output panel.",
+      conflict > 0 && " Review conflicts with Merge Back.",
+      remoteMissing > 0 && " Members deleted on the IBM i keep their local copies; Refresh one to remove it from checkouts.",
+    ].filter(Boolean).join("");
+    vscode.window.showWarningMessage(`${prefix}Refresh complete: ${counts}.${hints}`);
   } else if (modified > 0 || remoteChanged > 0) {
     vscode.window.showInformationMessage(`${prefix}Refresh complete: ${counts}.`);
   } else {

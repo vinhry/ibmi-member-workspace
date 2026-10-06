@@ -52,23 +52,27 @@ export interface RefreshPlan<T> {
   download: Array<{ entry: T; stamp?: string }>;
   /** Unchanged on the IBM i since the last full comparison: `hash` is still the remote's hash. */
   unchanged: Array<{ entry: T; hash: string }>;
+  /** Not in the catalog any more: deleted, renamed or moved on the IBM i. */
+  missing: Array<{ entry: T }>;
 }
 
 /**
  * Which members of one source file must be downloaded, given the stamps the catalog has now, keyed
  * by member name (undefined when the query failed). A member is skipped only when its last full
- * comparison recorded the same stamp with a current baseline; a member missing from the catalog is
- * downloaded, which reports it as not found.
+ * comparison recorded the same stamp with a current baseline. A member the catalog no longer lists
+ * is missing; when the catalog couldn't be read, everything is downloaded, since nothing is known.
  */
 export function planRefresh<T extends Pick<CheckedOutMember, "memberName" | "remoteSeen" | "hashVersion">>(
   entries: readonly T[],
   stamps: ReadonlyMap<string, string> | undefined
 ): RefreshPlan<T> {
-  const plan: RefreshPlan<T> = { download: [], unchanged: [] };
+  const plan: RefreshPlan<T> = { download: [], unchanged: [], missing: [] };
   for (const entry of entries) {
     const stamp = stamps?.get(entry.memberName.toUpperCase());
     if (stamp !== undefined && entry.remoteSeen?.stamp === stamp && entry.hashVersion === HASH_VERSION) {
       plan.unchanged.push({ entry, hash: entry.remoteSeen.hash });
+    } else if (stamps !== undefined && stamp === undefined) {
+      plan.missing.push({ entry });
     } else {
       plan.download.push(stamp === undefined ? { entry } : { entry, stamp });
     }
@@ -89,32 +93,34 @@ export function refreshIntervalMs(minutes: unknown): number | undefined {
   return clamped * 60_000;
 }
 
-/** Members that became a conflict, or changed on the IBM i, since `before` (statuses by id). */
+/** Members that became a conflict, changed on the IBM i, or disappeared from it since `before` (statuses by id). */
 export function newlyChanged(
   before: ReadonlyMap<string, CheckoutStatus>,
   after: ReadonlyArray<Pick<CheckedOutMember, "id" | "status">>
-): { conflicts: string[]; remoteChanged: string[] } {
+): { conflicts: string[]; remoteChanged: string[]; remoteMissing: string[] } {
   const became = (status: CheckoutStatus) =>
     after.filter((entry) => entry.status === status && before.get(entry.id) !== status).map((entry) => entry.id);
-  return { conflicts: became("conflict"), remoteChanged: became("remote-changed") };
+  return { conflicts: became("conflict"), remoteChanged: became("remote-changed"), remoteMissing: became("remote-missing") };
 }
 
 /**
- * The Checked Out Members view's badge: members changed on the IBM i, with or without local changes.
- * Undefined when there are none.
+ * The Checked Out Members view's badge: members changed on the IBM i, with or without local changes,
+ * and members deleted there. Undefined when there are none.
  */
 export function remoteChangeBadge(
   entries: ReadonlyArray<Pick<CheckedOutMember, "status">>
 ): { value: number; tooltip: string } | undefined {
   const remoteChanged = entries.filter((entry) => entry.status === "remote-changed").length;
   const conflicts = entries.filter((entry) => entry.status === "conflict").length;
-  const value = remoteChanged + conflicts;
+  const missing = entries.filter((entry) => entry.status === "remote-missing").length;
+  const value = remoteChanged + conflicts + missing;
   if (value === 0) {
     return undefined;
   }
   const parts = [
     remoteChanged > 0 && `${remoteChanged} changed on the IBM i`,
     conflicts > 0 && `${conflicts} changed on the IBM i and locally (conflict)`,
+    missing > 0 && `${missing} deleted on the IBM i`,
   ].filter((part): part is string => Boolean(part));
   return { value, tooltip: parts.join(", ") };
 }

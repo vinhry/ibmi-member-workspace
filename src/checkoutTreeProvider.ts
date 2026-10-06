@@ -230,6 +230,8 @@ export class CheckoutTreeProvider
         return `conflict detected ${checkedDate}`;
       case "in-sync":
         return `in sync ${checkedDate}`;
+      case "remote-missing":
+        return `deleted on IBM i (checked ${checkedDate})`;
     }
   }
 
@@ -238,6 +240,9 @@ export class CheckoutTreeProvider
     md.appendMarkdown(`**${formatMemberPath(entry)}**\n\n`);
     if (isReferenceCopy(entry)) {
       md.appendMarkdown("Read-only reference copy: it can't be uploaded or merged back.\n\n");
+    }
+    if (entry.status === "remote-missing") {
+      md.appendMarkdown("The member no longer exists on the IBM i. Your local copy is kept: remove the checkout, or keep the file.\n\n");
     }
     md.appendMarkdown(`- **System:** ${entry.system}\n`);
     md.appendMarkdown(`- **Status:** ${entry.status}\n`);
@@ -284,6 +289,11 @@ export class CheckoutTreeProvider
         return new vscode.ThemeIcon(
           "check-all",
           new vscode.ThemeColor("charts.green")
+        );
+      case "remote-missing":
+        return new vscode.ThemeIcon(
+          "circle-slash",
+          new vscode.ThemeColor("charts.red")
         );
     }
   }

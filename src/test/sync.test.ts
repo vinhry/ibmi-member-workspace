@@ -121,6 +121,11 @@ describe("nextBaseline", () => {
 });
 
 describe("statusAfterLocalSave", () => {
+  it("keeps a member deleted on the IBM i as deleted, whatever the local copy does", () => {
+    assert.equal(statusAfterLocalSave("remote-missing", true), "remote-missing");
+    assert.equal(statusAfterLocalSave("remote-missing", false), "remote-missing");
+  });
+
   it("marks clean checkouts as modified when local diverges", () => {
     assert.equal(statusAfterLocalSave("checked-out", true), "modified");
     assert.equal(statusAfterLocalSave("in-sync", true), "modified");

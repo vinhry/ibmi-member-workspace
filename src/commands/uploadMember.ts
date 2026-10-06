@@ -1,12 +1,13 @@
 import * as vscode from "vscode";
 import { CheckoutService } from "../checkoutService";
-import { errorMessage } from "../errors";
+import { RemoteMemberMissingError, errorMessage } from "../errors";
 import { MergeHandler } from "../mergeHandler";
 import { summarizeProblems } from "../sourceCheck";
 import { showSourceProblems } from "../sourceDiagnostics";
 import { CheckedOutMember, formatMemberPath } from "../types";
 import { UploadFlowOutcome, runUploadFlow } from "../uploadFlow";
 import { checkinCommandConfigured } from "./changeManagement";
+import { reportRemoteMissing } from "./remoteMissing";
 
 /**
  * Uploads one checkout with the same prompts for the Upload command and upload
@@ -88,9 +89,12 @@ export function uploadWithConflictHandling(
         "Merge Back"
       )) === "Merge Back",
 
-    notifyFailed: (_member, error) => {
+    notifyFailed: (member, error) => {
       if (error === undefined) {
         vscode.window.showErrorMessage(`Failed to upload ${memberPath} to IBM i.`);
+      } else if (error instanceof RemoteMemberMissingError) {
+        log.appendLine(`[upload] Not uploaded ${memberPath}: ${errorMessage(error)}`);
+        void reportRemoteMissing(service, [member]);
       } else {
         log.appendLine(`[upload] Error for ${memberPath}: ${errorMessage(error)}`);
         vscode.window.showErrorMessage(`Upload failed: ${errorMessage(error)}`);

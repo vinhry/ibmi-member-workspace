@@ -62,6 +62,7 @@ describe("planRefresh", () => {
     assert.deepEqual(planRefresh([prog], new Map([["PROG", "s1"]])), {
       download: [],
       unchanged: [{ entry: prog, hash: "remote" }],
+      missing: [],
     });
   });
 
@@ -70,6 +71,7 @@ describe("planRefresh", () => {
     assert.deepEqual(planRefresh([prog], new Map([["PROG", "s2"]])), {
       download: [{ entry: prog, stamp: "s2" }],
       unchanged: [],
+      missing: [],
     });
   });
 
@@ -81,14 +83,15 @@ describe("planRefresh", () => {
     assert.deepEqual(plan.unchanged, []);
   });
 
-  it("downloads a member missing from the catalog, without a stamp", () => {
+  it("reports a member missing from the catalog instead of downloading it", () => {
     const gone = member("GONE", { remoteSeen: { stamp: "s1", hash: "remote" } });
-    assert.deepEqual(planRefresh([gone], new Map()), { download: [{ entry: gone }], unchanged: [] });
+    const never = member("NEVER");
+    assert.deepEqual(planRefresh([gone, never], new Map()), { download: [], unchanged: [], missing: [{ entry: gone }, { entry: never }] });
   });
 
   it("downloads everything when the catalog couldn't be read", () => {
     const prog = member("PROG", { remoteSeen: { stamp: "s1", hash: "remote" } });
-    assert.deepEqual(planRefresh([prog], undefined), { download: [{ entry: prog }], unchanged: [] });
+    assert.deepEqual(planRefresh([prog], undefined), { download: [{ entry: prog }], unchanged: [], missing: [] });
   });
 
   it("matches member names whatever their case", () => {
@@ -118,18 +121,29 @@ describe("newlyChanged", () => {
       ["B", "conflict"],
       ["C", "in-sync"],
       ["D", "in-sync"],
+      ["E", "in-sync"],
+      ["F", "remote-missing"],
     ]);
     const after = [
       { id: "A", status: "conflict" as const },
       { id: "B", status: "conflict" as const },
       { id: "C", status: "remote-changed" as const },
       { id: "D", status: "in-sync" as const },
+      { id: "E", status: "remote-missing" as const },
+      { id: "F", status: "remote-missing" as const },
     ];
-    assert.deepEqual(newlyChanged(before, after), { conflicts: ["A"], remoteChanged: ["C"] });
+    assert.deepEqual(newlyChanged(before, after), { conflicts: ["A"], remoteChanged: ["C"], remoteMissing: ["E"] });
   });
 });
 
 describe("remoteChangeBadge", () => {
+  it("counts members deleted on the IBM i too", () => {
+    assert.deepEqual(
+      remoteChangeBadge([{ status: "remote-missing" }, { status: "remote-changed" }, { status: "in-sync" }]),
+      { value: 2, tooltip: "1 changed on the IBM i, 1 deleted on the IBM i" }
+    );
+  });
+
   it("counts members changed on the IBM i, with and without local changes", () => {
     assert.deepEqual(
       remoteChangeBadge([{ status: "remote-changed" }, { status: "conflict" }, { status: "modified" }, { status: "remote-changed" }]),

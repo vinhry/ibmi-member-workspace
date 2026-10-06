@@ -105,7 +105,7 @@ describe("hasLocalEditsToUpload", () => {
   it("uploads only checkouts with local edits", () => {
     assert.equal(hasLocalEditsToUpload("modified"), true);
     assert.equal(hasLocalEditsToUpload("conflict"), true);
-    for (const status of ["in-sync", "merged", "checked-out", "remote-changed"] as const) {
+    for (const status of ["in-sync", "merged", "checked-out", "remote-changed", "remote-missing"] as const) {
       assert.equal(hasLocalEditsToUpload(status), false, status);
     }
   });
@@ -158,6 +158,14 @@ describe("AutoUploadScheduler", () => {
     await h.fireTimers();
     assert.equal(h.uploads.length, 0);
     assert.match(h.logs.join("\n"), /reference copy/);
+  });
+
+  it("never uploads a member deleted on the IBM i, and says why", async () => {
+    const h = harness({ entry: member("remote-missing") });
+    h.scheduler.schedule(PATH);
+    await h.fireTimers();
+    assert.equal(h.uploads.length, 0);
+    assert.match(h.logs.join("\n"), /no longer exists on the IBM i/);
   });
 
   it("skips and logs when the checkout can't be uploaded now", async () => {

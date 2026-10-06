@@ -55,7 +55,9 @@ export type CheckoutStatus =
   | "modified"
   | "remote-changed"
   | "conflict"
-  | "in-sync";
+  | "in-sync"
+  /** The member no longer exists on the IBM i (deleted, renamed or moved); the local copy is kept. */
+  | "remote-missing";
 
 export interface CheckoutIndex {
   version: 3;
@@ -121,11 +123,13 @@ export interface RefreshTally {
   modified: number;
   remoteChanged: number;
   conflict: number;
+  /** Members that no longer exist on the IBM i. */
+  remoteMissing: number;
   errors: number;
 }
 
 export function emptyTally(): RefreshTally {
-  return { inSync: 0, modified: 0, remoteChanged: 0, conflict: 0, errors: 0 };
+  return { inSync: 0, modified: 0, remoteChanged: 0, conflict: 0, remoteMissing: 0, errors: 0 };
 }
 
 /** Parses the persisted checkout index and upgrades older formats to per-system storage. */

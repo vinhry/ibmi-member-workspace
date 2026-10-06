@@ -4,6 +4,7 @@ import { errorMessage } from "../errors";
 import { newlyChanged, refreshIntervalMs, remoteChangeBadge } from "../remoteStamps";
 import { formatMemberPath } from "../types";
 import { CommandContext } from "./context";
+import { reportRemoteMissing } from "./remoteMissing";
 
 const ON_CONNECT = "backgroundRefresh.onConnect";
 const INTERVAL = "backgroundRefresh.intervalMinutes";
@@ -45,11 +46,17 @@ export function registerBackgroundRefresh(ctx: CommandContext): void {
       );
       log.appendLine(
         `[refresh] Background refresh (${reason}): ${tally.inSync} in sync, ${tally.modified} modified, ` +
-        `${tally.remoteChanged} remote changed, ${tally.conflict} conflict, ${tally.errors} error(s)`
+        `${tally.remoteChanged} remote changed, ${tally.conflict} conflict, ${tally.remoteMissing} deleted on the IBM i, ${tally.errors} error(s)`
       );
-      const { conflicts } = newlyChanged(before, service.getEntriesForSystem(system));
+      const { conflicts, remoteMissing } = newlyChanged(before, service.getEntriesForSystem(system));
       if (conflicts.length > 0) {
         void reportConflicts(ctx, conflicts);
+      }
+      if (remoteMissing.length > 0) {
+        void reportRemoteMissing(service, remoteMissing.flatMap((id) => {
+          const entry = service.findEntryById(id);
+          return entry ? [entry] : [];
+        }));
       }
     } catch (err) {
       log.appendLine(`[refresh] Background refresh (${reason}) failed: ${errorMessage(err)}`);

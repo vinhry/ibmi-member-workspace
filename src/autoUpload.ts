@@ -168,6 +168,10 @@ export class AutoUploadScheduler {
     if (!entry) {
       return undefined;
     }
+    if (entry.status === "remote-missing") {
+      this.deps.log(`[auto-upload] Not uploaded: ${localPath} (the member no longer exists on the IBM i)`);
+      return undefined;
+    }
     if (!hasLocalEditsToUpload(entry.status)) {
       return undefined;
     }

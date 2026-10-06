@@ -193,3 +193,17 @@ The checkout command (section 2) started a change in VS Code; finishing it still
 - `src/test/checkoutIndexStore.test.ts`: the origin survives save and load.
 - `manifest.test.ts`: the new setting is application-scoped; the command is contributed.
 - README "Running Your Change-Management Check-In"; the Settings table lists the change-management settings.
+
+### 13. Members deleted on the IBM i (shipped in 1.8.4)
+
+A checked-out member deleted, renamed or moved on the IBM i failed every refresh with a raw error and kept its stale status.
+
+- `CheckoutStatus` and `RemoteStatus` gain `"remote-missing"`; `RefreshTally.remoteMissing`. The local file and baseline are never touched. No index migration (an older version reading the status hits its `default` branches).
+- Detection by the catalog, never by the download's error text: quick refresh's `planRefresh` (`remoteStamps.ts`) returns `missing` for members the catalog no longer lists while it answered (an unreadable catalog still downloads everything). Every single-member download (`refreshRemoteStatus`, the upload's remote check, `recheckoutNow`) goes through `CheckoutService.downloadForEntry`: on a failure that is neither a timeout nor a cancel, `memberChangeStamps` for that one member decides; gone → `markRemoteMissing` (status, `lastCheckedAt`, `remoteSeen` dropped so a member that comes back is compared in full) and `RemoteMemberMissingError` (`errors.ts`); otherwise the original error, so a dropped connection stays an error.
+- UI: tree description "deleted on IBM i", `circle-slash` icon, tooltip line; Explorer badge `✕` (`statusDecorations.ts`, `gitDecoration.deletedResourceForeground`); the view badge and `newlyChanged` count it. `commands/remoteMissing.ts` `reportRemoteMissing` (one or several members, **Remove from Checkouts** = `forgetEntries`, or **Keep**) is used by single Refresh, upload (`notifyFailed`), background refresh and the multi-upload summary counts them. Upload on save skips them with a log line. Upload, Merge Back, Run Action, Commit Now and Check In are hidden by `viewItem =~ /^checkout-(?!remote-missing)/`.
+
+**Validation**
+- `src/test/remoteStamps.test.ts`: the plan's `missing` list vs. an unreadable catalog, `newlyChanged`, the badge.
+- `src/test/sync.test.ts`, `statusDecorations.test.ts`, `autoUpload.test.ts`: the status survives local saves, has a one-character badge, and is never uploaded on save.
+- README "Refresh Remote Status" and the badge table.
+

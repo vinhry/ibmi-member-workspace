@@ -19,10 +19,18 @@ export function decorationFor(entry: Pick<CheckedOutMember, "status" | "kind">):
       badge: "RO",
       tooltip: entry.status === "remote-changed" || entry.status === "conflict"
         ? "IBM i: read-only reference copy, changed on the IBM i. Refresh offers to update it."
-        : "IBM i: read-only reference copy",
+        : entry.status === "remote-missing"
+          ? "IBM i: read-only reference copy of a member that no longer exists on the IBM i."
+          : "IBM i: read-only reference copy",
     };
   }
   switch (entry.status) {
+    case "remote-missing":
+      return {
+        badge: "✕",
+        tooltip: "IBM i: the member no longer exists on the IBM i. Your local copy is kept.",
+        colorId: "gitDecoration.deletedResourceForeground",
+      };
     case "modified":
       return {
         badge: "↑",

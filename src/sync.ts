@@ -1,7 +1,8 @@
 import * as crypto from "crypto";
 import { CheckoutStatus } from "./types";
 
-export type RemoteStatus = "in-sync" | "modified" | "remote-changed" | "conflict";
+/** What a refresh found; "remote-missing" is a member that no longer exists on the IBM i. */
+export type RemoteStatus = "in-sync" | "modified" | "remote-changed" | "conflict" | "remote-missing";
 
 /** `CheckedOutMember.hashVersion` of baselines computed with {@link hashContent}. */
 export const HASH_VERSION = 2;

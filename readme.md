@@ -99,6 +99,7 @@ Compares your local file, the live remote content, and the remote content as it 
 - **Modified** — you've edited locally; remote is unchanged (safe — nothing to lose)
 - **Remote changed** — the member changed on the IBM i but your local copy is untouched (safe to re-checkout)
 - **Conflict** — changed both locally *and* on the IBM i (re-checkout would discard your edits — review with Merge Back first)
+- **Deleted on IBM i** — the member no longer exists on the IBM i (deleted, renamed or moved). Your local copy is kept
 
 Local edits update the status to **Modified** automatically, whether you save in VS Code or another tool (an AI assistant, a script, git) writes the file. Saving the remote member from VS Code (from **Show Diff** or **Open Remote File**) also re-checks it. Changes made on the IBM i itself are detected by a refresh, which can also run in the background (see **Background Refresh**).
 
@@ -106,7 +107,9 @@ Refresh per member (inline icon or context menu, with a prompt to Re-checkout or
 
 Refreshing a source file group or every checkout is quick: one query per source file asks the IBM i which members changed since they were last compared, and only those are downloaded. For the others, only the local copy is read. Refreshing one member, or a selection of members, always downloads and compares each one. Whatever a refresh found, an upload always checks the member on the IBM i first.
 
-A badge on the Member Workspace icon shows how many members changed on the IBM i, with or without local changes, as of their last refresh.
+A badge on the Member Workspace icon shows how many members changed on the IBM i, with or without local changes, and how many were deleted there, as of their last refresh.
+
+When a checked-out member no longer exists on the IBM i, Refresh marks it **deleted on IBM i** instead of reporting an error each time, and leaves your local file as it is. The message offers **Remove from Checkouts** (the file stays on disk) or **Keep**. Upload, Merge Back and Run Action aren't offered for such a member; an upload or re-checkout that finds the member gone says so. If the member comes back, the next Refresh shows its usual status again. A member that can't be downloaded for another reason (a busy or dropped connection) is reported as an error, not as deleted: the IBM i's catalog decides.
 
 #### Status in the Explorer
 
@@ -117,6 +120,7 @@ Checked-out files also show their status in VS Code's Explorer, on editor tabs a
 | **↑** | Local changes not yet uploaded |
 | **↓** | Changed on the IBM i; your local copy has no changes |
 | **!** | Changed in both places (a conflict): review it with Merge Back |
+| **✕** | No longer exists on the IBM i; your local copy is kept |
 | **RO** | Read-only reference copy |
 
 Members in sync show nothing. Hover over a file for details. The badges are arrows rather than letters because, with Local Change History on, Git marks the same files with its own letters.
@@ -128,7 +132,7 @@ To keep the status current without refreshing yourself, turn on either or both i
 - `ibmi-member-workspace.backgroundRefresh.onConnect`: refresh when Code for IBM i connects.
 - `ibmi-member-workspace.backgroundRefresh.intervalMinutes`: refresh every so many minutes while connected (at least 5). `0`, the default, turns it off.
 
-A background refresh is the quick refresh above, with its progress in the status bar. It waits while a checkout, upload or another refresh is running. When a member you changed locally turns out to have changed on the IBM i too, a notification offers **Merge Back**. Both settings are read from user settings only, so a workspace can't make the extension query your IBM i.
+A background refresh is the quick refresh above, with its progress in the status bar. It waits while a checkout, upload or another refresh is running. When a member you changed locally turns out to have changed on the IBM i too, a notification offers **Merge Back**; when a member no longer exists on the IBM i, one offers **Remove from Checkouts**. Both settings are read from user settings only, so a workspace can't make the extension query your IBM i.
 
 ### Dependencies (Read-Only Reference Copies)
 

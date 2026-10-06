@@ -33,7 +33,7 @@ import {
   memberChangeStamps,
   getSystemName,
 } from "./codeForIBMi";
-import { CheckoutCancelledError, LocalFileMissingError, ReferenceCopyError, errorMessage } from "./errors";
+import { CheckoutCancelledError, LocalFileMissingError, ReferenceCopyError, RemoteMemberMissingError, errorMessage } from "./errors";
 import {
   HASH_VERSION,
   RemoteStatus,
@@ -56,7 +56,7 @@ import { assertNoLinkBelow } from "./localPath";
 import { GitIntegrationState, gitIntegrationState } from "./workspaceSettings";
 import { CheckoutIndexStore, IndexStorage } from "./checkoutIndexStore";
 import { SourceLayout, SourceProblem, describeProblem, sourceProblems, summarizeProblems } from "./sourceCheck";
-import { describeDuration, withDeadline } from "./deadline";
+import { TimedOutError, describeDuration, withDeadline } from "./deadline";
 import { RefreshPlan, groupBySourceFile, planRefresh } from "./remoteStamps";
 
 /** workspaceState key: the user turned on Local Change History in this workspace. */
@@ -1111,7 +1111,15 @@ export class CheckoutService implements vscode.Disposable {
     await this.assertEntryInActiveWorkItem(entry);
     const localUri = vscode.Uri.file(entry.localPath);
 
-    const remoteContent = await this.download(entry.library, entry.sourceFile, entry.memberName);
+    let remoteContent: string;
+    try {
+      remoteContent = await this.downloadForEntry(entry);
+    } catch (err) {
+      if (err instanceof RemoteMemberMissingError) {
+        return "remote-missing";
+      }
+      throw err;
+    }
     const localContent = await this.readLocal(localUri);
     this.upgradeBaseline(entry, [remoteContent, localContent]);
     const remoteHash = hashContent(remoteContent);
@@ -1164,7 +1172,7 @@ export class CheckoutService implements vscode.Disposable {
    * query per source file. A source file whose query fails is compared in full.
    */
   private async planQuickRefresh(entries: CheckedOutMember[]): Promise<RefreshPlan<CheckedOutMember>> {
-    const plan: RefreshPlan<CheckedOutMember> = { download: [], unchanged: [] };
+    const plan: RefreshPlan<CheckedOutMember> = { download: [], unchanged: [], missing: [] };
     const system = getSystemName();
     for (const group of groupBySourceFile(entries)) {
       const sameSystem = group.entries.filter((entry) => system && systemKey(entry.system) === systemKey(system));
@@ -1183,8 +1191,45 @@ export class CheckoutService implements vscode.Disposable {
       const others = group.entries.filter((entry) => !sameSystem.includes(entry)).map((entry) => ({ entry }));
       plan.download.push(...groupPlan.download, ...others);
       plan.unchanged.push(...groupPlan.unchanged);
+      plan.missing.push(...groupPlan.missing);
     }
     return plan;
+  }
+
+  /**
+   * Records that the member no longer exists on the IBM i. The local file and baseline are kept, and
+   * `remoteSeen` is dropped so the next refresh compares the member in full if it comes back.
+   */
+  private async markRemoteMissing(entry: CheckedOutMember): Promise<RemoteStatus> {
+    await this.assertEntryInActiveWorkItem(entry);
+    this.log.appendLine(`[refresh] ${formatMemberPath(entry)} no longer exists on the IBM i; the local copy is kept`);
+    entry.status = "remote-missing";
+    entry.lastCheckedAt = new Date().toISOString();
+    delete entry.remoteSeen;
+    await this.persist();
+    return "remote-missing";
+  }
+
+  /**
+   * Downloads the checkout's member. When the download fails for another reason than a timeout or a
+   * cancel, the catalog decides whether the member is gone: if it no longer lists it, the checkout is
+   * marked {@link markRemoteMissing} and {@link RemoteMemberMissingError} is thrown; otherwise the
+   * download's own error is, so a busy or dropped connection is still an error, not a deletion.
+   */
+  private async downloadForEntry(entry: CheckedOutMember, signal?: AbortSignal): Promise<string> {
+    try {
+      return await this.download(entry.library, entry.sourceFile, entry.memberName, signal);
+    } catch (err) {
+      if (err instanceof TimedOutError || err instanceof CheckoutCancelledError) {
+        throw err;
+      }
+      const stamps = await memberChangeStamps(entry.library, entry.sourceFile, [entry.memberName]).catch(() => undefined);
+      if (stamps === undefined || stamps.has(entry.memberName.toUpperCase())) {
+        throw err;
+      }
+      await this.markRemoteMissing(entry);
+      throw new RemoteMemberMissingError(formatMemberPath(entry));
+    }
   }
 
   recheckout(entry: CheckedOutMember): Promise<void> {
@@ -1194,7 +1239,7 @@ export class CheckoutService implements vscode.Disposable {
   private async recheckoutNow(entry: CheckedOutMember): Promise<void> {
     this.assertConnectedTo(entry.system);
     await this.assertEntryInActiveWorkItem(entry);
-    const content = await this.download(entry.library, entry.sourceFile, entry.memberName);
+    const content = await this.downloadForEntry(entry);
     const localUri = vscode.Uri.file(entry.localPath);
     this.assertLocalPathSafe(entry.localPath);
 
@@ -1262,7 +1307,7 @@ export class CheckoutService implements vscode.Disposable {
     }
 
     if (!options?.overwriteRemoteChanges) {
-      const remoteContent = await this.download(entry.library, entry.sourceFile, entry.memberName);
+      const remoteContent = await this.downloadForEntry(entry);
       this.upgradeBaseline(entry, [remoteContent, localContent]);
       const remoteHash = hashContent(remoteContent);
       this.adoptNextBaseline(entry, localHash, remoteHash);
@@ -1376,7 +1421,7 @@ export class CheckoutService implements vscode.Disposable {
     await this.runBatch(async () => {
       const plan: RefreshPlan<CheckedOutMember> = quick
         ? await this.planQuickRefresh(entries)
-        : { download: entries.map((entry) => ({ entry })), unchanged: [] };
+        : { download: entries.map((entry) => ({ entry })), unchanged: [], missing: [] };
       if (quick) {
         this.log.appendLine(
           `[refresh] ${plan.unchanged.length} of ${entries.length} member(s) unchanged on the IBM i since they were last compared`
@@ -1384,6 +1429,7 @@ export class CheckoutService implements vscode.Disposable {
       }
       const steps: Array<{ entry: CheckedOutMember; run: () => Promise<RemoteStatus> }> = [
         ...plan.unchanged.map(({ entry, hash }) => ({ entry, run: () => this.refreshFromSeen(entry, hash) })),
+        ...plan.missing.map(({ entry }) => ({ entry, run: () => this.markRemoteMissing(entry) })),
         ...plan.download.map(({ entry, stamp }) => ({ entry, run: () => this.refreshRemoteStatus(entry, stamp) })),
       ];
       for (let i = 0; i < steps.length; i++) {
@@ -1406,6 +1452,9 @@ export class CheckoutService implements vscode.Disposable {
               break;
             case "conflict":
               tally.conflict++;
+              break;
+            case "remote-missing":
+              tally.remoteMissing++;
               break;
           }
         } catch (err) {
