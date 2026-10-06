@@ -21,6 +21,7 @@ import { CommandContext } from "./commands/context";
 import { registerCheckoutCommands } from "./commands/checkout";
 import { registerCompareCommands } from "./commands/compare";
 import { registerDependencyCommands } from "./commands/dependencies";
+import { registerChangeManagementCommands } from "./commands/changeManagement";
 import { registerFindMemberCommands } from "./commands/findMember";
 import { offerLegacyRepositoryRepair, registerGitCommands } from "./commands/git";
 import { registerAutoUpload } from "./commands/autoUpload";
@@ -250,6 +251,7 @@ export async function activate(
   registerSyncCommands(ctx);
   registerCompareCommands(ctx);
   registerDependencyCommands(ctx);
+  registerChangeManagementCommands(ctx);
   registerFindMemberCommands(ctx);
   registerViewCommands(ctx);
   registerGitCommands(ctx);
