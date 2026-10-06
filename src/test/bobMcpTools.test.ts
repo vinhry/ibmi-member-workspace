@@ -14,6 +14,7 @@ import {
 } from "../bobMcpTools";
 import type { MemberInfo } from "../memberInfo";
 import { ReferenceCheckoutOptions, bringReferenceCopies } from "../referenceCopies";
+import { hashContent } from "../sync";
 import type { CheckedOutMember } from "../types";
 
 function entry(library: string, sourceFile: string, member: string, extension: string, reference: boolean): CheckedOutMember {
@@ -171,6 +172,30 @@ function fakeIo(overrides: Partial<ResearchIo> = {}) {
     searchSourceMembers: async () => [],
     describeFile: async () => undefined,
     serviceProgramExports: async () => undefined,
+    downloadMember: async () => ["**FREE", "/copy qcpysrc,protos", "dcl-proc main export;", "end-proc;", "line 5"].join("\n"),
+    describeObject: async (name, libraries) => libraries.includes("PRODOBJ") && name === "ORDENT"
+      ? {
+        library: "PRODOBJ", name: "ORDENT", type: "*PGM",
+        object: { attribute: "RPGLE", text: "Order entry", owner: "PRODOWN" },
+        program: { programType: "ILE", activationGroup: "QILE", moduleCount: "2", serviceProgramCount: "1" },
+        modules: [{ library: "PRODOBJ", name: "ORDENT" }, { library: "PRODOBJ", name: "ORDUTIL" }],
+        boundServicePrograms: [{ library: "PRODOBJ", name: "CUSTSRV", signature: "CUSTSRV_V1" }],
+        notes: [],
+      }
+      : undefined,
+    jobLogMessages: async ({ job, maxMessages, minSeverity }) => ({
+      job: job ?? "*",
+      messages: [{ position: 1, id: "CPF9898", type: "ESCAPE", severity: 40, sent: "2026-10-06 10:00:00", fromProgram: "QCMD", text: `${maxMessages}/${minSeverity}`, help: "" }],
+    }),
+    sampleFileRows: async (name, libraries, { member, maxRows }) => libraries.includes("PRODDTA") && name === "CUSTMAST"
+      ? {
+        library: "PRODDTA", systemName: "CUSTMAST", sqlName: "CUSTOMER_MASTER", ...(member ? { member } : {}),
+        columns: ["CUSTNO", "NAME"],
+        rows: Array.from({ length: Math.min(maxRows, 3) }, (_, i) => [String(i + 1), `Customer ${i + 1}`]),
+        notes: [],
+      }
+      : undefined,
+    allowDataSamples: () => false,
     ...overrides,
   };
   return { io, checkouts, brought };
@@ -195,6 +220,10 @@ describe("research tools", () => {
       "search_source_members",
       "describe_file",
       "list_service_program_exports",
+      "compare_checkout",
+      "describe_object",
+      "read_job_log",
+      "sample_file_data",
     ]);
     for (const name of names) {
       assert.doesNotMatch(name, /upload|merge|write|edit|delete|discard|compile|run/);
@@ -305,6 +334,76 @@ describe("research tools", () => {
     assert.equal(searched.length, 0);
     await tool(tools, "search_source_members").call({ pattern: "ORD*", libraries: names(MAX_LIBRARIES) });
     assert.equal(searched[0].length, MAX_LIBRARIES);
+  });
+
+  it("compares a checked-out member with the IBM i and says how it differs", async () => {
+    const { io, checkouts } = fakeIo({
+      readLocal: () => ["**FREE", "/copy qcpysrc,protos", "dcl-proc main export;", "  new line;", "end-proc;", "line 5"].join("\n"),
+    });
+    // The baseline is the IBM i's text: only the local copy changed.
+    const remote = await io.downloadMember("SYS", "DEVSRC", "QRPGLESRC", "ORDENT");
+    checkouts.push({ ...entry("DEVSRC", "QRPGLESRC", "ORDENT", "rpgle", false), hashVersion: 2, remoteHashAtCheckout: hashContent(remote) });
+    const result = await tool(createResearchTools(io), "compare_checkout").call({ library: "DEVSRC", sourceFile: "QRPGLESRC", member: "ORDENT", context: 0 }) as Record<string, unknown>;
+    assert.equal(result.identical, false);
+    assert.equal(result.linesOnlyLocal, 1);
+    assert.equal(result.linesOnlyOnIbmi, 0);
+    assert.equal(result.statusNow, "modified");
+    assert.match(String(result.diff), /^--- local \/work/m);
+    assert.match(String(result.diff), /^- {2}new line;$/m);
+    assert.equal(result.note, undefined);
+  });
+
+  it("says a checkout is identical to the IBM i, and refuses a member that isn't checked out", async () => {
+    const { io, checkouts } = fakeIo();
+    checkouts.push({ ...entry("DEVSRC", "QRPGLESRC", "ORDENT", "rpgle", false), hashVersion: 2 });
+    const same = await tool(createResearchTools(io), "compare_checkout").call({ library: "DEVSRC", sourceFile: "QRPGLESRC", member: "ORDENT" }) as Record<string, unknown>;
+    assert.equal(same.identical, true);
+    assert.equal(same.diff, "");
+    await assert.rejects(
+      tool(createResearchTools(io), "compare_checkout").call({ library: "DEVSRC", sourceFile: "QRPGLESRC", member: "OTHER" }),
+      /isn't in the checkout folder; use read_member_source/
+    );
+  });
+
+  it("describes a program and what is bound into it, in the search libraries or a named one", async () => {
+    const { io } = fakeIo({ searchLibraries: () => ["PRODOBJ"] });
+    const result = await tool(createResearchTools(io), "describe_object").call({ name: "ordent" }) as Record<string, unknown>;
+    assert.equal(result.type, "*PGM");
+    assert.equal((result.modules as unknown[]).length, 2);
+    await assert.rejects(tool(createResearchTools(io), "describe_object").call({ name: "ORDENT", library: "OTHERLIB" }), /No program or service program named ORDENT in OTHERLIB/);
+    await assert.rejects(tool(createResearchTools(io), "describe_object").call({ name: "ORDENT", objectType: "*FILE" }), /must be \*PGM or \*SRVPGM/);
+  });
+
+  it("reads the job log with bounded size and a validated job name", async () => {
+    const { io } = fakeIo();
+    const log = tool(createResearchTools(io), "read_job_log");
+    const byDefault = await log.call({}) as { job: string; messages: Array<{ text: string }> };
+    assert.equal(byDefault.job, "*");
+    assert.equal(byDefault.messages[0].text, "50/0");
+    const named = await log.call({ job: "123456/QUSER/QZDASOINIT", maxMessages: 5, minSeverity: 30 }) as { job: string; messages: Array<{ text: string }> };
+    assert.equal(named.job, "123456/QUSER/QZDASOINIT");
+    assert.equal(named.messages[0].text, "5/30");
+    await assert.rejects(log.call({ job: "QZDASOINIT; DROP" }), /must be a job name/);
+    await assert.rejects(log.call({ maxMessages: 501 }), /from 1 to 500/);
+  });
+
+  it("refuses data samples until the user allows them, naming the setting of the host", async () => {
+    const off = fakeIo({ searchLibraries: () => ["PRODDTA"] });
+    await assert.rejects(tool(createResearchTools(off.io), "sample_file_data").call({ name: "CUSTMAST" }), /ibmi-member-workspace\.researchTools\.allowDataSamples/);
+    const bob = fakeIo({ dataSamplesSetting: "ibmi-member-workspace.researchTools.allowDataSamples" });
+    assert.match(createResearchTools(bob.io).find((t) => t.name === "sample_file_data")!.description, /researchTools\.allowDataSamples/);
+  });
+
+  it("returns rows as text once allowed, at most 100, from a named member too", async () => {
+    const { io } = fakeIo({ allowDataSamples: () => true, searchLibraries: () => ["PRODDTA"] });
+    const sample = tool(createResearchTools(io), "sample_file_data");
+    const rows = await sample.call({ name: "custmast", maxRows: 2 }) as { rows: unknown[][]; member?: string };
+    assert.deepEqual(rows.rows, [["1", "Customer 1"], ["2", "Customer 2"]]);
+    assert.equal(rows.member, undefined);
+    const member = await sample.call({ name: "CUSTMAST", member: "ARCHIVE" }) as { member?: string };
+    assert.equal(member.member, "ARCHIVE");
+    await assert.rejects(sample.call({ name: "CUSTMAST", maxRows: 101 }), /from 1 to 100/);
+    await assert.rejects(sample.call({ name: "NOPE" }), /No file or table named NOPE in PRODDTA/);
   });
 
   describe("find_where_used library limit", () => {

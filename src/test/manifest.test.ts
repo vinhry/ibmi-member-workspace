@@ -104,6 +104,7 @@ describe("extension manifest", () => {
       "agents.researchTools",
       "changeManagement.release",
       "changeManagement.checkinCommand",
+      "researchTools.allowDataSamples",
     ]) {
       assert.equal(properties[`ibmi-member-workspace.${setting}`].scope, "application", setting);
     }

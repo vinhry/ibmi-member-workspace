@@ -221,3 +221,19 @@ Check Out All Members downloaded one member after another; a source file of a fe
 - `src/test/bobMcpTools.test.ts`: the abort case with `limit: 1`; several at once keep the members' order.
 - To verify on a real system: Check Out All on a 200+ member file, no duplicate entries in `checkout-index.json`, Cancel mid-way leaves one checkpoint; if the SSH server refuses channels, lower `DOWNLOAD_CONCURRENCY`.
 
+### 15. Four more research tools (shipped in 1.8.6)
+
+Agents could see relationships and source, but not a program's attributes, why a command failed, what a file's data looks like, or what the user changed in a checkout.
+
+- `compare_checkout` (read-only): for a member in the checkout folder, `classifyStatus` of local/IBM i/baseline hashes and a unified diff from `src/lineDiff.ts` (vscode-free, no dependency: Myers O(ND) after trimming the common ends; past `maxEdits` differing lines the middle is one replacement and `truncated` says so; texts go through `canonicalMemberText`). Needs `ResearchIo.downloadMember`, wired with `withDeadline` (2 minutes) and a system check.
+- `describe_object`: `describeObject` (`codeForIBMi.ts`) reads `OBJECT_STATISTICS` for the first match, then `PROGRAM_INFO`, `BOUND_MODULE_INFO` and `BOUND_SRVPGM_INFO` with `SELECT *` and tolerant column lookup (`pickColumns`), each failure a note, so older releases still answer.
+- `read_job_log`: `jobLogMessages`, `JOBLOG_INFO('*')` (the SQL job, which CL commands also run in) or a job validated as number/user/name and inlined; newest N by `ORDINAL_POSITION DESC`, returned oldest first. `jobLogSince` (the 1.8.0 LMI fix) is unchanged.
+- `sample_file_data`: `sampleFileRows` resolves the file through the `findTable` helper now shared with `describeFile`; `SELECT * … FETCH FIRST n ROWS ONLY` on `"LIB"."FILE"`, or through `CREATE OR REPLACE ALIAS QTEMP.IMWSAMPLE` inside `exclusive()` for a named member; values as text cut at 200 characters. Gated by `ibmi-member-workspace.researchTools.allowDataSamples` (boolean, default false, application scope, in `manifest.test.ts`'s list): the tool stays listed (Bob's cached tool list is stable) and names the setting when refused.
+- `RULES_BODY` names the four tools; the previous text is frozen as `RULES_1_7_13` in `commands/bob.ts` so connected folders are upgraded. The deep-dive prompt mentions `describe_object` and `compare_checkout`.
+
+**Validation**
+- `src/test/lineDiff.test.ts`: identical as the IBM i stores it, insert, delete, replace, both ends, merged hunks, short edit scripts, the `maxEdits` fallback in under 2 seconds, empty text.
+- `src/test/bobMcpTools.test.ts`: the tool list, each tool's happy path and refusals, the data-sample gate naming the setting.
+- `src/test/bobPrompts.test.ts`, `manifest.test.ts`.
+- On a real system: `describe_object` on an ILE program with bound service programs and on an OPM program; `read_job_log` default and with a WRKACTJOB job name; `sample_file_data` off, on, with a member, on an empty file; `compare_checkout` on in-sync and modified members.
+

@@ -344,6 +344,12 @@ In [IBM Bob](https://bob.ibm.com), Bob's agent can use the extension to research
 | `read_member_source` | A member's source |
 | `bring_reference_copies` | Brings members to read |
 | `list_checkouts` | What's in the checkout folder, and which files are reference copies |
+| `compare_checkout` | How a checked-out member differs from its copy on the IBM i, as a line-by-line diff, with its sync status |
+| `describe_object` | A program or service program: ILE or OPM, text, owner, when it was created and last used, the source it was compiled from, activation group, adopted authority, entry module, and the modules and service programs bound into it |
+| `read_job_log` | The recent messages of the job the extension runs commands in (where a failed command or compile left its messages), or of a job you name |
+| `sample_file_data` | The first rows of a file or table (10 by default, at most 100), only while `ibmi-member-workspace.researchTools.allowDataSamples` is on |
+
+All of them are read-only. `sample_file_data` is the one tool that returns data rather than metadata or source: rows can hold customers, prices or personal data, so it stays off until you turn on `ibmi-member-workspace.researchTools.allowDataSamples` in your user settings (one setting for Bob and the other agents). Until then it tells the agent which setting to ask you for.
 
 #### Bob, Investigate (right-click)
 
@@ -456,6 +462,7 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.bob.researchTools` | `true` | **IBM Bob only.** Offer the IBM i research tools to Bob's agent. User settings only. See **Using with IBM Bob**. |
 | `ibmi-member-workspace.bob.whereUsedMaxLibraries` | `10` | **IBM Bob only.** How many search libraries `find_where_used` reads when Bob names none, from 1 to 25. |
 | `ibmi-member-workspace.agents.researchTools` | `true` | Let Claude Code, Codex (VS Code and IBM Bob) or GitHub Copilot (VS Code) use the IBM i research tools once you connect them. User settings only. See **Using with Claude Code, Codex and GitHub Copilot**. |
+| `ibmi-member-workspace.researchTools.allowDataSamples` | `false` | Let the `sample_file_data` research tool return the first rows of a file or table (at most 100) to Bob's agent, Claude Code, Codex or GitHub Copilot. The other tools return only metadata and source. User settings only. |
 | `ibmi-member-workspace.agents.whereUsedMaxLibraries` | `10` | **Claude Code, Codex and GitHub Copilot.** How many search libraries `find_where_used` reads when the agent names none, from 1 to 25. |
 
 ## Local Change History

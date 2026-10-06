@@ -4,14 +4,21 @@ import { MCP_SERVER_NAME } from "../agentFiles";
 import { BobMcpServer, McpTool } from "../bobMcpServer";
 import { SERVER_INSTRUCTIONS, createResearchTools } from "../bobMcpTools";
 import {
+  OperationCancelledError,
   describeFile,
+  describeObject,
+  downloadMemberContent,
   findSourceMembers,
   getSystemName,
+  jobLogMessages,
+  sampleFileRows,
   searchSourceMembers,
   serviceProgramExports,
   whereUsed,
 } from "../codeForIBMi";
+import { withDeadline } from "../deadline";
 import { errorMessage } from "../errors";
+import { systemKey } from "../types";
 import { readCheckoutText } from "../localPath";
 import { bringReferenceCopiesFor } from "./checkout";
 import { CommandContext } from "./context";
@@ -213,5 +220,25 @@ function createTools(ctx: CommandContext, whereUsedSetting: string): McpTool[] {
     searchSourceMembers,
     describeFile,
     serviceProgramExports,
+    downloadMember: (system, library, sourceFile, member, signal) => {
+      const connected = getSystemName();
+      if (!connected || systemKey(connected) !== systemKey(system)) {
+        return Promise.reject(new Error(`Not connected to ${system}.`));
+      }
+      return withDeadline(downloadMemberContent(library, sourceFile, member), {
+        ms: DOWNLOAD_TIMEOUT_MS,
+        what: `downloading ${library}/${sourceFile}(${member})`,
+        signal,
+        cancelled: () => new OperationCancelledError(),
+      });
+    },
+    describeObject,
+    jobLogMessages,
+    sampleFileRows,
+    allowDataSamples: () => vscode.workspace.getConfiguration("ibmi-member-workspace").get<boolean>("researchTools.allowDataSamples", false),
+    dataSamplesSetting: "ibmi-member-workspace.researchTools.allowDataSamples",
   });
 }
+
+/** How long a tool waits for a member download, as the checkout service does. */
+const DOWNLOAD_TIMEOUT_MS = 120_000;

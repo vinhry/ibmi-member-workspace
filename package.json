@@ -1077,6 +1077,12 @@
           "maximum": 25,
           "markdownDescription": "**Claude Code, Codex and GitHub Copilot.** How many search libraries the `find_where_used` research tool reads when the agent doesn't name any, from 1 to 25. Each library runs `DSPPGMREF` over every program in it, one library after another, so more libraries take longer."
         },
+        "ibmi-member-workspace.researchTools.allowDataSamples": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Let the `sample_file_data` research tool return the first rows of a file or table (at most 100) to IBM Bob's agent, Claude Code, Codex or GitHub Copilot. Rows can hold business data, so this is off until you turn it on. The other research tools return only metadata and source. User settings only."
+        },
         "ibmi-member-workspace.dependencies.suggestAfterCheckout": {
           "type": "boolean",
           "default": true,

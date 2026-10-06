@@ -9,6 +9,7 @@ import {
 } from "./dependencySources";
 import { commandFailureMessages } from "./changeManagement";
 import { TimedOutError, withDeadline } from "./deadline";
+import { errorMessage } from "./errors";
 import { LIKE_ESCAPE, likeMemberPattern, likeText } from "./memberSearch";
 import { changeStamp } from "./remoteStamps";
 import { SourceLayout, layoutFromColumn } from "./sourceCheck";
@@ -664,13 +665,16 @@ export interface FileDescription {
 }
 
 /** A file, table or view: its columns and what depends on it. The first match in `libraries` wins. */
-export async function describeFile(name: string, libraries: string[]): Promise<FileDescription | undefined> {
-  const connection = requireConnection();
+/** The SYSTABLES row of a file, table or view named `name` (system or SQL name); the first match in `libraries` wins. */
+async function findTable(
+  name: string,
+  libraries: string[]
+): Promise<{ library: string; systemName: string; sqlName: string; type: string; text: string } | undefined> {
   const upper = name.trim().toUpperCase();
   if (libraries.length === 0) {
     return undefined;
   }
-  const tables = await connection.runSQL(
+  const tables = await requireConnection().runSQL(
     "SELECT RTRIM(SYSTEM_TABLE_SCHEMA) AS LIBRARY, RTRIM(SYSTEM_TABLE_NAME) AS SYSTEM_NAME, TABLE_NAME, " +
     "TABLE_TYPE, COALESCE(TABLE_TEXT, '') AS TEXT FROM QSYS2.SYSTABLES " +
     `WHERE SYSTEM_TABLE_SCHEMA IN (${libraries.map(() => "?").join(", ")}) ` +
@@ -681,11 +685,24 @@ export async function describeFile(name: string, libraries: string[]): Promise<F
   const [table] = tables.sort((a, b) =>
     order.indexOf(String(a.LIBRARY).toUpperCase()) - order.indexOf(String(b.LIBRARY).toUpperCase())
   );
+  return table
+    ? {
+      library: String(table.LIBRARY),
+      systemName: String(table.SYSTEM_NAME),
+      sqlName: String(table.TABLE_NAME ?? "").trim(),
+      type: String(table.TABLE_TYPE ?? "").trim(),
+      text: String(table.TEXT ?? "").trim(),
+    }
+    : undefined;
+}
+
+export async function describeFile(name: string, libraries: string[]): Promise<FileDescription | undefined> {
+  const connection = requireConnection();
+  const table = await findTable(name, libraries);
   if (!table) {
     return undefined;
   }
-  const library = String(table.LIBRARY);
-  const systemName = String(table.SYSTEM_NAME);
+  const { library, systemName } = table;
   const columns = await connection.runSQL(
     "SELECT COLUMN_NAME, RTRIM(SYSTEM_COLUMN_NAME) AS SYSTEM_COLUMN_NAME, DATA_TYPE, LENGTH, NUMERIC_SCALE, " +
     "IS_NULLABLE, COALESCE(COLUMN_TEXT, '') AS TEXT FROM QSYS2.SYSCOLUMNS " +
@@ -695,9 +712,9 @@ export async function describeFile(name: string, libraries: string[]): Promise<F
   const description: FileDescription = {
     library,
     systemName,
-    sqlName: String(table.TABLE_NAME ?? "").trim(),
-    type: String(table.TABLE_TYPE ?? "").trim(),
-    text: String(table.TEXT ?? "").trim(),
+    sqlName: table.sqlName,
+    type: table.type,
+    text: table.text,
     columns: columns.map((column) => {
       const scale = column.NUMERIC_SCALE;
       return {
@@ -770,6 +787,279 @@ export async function serviceProgramExports(
   }
   const library = order.find((candidate) => byLibrary.has(candidate));
   return library ? { library, name: program, exports: byLibrary.get(library)! } : undefined;
+}
+
+/** A value of a row by any of several column names (they vary a little between releases), trimmed; undefined when absent or null. */
+function columnValue(row: Record<string, unknown>, ...names: string[]): string | undefined {
+  const key = Object.keys(row).find((candidate) => names.includes(candidate.toUpperCase()));
+  const value = key === undefined ? undefined : row[key];
+  return value === undefined || value === null ? undefined : String(value).trim();
+}
+
+/** The named columns of a row that are present and not null, as text. */
+function pickColumns(row: Record<string, unknown>, mapping: Record<string, string[]>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, names] of Object.entries(mapping)) {
+    const value = columnValue(row, ...names);
+    if (value !== undefined) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+export interface ObjectDescription {
+  library: string;
+  name: string;
+  /** *PGM or *SRVPGM. */
+  type: string;
+  /** From OBJECT_STATISTICS: attribute (RPGLE, CLLE…), text, owner, timestamps, source. */
+  object: Record<string, string>;
+  /** From QSYS2.PROGRAM_INFO: ILE or OPM, activation group, adopted authority, entry module, counts…; absent when it couldn't be read. */
+  program?: Record<string, string>;
+  /** From QSYS2.BOUND_MODULE_INFO; absent when it couldn't be read. */
+  modules?: Array<Record<string, string>>;
+  /** From QSYS2.BOUND_SRVPGM_INFO; absent when it couldn't be read. */
+  boundServicePrograms?: Array<Record<string, string>>;
+  notes: string[];
+}
+
+/**
+ * A program or service program: what OBJECT_STATISTICS, PROGRAM_INFO, BOUND_MODULE_INFO and
+ * BOUND_SRVPGM_INFO say about it. The first match in `libraries` wins; each view beyond the first is
+ * optional (older releases lack some), so a failure there is a note, not an error.
+ */
+export async function describeObject(
+  name: string,
+  libraries: string[],
+  types: string[] = ["*PGM", "*SRVPGM"]
+): Promise<ObjectDescription | undefined> {
+  const connection = requireConnection();
+  const object = objectName(name, "object");
+  const typeList = types.map((type) => objectType(type)).join(" ");
+  let found: Record<string, unknown> | undefined;
+  for (const library of libraries) {
+    try {
+      [found] = await connection.runSQL(
+        "SELECT OBJLIB, OBJNAME, OBJTYPE, OBJATTRIBUTE, OBJTEXT, OBJOWNER, OBJCREATED, CHANGE_TIMESTAMP, " +
+        "LAST_USED_TIMESTAMP, DAYS_USED_COUNT, SOURCE_LIBRARY, SOURCE_FILE, SOURCE_MEMBER, SOURCE_TIMESTAMP " +
+        `FROM TABLE(QSYS2.OBJECT_STATISTICS(?, '${typeList}', OBJECT_NAME => ?)) X`,
+        { bindings: [objectName(library, "library"), object] }
+      );
+    } catch {
+      // A library that doesn't exist or isn't authorized just holds no object.
+    }
+    if (found) {
+      break;
+    }
+  }
+  if (!found) {
+    return undefined;
+  }
+  const library = columnValue(found, "OBJLIB") ?? "";
+  const type = columnValue(found, "OBJTYPE") ?? "";
+  const description: ObjectDescription = {
+    library,
+    name: columnValue(found, "OBJNAME") ?? object,
+    type,
+    object: pickColumns(found, {
+      attribute: ["OBJATTRIBUTE"],
+      text: ["OBJTEXT"],
+      owner: ["OBJOWNER"],
+      created: ["OBJCREATED"],
+      changed: ["CHANGE_TIMESTAMP"],
+      lastUsed: ["LAST_USED_TIMESTAMP"],
+      daysUsed: ["DAYS_USED_COUNT"],
+      sourceLibrary: ["SOURCE_LIBRARY"],
+      sourceFile: ["SOURCE_FILE"],
+      sourceMember: ["SOURCE_MEMBER"],
+      sourceChanged: ["SOURCE_TIMESTAMP"],
+    }),
+    notes: [],
+  };
+  const where = "WHERE PROGRAM_LIBRARY = ? AND PROGRAM_NAME = ? AND OBJECT_TYPE = ?";
+  const bindings = [library, description.name, type];
+  try {
+    const [row] = await connection.runSQL(`SELECT * FROM QSYS2.PROGRAM_INFO ${where}`, { bindings });
+    if (row) {
+      description.program = pickColumns(row, {
+        programType: ["PROGRAM_TYPE"],
+        attribute: ["PROGRAM_ATTRIBUTE"],
+        text: ["TEXT_DESCRIPTION"],
+        owner: ["PROGRAM_OWNER"],
+        userProfile: ["USER_PROFILE"],
+        useAdoptedAuthority: ["USE_ADOPTED_AUTHORITY"],
+        activationGroup: ["ACTIVATION_GROUP"],
+        entryModule: ["PROGRAM_ENTRY_PROCEDURE_MODULE"],
+        entryModuleLibrary: ["PROGRAM_ENTRY_PROCEDURE_MODULE_LIBRARY"],
+        moduleCount: ["MODULES"],
+        serviceProgramCount: ["SERVICE_PROGRAMS"],
+        sourceLibrary: ["SOURCE_FILE_LIBRARY"],
+        sourceFile: ["SOURCE_FILE"],
+        sourceMember: ["SOURCE_FILE_MEMBER"],
+        sourceChanged: ["SOURCE_FILE_CHANGE_TIMESTAMP"],
+        targetRelease: ["TARGET_RELEASE"],
+        releaseCreatedOn: ["RELEASE_CREATED_ON"],
+        observable: ["OBSERVABLE"],
+        sqlStatementCount: ["SQL_STATEMENT_COUNT"],
+        created: ["CREATE_TIMESTAMP"],
+      });
+    }
+  } catch (err) {
+    description.notes.push(`PROGRAM_INFO could not be read: ${errorMessage(err)}`);
+  }
+  try {
+    const rows = await connection.runSQL(`SELECT * FROM QSYS2.BOUND_MODULE_INFO ${where}`, { bindings });
+    description.modules = rows.map((row) => pickColumns(row, {
+      library: ["BOUND_MODULE_LIBRARY"],
+      name: ["BOUND_MODULE"],
+      attribute: ["MODULE_ATTRIBUTE"],
+      sourceLibrary: ["SOURCE_FILE_LIBRARY"],
+      sourceFile: ["SOURCE_FILE"],
+      sourceMember: ["SOURCE_FILE_MEMBER"],
+      sourceChanged: ["SOURCE_CHANGE_TIMESTAMP", "SOURCE_FILE_CHANGE_TIMESTAMP"],
+      created: ["MODULE_CREATE_TIMESTAMP", "CREATE_TIMESTAMP"],
+    }));
+  } catch (err) {
+    description.notes.push(`BOUND_MODULE_INFO could not be read: ${errorMessage(err)}`);
+  }
+  try {
+    const rows = await connection.runSQL(`SELECT * FROM QSYS2.BOUND_SRVPGM_INFO ${where}`, { bindings });
+    description.boundServicePrograms = rows.map((row) => pickColumns(row, {
+      library: ["BOUND_SERVICE_PROGRAM_LIBRARY"],
+      name: ["BOUND_SERVICE_PROGRAM"],
+      signature: ["BOUND_SERVICE_PROGRAM_SIGNATURE"],
+    }));
+  } catch (err) {
+    description.notes.push(`BOUND_SRVPGM_INFO could not be read: ${errorMessage(err)}`);
+  }
+  return description;
+}
+
+/** An object type such as *PGM, safe to put in SQL text. */
+function objectType(type: string): string {
+  const upper = type.trim().toUpperCase();
+  if (!/^\*[A-Z]{1,9}$/.test(upper)) {
+    throw new Error(`Not a valid object type: ${type}`);
+  }
+  return upper;
+}
+
+export interface JobLogMessage {
+  position: number;
+  id: string;
+  type: string;
+  severity: number;
+  sent: string;
+  fromProgram: string;
+  text: string;
+  help: string;
+}
+
+/** A qualified job name: number/user/name. */
+const JOB_NAME = /^\d{6}\/[A-Z0-9_$#@]{1,10}\/[A-Z0-9_$#@]{1,10}$/;
+
+/**
+ * The most recent messages of a job's log, oldest first: the SQL job's (`*`), which is also the
+ * one CL commands run in, or any job named number/user/name.
+ */
+export async function jobLogMessages(
+  options: { job?: string; maxMessages: number; minSeverity: number }
+): Promise<{ job: string; messages: JobLogMessage[] }> {
+  const job = (options.job ?? "*").trim().toUpperCase();
+  if (job !== "*" && !JOB_NAME.test(job)) {
+    throw new Error(`Not a job name: ${options.job}. Use number/user/name, for example 123456/QUSER/QZDASOINIT, or * for this connection's job.`);
+  }
+  const limit = Math.max(1, Math.floor(options.maxMessages));
+  const rows = await requireConnection().runSQL(
+    "SELECT ORDINAL_POSITION, MESSAGE_ID, MESSAGE_TYPE, SEVERITY, VARCHAR(MESSAGE_TIMESTAMP) AS SENT, FROM_PROGRAM, " +
+    `MESSAGE_TEXT, MESSAGE_SECOND_LEVEL_TEXT FROM TABLE(QSYS2.JOBLOG_INFO('${job}')) X ` +
+    `WHERE SEVERITY >= ? ORDER BY ORDINAL_POSITION DESC FETCH FIRST ${limit} ROWS ONLY`,
+    { bindings: [Math.max(0, Math.floor(options.minSeverity))] }
+  );
+  const messages = rows.map((row): JobLogMessage => ({
+    position: Number(row.ORDINAL_POSITION ?? 0),
+    id: columnValue(row, "MESSAGE_ID") ?? "",
+    type: columnValue(row, "MESSAGE_TYPE") ?? "",
+    severity: Number(row.SEVERITY ?? 0),
+    sent: columnValue(row, "SENT") ?? "",
+    fromProgram: columnValue(row, "FROM_PROGRAM") ?? "",
+    text: columnValue(row, "MESSAGE_TEXT") ?? "",
+    help: columnValue(row, "MESSAGE_SECOND_LEVEL_TEXT") ?? "",
+  })).reverse();
+  return { job, messages };
+}
+
+export interface FileSample {
+  library: string;
+  systemName: string;
+  sqlName: string;
+  member?: string;
+  columns: string[];
+  /** Each row's values as text, in `columns` order; null is null. */
+  rows: Array<Array<string | null>>;
+  notes: string[];
+}
+
+/** Characters of one value a sample returns at most. */
+const SAMPLE_VALUE_LENGTH = 200;
+
+/**
+ * The first rows of a file, table or view, as text. The first match in `libraries` wins. A `member`
+ * other than the first is read through an alias in QTEMP, which the outfile commands also use.
+ */
+export async function sampleFileRows(
+  name: string,
+  libraries: string[],
+  options: { member?: string; maxRows: number }
+): Promise<FileSample | undefined> {
+  const connection = requireConnection();
+  const table = await findTable(name, libraries);
+  if (!table) {
+    return undefined;
+  }
+  const library = objectName(table.library, "library");
+  const file = objectName(table.systemName, "file");
+  const member = options.member === undefined ? undefined : objectName(options.member, "member");
+  const limit = Math.max(1, Math.floor(options.maxRows));
+  const select = (from: string) => connection.runSQL(`SELECT * FROM ${from} FETCH FIRST ${limit} ROWS ONLY`);
+  const rows = member === undefined
+    ? await select(`"${library}"."${file}"`)
+    : await exclusive(async () => {
+      await connection.runSQL(`CREATE OR REPLACE ALIAS QTEMP.IMWSAMPLE FOR "${library}"."${file}"("${member}")`);
+      try {
+        return await select("QTEMP.IMWSAMPLE");
+      } finally {
+        await connection.runSQL("DROP ALIAS QTEMP.IMWSAMPLE").catch(() => undefined);
+      }
+    });
+  const notes: string[] = [];
+  let columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+  if (columns.length === 0) {
+    const described = await connection.runSQL(
+      "SELECT COLUMN_NAME FROM QSYS2.SYSCOLUMNS WHERE SYSTEM_TABLE_SCHEMA = ? AND SYSTEM_TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+      { bindings: [library, file] }
+    );
+    columns = described.map((row) => String(row.COLUMN_NAME ?? "").trim());
+    notes.push("The file has no rows.");
+  }
+  let truncated = 0;
+  const values = rows.map((row) => columns.map((column) => {
+    const value = row[column];
+    if (value === null || value === undefined) {
+      return null;
+    }
+    const text = String(value);
+    if (text.length > SAMPLE_VALUE_LENGTH) {
+      truncated++;
+      return `${text.slice(0, SAMPLE_VALUE_LENGTH)}…`;
+    }
+    return text;
+  }));
+  if (truncated > 0) {
+    notes.push(`${truncated} value(s) longer than ${SAMPLE_VALUE_LENGTH} characters were cut short.`);
+  }
+  return { library, systemName: file, sqlName: table.sqlName, ...(member ? { member } : {}), columns, rows: values, notes };
 }
 
 export async function listSourceFileMembers(

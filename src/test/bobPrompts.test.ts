@@ -46,7 +46,7 @@ describe("buildBobPrompt", () => {
     );
     assert.match(text, /^Give a new developer a deep-dive walkthrough of this IBM i member, written by developers who have since left:/);
     assert.match(text, /^- PRODSRC\/QRPGLESRC\(ORDENT\) \[SQLRPGLE\] @\/checkouts\/\S+ \(read-only reference copy\)$/m);
-    for (const tool of ["read_member_source", "find_member_dependencies", "find_where_used", "describe_file", "list_service_program_exports"]) {
+    for (const tool of ["read_member_source", "find_member_dependencies", "find_where_used", "describe_file", "describe_object", "list_service_program_exports", "compare_checkout"]) {
       assert.match(text, new RegExp(tool));
     }
     assert.match(text, /For a program, cover:/);
