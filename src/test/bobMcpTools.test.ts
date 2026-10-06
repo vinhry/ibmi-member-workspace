@@ -86,10 +86,46 @@ describe("bringReferenceCopies when abandoned", () => {
       },
       ["A", "B", "C"].map((memberName) => ({ library: "L", sourceFile: "F", memberName, extension: "rpgle" })),
       [],
-      abandoned.signal
+      abandoned.signal,
+      { limit: 1 }
     );
     assert.deepEqual(brought, ["A"]);
     assert.deepEqual(results.map((r) => r.status), ["brought", "cancelled", "cancelled"]);
+  });
+});
+
+describe("bringReferenceCopies several at once", () => {
+  it("downloads a few members at the same time and keeps the members' order", async () => {
+    const waiting: Array<() => void> = [];
+    let inFlight = 0;
+    let most = 0;
+    const names = ["A", "B", "C", "D", "E", "F"];
+    const run = bringReferenceCopies(
+      {
+        findEntry: () => undefined,
+        checkoutMember: async (library, sourceFile, member, extension, options) => {
+          inFlight++;
+          most = Math.max(most, inFlight);
+          await new Promise<void>((resolve) => waiting.push(resolve));
+          inFlight--;
+          return entry(library, sourceFile, member, extension, options.reference);
+        },
+        log: () => undefined,
+      },
+      names.map((memberName) => ({ library: "L", sourceFile: "F", memberName, extension: "rpgle" })),
+      []
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(waiting.length, 4);
+    // Finish them in reverse order; the results still follow the members.
+    while (waiting.length > 0) {
+      waiting.pop()!();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    const results = await run;
+    assert.equal(most, 4);
+    assert.deepEqual(results.map((r) => r.member), names.map((name) => `L/F(${name})`));
+    assert.ok(results.every((r) => r.status === "brought"));
   });
 });
 

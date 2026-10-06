@@ -34,7 +34,7 @@ A checkout shows its progress and can be cancelled at any time; cancelling write
 
 ### Check Out All Members
 
-Right-click a **source file** (one level above members) and choose **Check Out All Members** to pull down every member it contains in one go. Since this can mean a lot of members, a confirmation dialog warns that it may take a while before starting.
+Right-click a **source file** (one level above members) and choose **Check Out All Members** to pull down every member it contains in one go. Since this can mean a lot of members, a confirmation dialog warns that it may take a while before starting. Members are downloaded four at a time; the progress shows how many are done, and Cancel stops the downloads under way. Whatever the order they arrive in, the result is the same: the same members, and one checkpoint.
 
 ### Protected Filter Members
 

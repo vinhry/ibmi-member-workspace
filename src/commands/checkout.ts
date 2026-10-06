@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { CheckoutService } from "../checkoutService";
 import { ensureCheckoutFolder } from "../checkoutFolder";
 import { getSystemName, listSourceFileMembers } from "../codeForIBMi";
+import { DOWNLOAD_CONCURRENCY, mapWithLimit } from "../concurrency";
 import { CheckoutCancelledError, errorMessage } from "../errors";
 import {
   BrowserNode,
@@ -13,7 +14,7 @@ import {
 } from "../memberInfo";
 import { countLocalChanges, saveDirtyLocalFiles } from "../prompts";
 import { ReferenceCopyResult, bringReferenceCopies } from "../referenceCopies";
-import { ChangeManagementOrigin, CheckedOutMember, systemKey } from "../types";
+import { ChangeManagementOrigin, CheckedOutMember, buildCheckoutId, systemKey } from "../types";
 import { CommandContext } from "./context";
 import { suggestDependencies } from "./dependencies";
 import { ensureWorkItemForCheckout } from "./git";
@@ -196,9 +197,10 @@ export async function checkoutMembersBatch(
   log: vscode.OutputChannel,
   { reference = false }: { reference?: boolean } = {}
 ): Promise<void> {
-  const alreadyCheckedOut = memberInfoList.filter(
-    (m) => service.findEntry(system, m.library, m.sourceFile, m.memberName)
-  );
+  // One lookup per member, not a scan of every checkout per member: Check Out All can name hundreds.
+  const existing = new Map(service.getEntriesForSystem(system).map((entry) => [entry.id, entry]));
+  const existingEntryOf = (m: MemberInfo) => existing.get(buildCheckoutId(system, m.library, m.sourceFile, m.memberName));
+  const alreadyCheckedOut = memberInfoList.filter((m) => existingEntryOf(m));
 
   let redownloadBehavior: "skip" | "force" = "force";
   // A reference copy has nothing worth keeping locally.
@@ -217,7 +219,7 @@ export async function checkoutMembersBatch(
 
     if (redownloadBehavior === "force") {
       const existingEntries = alreadyCheckedOut
-        .map((m) => service.findEntry(system, m.library, m.sourceFile, m.memberName))
+        .map(existingEntryOf)
         .filter((e): e is CheckedOutMember => e !== undefined);
       if (!(await saveDirtyLocalFiles(existingEntries))) {
         return;
@@ -254,31 +256,38 @@ export async function checkoutMembersBatch(
       const subscription = token.onCancellationRequested(() => controller.abort());
 
       await service.runBatch(async () => {
-        for (let i = 0; i < memberInfoList.length; i++) {
-          if (token.isCancellationRequested) {
-            cancelled = true;
-            break;
-          }
-          const m = memberInfoList[i];
-          progress.report({ message: `${m.memberName} (${i + 1}/${memberInfoList.length})` });
-          try {
-            await service.checkoutMember(
-              m.library, m.sourceFile, m.memberName, m.extension,
-              {
-                redownloadBehavior, suppressAutoOpen: true, discardLocalChanges, deferCheckpointTo: downloaded, reference, system,
-                signal: controller.signal, changeManagement: m.changeManagement,
-              }
-            );
-            succeeded++;
-          } catch (err) {
-            if (err instanceof CheckoutCancelledError) {
-              cancelled ||= token.isCancellationRequested;
-            } else {
-              errors++;
-              log.appendLine(`[checkout] Error for ${m.memberName}: ${errorMessage(err)}`);
+        const total = memberInfoList.length;
+        let done = 0;
+        // Several downloads at once; the index and the checkpoint list are only touched between awaits.
+        const settled = await mapWithLimit(
+          memberInfoList,
+          DOWNLOAD_CONCURRENCY,
+          (m) => service.checkoutMember(
+            m.library, m.sourceFile, m.memberName, m.extension,
+            {
+              redownloadBehavior, suppressAutoOpen: true, discardLocalChanges, deferCheckpointTo: downloaded, reference, system,
+              signal: controller.signal, changeManagement: m.changeManagement,
             }
+          ),
+          {
+            signal: controller.signal,
+            cancelled: () => new CheckoutCancelledError(),
+            onSettled: (index) => {
+              done++;
+              progress.report({ message: `${memberInfoList[index].memberName} (${done}/${total})`, increment: 100 / total });
+            },
           }
-        }
+        );
+        settled.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            succeeded++;
+          } else if (result.reason instanceof CheckoutCancelledError) {
+            cancelled ||= token.isCancellationRequested;
+          } else {
+            errors++;
+            log.appendLine(`[checkout] Error for ${memberInfoList[index].memberName}: ${errorMessage(result.reason)}`);
+          }
+        });
         subscription.dispose();
         // One checkpoint for the whole batch, including members downloaded before a cancel.
         await service.saveBatchCheckpoint(

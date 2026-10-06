@@ -1074,9 +1074,10 @@ export class CheckoutService implements vscode.Disposable {
       this.logGitFailure(result);
     }
 
-    // Recorded under `system` even if the connection dropped meanwhile.
+    // Recorded under `system` even if the connection dropped meanwhile. Looked up again now: with
+    // several checkouts at once, another may have recorded the same member since `existing` was read.
     const entries = this.activeEntries(system);
-    const idx = existing ? entries.findIndex((e) => e.id === entry.id) : -1;
+    const idx = entries.findIndex((e) => e.id === entry.id);
     if (idx >= 0) {
       entries[idx] = entry;
     } else {

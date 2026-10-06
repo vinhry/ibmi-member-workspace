@@ -1,3 +1,4 @@
+import { DOWNLOAD_CONCURRENCY, mapWithLimit } from "./concurrency";
 import type { MemberInfo } from "./memberInfo";
 import { CheckedOutMember, formatMemberPath, isReferenceCopy } from "./types";
 
@@ -48,52 +49,60 @@ export interface ReferenceCopyResult {
   error?: string;
 }
 
-/** Brings each member as a reference copy, one at a time; one failing never stops the others. */
+/**
+ * Brings each member as a reference copy, a few at a time ({@link DOWNLOAD_CONCURRENCY} unless
+ * `limit` says otherwise), in the members' order; one failing never stops the others. Once `signal`
+ * aborts, the members not started yet are reported as cancelled.
+ */
 export async function bringReferenceCopies(
   io: ReferenceCopyIo,
   members: readonly MemberInfo[],
   checkpointPaths: string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  { limit = DOWNLOAD_CONCURRENCY }: { limit?: number } = {}
 ): Promise<ReferenceCopyResult[]> {
-  const results: ReferenceCopyResult[] = [];
-  for (const m of members) {
-    const member = `${m.library}/${m.sourceFile}(${m.memberName})`.toUpperCase();
-    if (signal?.aborted) {
-      results.push({ member, status: "cancelled" });
-      continue;
-    }
-    const existing = io.findEntry(m.library, m.sourceFile, m.memberName);
-    if (existing) {
-      const reference = isReferenceCopy(existing);
-      results.push({
-        member: formatMemberPath(existing),
-        status: reference ? "alreadyReference" : "checkedOutForChange",
-        localPath: existing.localPath,
-        readOnly: reference,
-      });
-      continue;
-    }
-    try {
-      const entry = await io.checkoutMember(m.library, m.sourceFile, m.memberName, m.extension, {
-        reference: true,
-        redownloadBehavior: "skip",
-        suppressAutoOpen: true,
-        discardLocalChanges: false,
-        deferCheckpointTo: checkpointPaths,
-      });
-      const reference = isReferenceCopy(entry);
-      io.log(`[bob] ${reference ? "reference" : "kept"}: ${formatMemberPath(entry)}`);
-      results.push({
-        member: formatMemberPath(entry),
-        status: reference ? "brought" : "checkedOutForChange",
-        localPath: entry.localPath,
-        readOnly: reference,
-      });
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      io.log(`[bob] Could not bring ${member}: ${error}`);
-      results.push({ member, status: "failed", error });
-    }
+  const settled = await mapWithLimit(members, limit, (m) => bringOne(io, m, checkpointPaths), { signal });
+  return settled.map((result, index) =>
+    result.status === "fulfilled" ? result.value : { member: memberLabel(members[index]), status: "cancelled" }
+  );
+}
+
+function memberLabel(m: MemberInfo): string {
+  return `${m.library}/${m.sourceFile}(${m.memberName})`.toUpperCase();
+}
+
+/** Brings one member; never rejects, a failure is a result. */
+async function bringOne(io: ReferenceCopyIo, m: MemberInfo, checkpointPaths: string[]): Promise<ReferenceCopyResult> {
+  const member = memberLabel(m);
+  const existing = io.findEntry(m.library, m.sourceFile, m.memberName);
+  if (existing) {
+    const reference = isReferenceCopy(existing);
+    return {
+      member: formatMemberPath(existing),
+      status: reference ? "alreadyReference" : "checkedOutForChange",
+      localPath: existing.localPath,
+      readOnly: reference,
+    };
   }
-  return results;
+  try {
+    const entry = await io.checkoutMember(m.library, m.sourceFile, m.memberName, m.extension, {
+      reference: true,
+      redownloadBehavior: "skip",
+      suppressAutoOpen: true,
+      discardLocalChanges: false,
+      deferCheckpointTo: checkpointPaths,
+    });
+    const reference = isReferenceCopy(entry);
+    io.log(`[bob] ${reference ? "reference" : "kept"}: ${formatMemberPath(entry)}`);
+    return {
+      member: formatMemberPath(entry),
+      status: reference ? "brought" : "checkedOutForChange",
+      localPath: entry.localPath,
+      readOnly: reference,
+    };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    io.log(`[bob] Could not bring ${member}: ${error}`);
+    return { member, status: "failed", error };
+  }
 }

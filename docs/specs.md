@@ -207,3 +207,17 @@ A checked-out member deleted, renamed or moved on the IBM i failed every refresh
 - `src/test/sync.test.ts`, `statusDecorations.test.ts`, `autoUpload.test.ts`: the status survives local saves, has a one-character badge, and is never uploaded on save.
 - README "Refresh Remote Status" and the badge table.
 
+### 14. Several downloads at once (shipped in 1.8.5)
+
+Check Out All Members downloaded one member after another; a source file of a few hundred members took minutes.
+
+- `src/concurrency.ts` (vscode-free): `mapWithLimit(items, limit, fn, { signal, cancelled, onSettled })`, `Promise.allSettled` with a limit: results in the items' order, one failure never stops the others, nothing starts after the signal aborts (those items are rejected with `cancelled()`). `DOWNLOAD_CONCURRENCY = 4`: Code for IBM i opens a channel per download on the one SSH connection, and four stays well under the usual `MaxSessions 10`.
+- `checkoutMembersBatch` (`commands/checkout.ts`) runs the checkouts through it, with `onSettled` driving the progress (done/total) and the tally of succeeded, cancelled and failed members read from the settled results afterwards. The already-checked-out lookup is one `Map` by checkout id instead of a scan per member. The checkpoint and the messages are unchanged.
+- `CheckoutService.checkoutMemberNow` always looks the entry up again by id before recording it, so two checkouts of one member can't record it twice. `ensureGitReady` already shares one preparation (`gitPreparations`), `lookupSourceLayout` one promise per source file, and `persist()` is deferred in a batch.
+- `bringReferenceCopies` (`referenceCopies.ts`) takes `{ limit }` (default `DOWNLOAD_CONCURRENCY`); members not started when the signal aborts are reported as cancelled. The dependency walk still reads members one at a time: each level depends on the previous.
+
+**Validation**
+- `src/test/concurrency.test.ts`: at most `limit` in flight, results in order, one rejection, abort, limit 1, empty list.
+- `src/test/bobMcpTools.test.ts`: the abort case with `limit: 1`; several at once keep the members' order.
+- To verify on a real system: Check Out All on a 200+ member file, no duplicate entries in `checkout-index.json`, Cancel mid-way leaves one checkpoint; if the SSH server refuses channels, lower `DOWNLOAD_CONCURRENCY`.
+
