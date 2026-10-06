@@ -135,6 +135,20 @@ describe("BobMcpServer", () => {
     assert.equal((await post(port, "{ nope", { Authorization: "Bearer token" })).status, 400);
   });
 
+  it("answers a body over the limit with 413 and closes the connection", async (t) => {
+    const server = new BobMcpServer([echo], "token", info, () => undefined);
+    const port = await server.start(undefined);
+    t.after(() => server.dispose());
+
+    const huge = `{"pad":"${"x".repeat(1024 * 1024 + 1)}"}`;
+    const response = await post(port, huge, { Authorization: "Bearer token" });
+    assert.equal(response.status, 413);
+    assert.equal(JSON.parse(response.body).error, "Request too large");
+    // The server still answers afterwards.
+    const ping = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
+    assert.equal((await post(port, ping, { Authorization: "Bearer token" })).status, 200);
+  });
+
   it(`runs at most ${MAX_CONCURRENT_CALLS} tool calls at once`, async (t) => {
     const release: Array<() => void> = [];
     const slow: McpTool = { ...echo, name: "slow", call: () => new Promise((resolve) => release.push(() => resolve({ done: true }))) };

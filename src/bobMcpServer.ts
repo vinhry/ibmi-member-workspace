@@ -156,6 +156,12 @@ export function refusal(
 
 const MAX_BODY = 1024 * 1024;
 
+class RequestTooLargeError extends Error {
+  constructor() {
+    super("Request too large");
+  }
+}
+
 export class BobMcpServer {
   private server: http.Server | undefined;
   private port = 0;
@@ -238,8 +244,13 @@ export class BobMcpServer {
     try {
       body = await readBody(req);
     } catch (err) {
-      send(413, { error: err instanceof Error ? err.message : String(err) });
-      return;
+      if (err instanceof RequestTooLargeError) {
+        // The rest of the body is never read: answer, then close the connection instead of reusing it.
+        res.setHeader("Connection", "close");
+        send(413, { error: err.message });
+        return;
+      }
+      throw err;
     }
     let message: unknown;
     try {
@@ -313,15 +324,19 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    req.on("data", (chunk: Buffer) => {
+    const onData = (chunk: Buffer) => {
       size += chunk.length;
       if (size > MAX_BODY) {
-        reject(new Error("Request too large"));
-        req.destroy();
+        // Stop keeping the body; the rest still drains so the 413 reaches the client before the
+        // connection closes (a destroyed socket would only show the client a reset).
+        req.off("data", onData);
+        chunks.length = 0;
+        reject(new RequestTooLargeError());
         return;
       }
       chunks.push(chunk);
-    });
+    };
+    req.on("data", onData);
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
     req.on("error", reject);
   });
