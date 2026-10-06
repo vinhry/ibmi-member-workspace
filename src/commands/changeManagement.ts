@@ -1,10 +1,20 @@
 import * as vscode from "vscode";
 import { connectedUser, getSystemName, runClCommand } from "../codeForIBMi";
-import { ChangeCheckoutResult, nameValueProblem, releaseProblem, runChangeManagementCheckout } from "../changeManagement";
+import {
+  ChangeCheckinResult,
+  ChangeCheckoutResult,
+  CheckinMember,
+  checkinMemberOf,
+  checkinRefusal,
+  nameValueProblem,
+  releaseProblem,
+  runChangeManagementCheckin,
+  runChangeManagementCheckout,
+} from "../changeManagement";
 import { errorMessage } from "../errors";
 import type { BrowserNode, MemberInfo } from "../memberInfo";
 import { resolveMemberSelections } from "../prompts";
-import { TreeItemType } from "../types";
+import { CheckedOutMember, TreeItemType, formatMemberPath, isReferenceCopy } from "../types";
 import { checkoutMembersBatch, memberInfoOf } from "./checkout";
 import { CommandContext } from "./context";
 import { foundMembersOf } from "../findMemberView";
@@ -25,8 +35,22 @@ export function registerChangeManagementCommands(ctx: CommandContext): void {
           await changeThroughChangeManagement(ctx, system, members);
         }
       }
+    ),
+    vscode.commands.registerCommand(
+      "ibmi-member-workspace.checkinThroughChangeManagement",
+      async (item: TreeItemType, allSelections?: TreeItemType[]) => {
+        const entries = resolveMemberSelections(ctx.service, item, allSelections).map(({ entry }) => entry);
+        if (entries.length > 0) {
+          await checkInThroughChangeManagement(ctx, entries);
+        }
+      }
     )
   );
+}
+
+/** Whether a check-in command is set, so Check In… is worth offering after an upload. */
+export function checkinCommandConfigured(): boolean {
+  return Boolean(vscode.workspace.getConfiguration("ibmi-member-workspace").inspect<string>(CHECKIN_COMMAND_SETTING)?.globalValue?.trim());
 }
 
 
@@ -52,11 +76,45 @@ function selectedMembers(ctx: CommandContext, arg: unknown, all?: unknown[]): Me
 
 /** workspaceState key: the development library last named for a change-management checkout. */
 const LAST_DEV_LIBRARY = "changeManagement.lastDevLibrary";
-/** workspaceState key: the project last named for a change-management checkout (&PROJECT). */
+/** workspaceState key: the project last named for a change-management checkout or check-in (&PROJECT). */
 const LAST_PROJECT = "changeManagement.lastProject";
+/** workspaceState key: the production library last named for a change-management check-in (&OPENLIB). */
+const LAST_OPEN_LIBRARY = "changeManagement.lastOpenLibrary";
 
 const CHECKOUT_COMMAND_SETTING = "changeManagement.checkoutCommand";
+const CHECKIN_COMMAND_SETTING = "changeManagement.checkinCommand";
 const RELEASE_SETTING = "changeManagement.release";
+
+const IBMI_NAME = /^[A-Z0-9_$#@][A-Z0-9_$#@.]{0,9}$/i;
+
+/** The usual release, from user settings only, like the command it goes into. */
+function usualRelease(): string {
+  return (vscode.workspace
+    .getConfiguration("ibmi-member-workspace")
+    .inspect<string>(RELEASE_SETTING)?.globalValue ?? "").trim().toUpperCase();
+}
+
+/** After a command ran with another release than the usual one, offers to make it the usual one. */
+function offerReleaseAsDefault(release: string | undefined, usual: string): void {
+  if (!release || release === usual) {
+    return;
+  }
+  const makeDefault = "Make Default";
+  void vscode.window
+    .showInformationMessage(
+      usual ? `Make ${release} your default release instead of ${usual}?` : `Make ${release} your default release?`,
+      makeDefault
+    )
+    .then(async (choice) => {
+      if (choice === makeDefault) {
+        await vscode.workspace.getConfiguration("ibmi-member-workspace").update(RELEASE_SETTING, release, vscode.ConfigurationTarget.Global);
+      }
+    });
+}
+
+function openSetting(setting: string): void {
+  void vscode.commands.executeCommand("workbench.action.openSettings", `ibmi-member-workspace.${setting}`);
+}
 
 /**
  * "I Need to Change Some…": runs the change-management checkout command when one is set, then
@@ -71,10 +129,7 @@ export async function changeThroughChangeManagement(ctx: CommandContext, system:
     return;
   }
 
-  // The usual release, from user settings only, like the command it goes into.
-  const usualRelease = (vscode.workspace
-    .getConfiguration("ibmi-member-workspace")
-    .inspect<string>(RELEASE_SETTING)?.globalValue ?? "").trim().toUpperCase();
+  const usual = usualRelease();
 
   let result: ChangeCheckoutResult | undefined;
   try {
@@ -97,10 +152,10 @@ export async function changeThroughChangeManagement(ctx: CommandContext, system:
       }),
       askRelease: async () => vscode.window.showInputBox({
         title: "Change-Management Checkout: Release",
-        prompt: usualRelease
+        prompt: usual
           ? "The release to check out from (&RELEASE). Change it for this checkout if needed."
           : "The release to check out from (&RELEASE), for example MYGROUP/MYAPP/BASE",
-        value: usualRelease,
+        value: usual,
         ignoreFocusOut: true,
         validateInput: (value) => releaseProblem(value.trim()),
       }),
@@ -127,7 +182,7 @@ export async function changeThroughChangeManagement(ctx: CommandContext, system:
       "Open Setting"
     );
     if (choice) {
-      void vscode.commands.executeCommand("workbench.action.openSettings", `ibmi-member-workspace.${CHECKOUT_COMMAND_SETTING}`);
+      openSetting(CHECKOUT_COMMAND_SETTING);
     }
     return;
   }
@@ -135,22 +190,8 @@ export async function changeThroughChangeManagement(ctx: CommandContext, system:
     return;
   }
 
-  const { devLibrary, succeeded, failed, release } = result;
-  if (release && release !== usualRelease) {
-    const makeDefault = "Make Default";
-    void vscode.window
-      .showInformationMessage(
-        usualRelease
-          ? `Make ${release} your default release instead of ${usualRelease}?`
-          : `Make ${release} your default release?`,
-        makeDefault
-      )
-      .then(async (choice) => {
-        if (choice === makeDefault) {
-          await vscode.workspace.getConfiguration("ibmi-member-workspace").update(RELEASE_SETTING, release, vscode.ConfigurationTarget.Global);
-        }
-      });
-  }
+  const { devLibrary, succeeded, failed, project, release } = result;
+  offerReleaseAsDefault(release, usual);
   if (failed.length > 0) {
     const names = failed.map(({ member, error }) => `${member.memberName} (${error})`).join(", ");
     void vscode.window
@@ -169,7 +210,172 @@ export async function changeThroughChangeManagement(ctx: CommandContext, system:
   if (choice !== checkOut || !(await ensureWorkItemForCheckout(ctx, system))) {
     return;
   }
-  await checkoutMembersBatch(ctx.service, system, succeeded.map((member) => ({ ...member, library: devLibrary })), ctx.log);
+  const checkedOutAt = new Date().toISOString();
+  await checkoutMembersBatch(
+    ctx.service,
+    system,
+    succeeded.map((member) => ({
+      ...member,
+      library: devLibrary,
+      // Kept with the checkout, so Check In Through Change Management knows where it came from.
+      changeManagement: {
+        openLibrary: member.library,
+        ...(project ? { project } : {}),
+        ...(release ? { release } : {}),
+        checkedOutAt,
+      },
+    })),
+    ctx.log
+  );
+}
+
+/**
+ * Check In Through Change Management: runs the check-in command for checkouts whose change is on
+ * the IBM i, then offers to discard the local copies. Reference copies and members with changes
+ * not yet uploaded are refused, since the check-in takes the member as it is on the IBM i.
+ */
+export async function checkInThroughChangeManagement(ctx: CommandContext, entries: CheckedOutMember[]): Promise<void> {
+  const system = getSystemName();
+  if (!system) {
+    vscode.window.showWarningMessage("Connect to an IBM i first.");
+    return;
+  }
+  const template = vscode.workspace
+    .getConfiguration("ibmi-member-workspace")
+    .inspect<string>(CHECKIN_COMMAND_SETTING)?.globalValue?.trim();
+  if (!template) {
+    const choice = await vscode.window.showInformationMessage(
+      "To check members in through your change-management system from here, set " +
+        `ibmi-member-workspace.${CHECKIN_COMMAND_SETTING} in your user settings to its check-in command.`,
+      "Open Setting"
+    );
+    if (choice) {
+      openSetting(CHECKIN_COMMAND_SETTING);
+    }
+    return;
+  }
+
+  const refused: Array<{ entry: CheckedOutMember; reason: string }> = [];
+  const members = new Map<CheckinMember, CheckedOutMember>();
+  for (const entry of entries) {
+    const reason = checkinRefusal(entry) ??
+      ((await ctx.service.hasLocalChanges(entry)) ? "it has changes that haven't been uploaded to the IBM i; upload it first" : undefined);
+    if (reason) {
+      refused.push({ entry, reason });
+    } else {
+      members.set(checkinMemberOf(entry), entry);
+    }
+  }
+  if (refused.length > 0) {
+    const upload = "Upload to IBM i";
+    // Only reference copies are refused for another reason than local changes.
+    const uploadable = refused.filter(({ entry }) => !isReferenceCopy(entry)).map(({ entry }) => entry);
+    const message = refused.length === 1
+      ? `Not checked in: ${formatMemberPath(refused[0].entry)}, ${refused[0].reason}.`
+      : `Not checked in: ${refused.map(({ entry, reason }) => `${entry.memberName} (${reason})`).join(", ")}.`;
+    const offer = uploadable.length > 0 ? [upload] : [];
+    void vscode.window.showWarningMessage(message, ...offer).then((choice) => {
+      if (choice === upload) {
+        const items: TreeItemType[] = uploadable.map((entry) => ({ kind: "member", entry }));
+        void vscode.commands.executeCommand("ibmi-member-workspace.uploadToRemote", items[0], items);
+      }
+    });
+  }
+  if (members.size === 0) {
+    return;
+  }
+
+  const usual = usualRelease();
+  let openLibraryAnswer: string | undefined;
+  let result: ChangeCheckinResult | undefined;
+  try {
+    result = await runChangeManagementCheckin([...members.keys()], system, template, {
+      askOpenLibrary: async () => {
+        openLibraryAnswer = await vscode.window.showInputBox({
+          title: "Change-Management Check-In",
+          prompt: "The library the members were checked out from (&OPENLIB), for example the production library",
+          value: ctx.context.workspaceState.get<string>(LAST_OPEN_LIBRARY) ?? "",
+          ignoreFocusOut: true,
+          validateInput: (value) => IBMI_NAME.test(value.trim()) ? undefined : "Enter an IBM i library name.",
+        });
+        return openLibraryAnswer;
+      },
+      askProject: async (suggested) => vscode.window.showInputBox({
+        title: "Change-Management Check-In",
+        prompt: "The change-management project (task) the members are checked in for (&PROJECT)",
+        value: suggested ?? ctx.context.workspaceState.get<string>(LAST_PROJECT) ?? "",
+        ignoreFocusOut: true,
+        validateInput: (value) => nameValueProblem("project", value.trim()),
+      }),
+      askRelease: async (suggested) => vscode.window.showInputBox({
+        title: "Change-Management Check-In: Release",
+        prompt: suggested || usual
+          ? "The release to check in to (&RELEASE). Change it for this check-in if needed."
+          : "The release to check in to (&RELEASE), for example MYGROUP/MYAPP/BASE",
+        value: suggested ?? usual,
+        ignoreFocusOut: true,
+        validateInput: (value) => releaseProblem(value.trim()),
+      }),
+      confirm: async (commands) => {
+        if (openLibraryAnswer?.trim()) {
+          await ctx.context.workspaceState.update(LAST_OPEN_LIBRARY, openLibraryAnswer.trim().toUpperCase());
+        }
+        const choice = await vscode.window.showWarningMessage(
+          `Run ${commands.length === 1 ? "this command" : `these ${commands.length} commands`} on ${system}?`,
+          { modal: true, detail: commands.join("\n") },
+          "Run"
+        );
+        return choice === "Run";
+      },
+      connectedSystem: getSystemName,
+      currentUser: connectedUser,
+      runCommand: runClCommand,
+      log: (message) => ctx.log.appendLine(message),
+    });
+  } catch (err) {
+    const choice = await vscode.window.showErrorMessage(
+      `Could not run the change-management check-in: ${errorMessage(err)}`,
+      "Open Setting"
+    );
+    if (choice) {
+      openSetting(CHECKIN_COMMAND_SETTING);
+    }
+    return;
+  }
+  if (!result) {
+    return;
+  }
+
+  const { succeeded, failed, project, release } = result;
+  if (project) {
+    await ctx.context.workspaceState.update(LAST_PROJECT, project);
+  }
+  offerReleaseAsDefault(release, usual);
+  if (failed.length > 0) {
+    const names = failed.map(({ member, error }) => `${member.memberName} (${error})`).join(", ");
+    void vscode.window
+      .showErrorMessage(`Change-management check-in failed for ${names}`, "Show Output")
+      .then((choice) => choice && ctx.log.show());
+  }
+  if (succeeded.length === 0) {
+    return;
+  }
+  const checkedIn = succeeded.map((member) => members.get(member)!);
+  const count = checkedIn.length === 1 ? formatMemberPath(checkedIn[0]) : `${checkedIn.length} members`;
+  const discard = "Discard Checkout";
+  const choice = await vscode.window.showInformationMessage(
+    `Checked in ${count} in change management. Delete the local ${checkedIn.length === 1 ? "copy" : "copies"} and stop tracking ${checkedIn.length === 1 ? "it" : "them"}?`,
+    discard,
+    "Keep"
+  );
+  if (choice !== discard) {
+    return;
+  }
+  try {
+    await ctx.service.discardEntries(checkedIn);
+  } catch (err) {
+    vscode.window.showErrorMessage(`Could not discard the checkout: ${errorMessage(err)}`);
+  }
 }
 
 async function showChangeGuide(members: MemberInfo[]): Promise<void> {
@@ -190,6 +396,6 @@ async function showChangeGuide(members: MemberInfo[]): Promise<void> {
   if (choice === "Copy Member Paths") {
     await vscode.env.clipboard.writeText(paths.join("\n"));
   } else if (choice === "Open Setting") {
-    void vscode.commands.executeCommand("workbench.action.openSettings", `ibmi-member-workspace.${CHECKOUT_COMMAND_SETTING}`);
+    openSetting(CHECKOUT_COMMAND_SETTING);
   }
 }

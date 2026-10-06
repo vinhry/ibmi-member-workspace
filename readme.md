@@ -46,7 +46,7 @@ Right-click a checkout and choose **Merge Back to IBM i** to open a diff view �
 
 ### Upload to IBM i
 
-For a quick full replace, use **Upload to IBM i**. This overwrites the remote member with your local copy.
+For a quick full replace, use **Upload to IBM i**. This overwrites the remote member with your local copy. When a change-management check-in command is set, the message afterwards offers **Check In…** (see **Running Your Change-Management Check-In**).
 
 When **Enable source dates** is on in Code for IBM i's connection settings (Source Code), the upload saves through Code for IBM i just like editing the member there: unchanged lines **keep their source dates**, and inserted or changed lines are dated today. Sequence numbers are renumbered, as when saving in the Code for IBM i editor. Line endings (CRLF or LF) in the local file do not affect the dates, and blank lines at the end of the local file are not uploaded, so the member never ends with empty records. When source dates are disabled, the confirmation warns that every date will be reset to 0.
 
@@ -262,6 +262,42 @@ Values are filled in uppercase and unquoted, and only valid IBM i names are used
 
 Prefer the change-management command itself to a wrapper program. A failed command is reported with the IBM i's messages, but a wrapper whose `MONMSG` swallows an error makes a failed checkout look successful. If you do call a program, quote its parameters (`CALL PGM(MYLIB/MYCHKOUT) PARM('&OPENSPF' '&OPENMBR' '&PROJECT')`): an unquoted value starting with a digit is passed as a number, not as characters.
 
+#### Running Your Change-Management Check-In
+
+When the change is uploaded, the member can go back through change management without a 5250 session. Set `ibmi-member-workspace.changeManagement.checkinCommand` in your user settings to the CL command that checks a member in. Then:
+
+- right-click one or more checkouts in Checked Out Members for **Check In Through Change Management…**, or
+- choose **Check In…** on the message after **Upload to IBM i** (one member or several).
+
+It then:
+
+1. refuses members whose changes haven't been uploaded yet (the check-in takes the member as it is on the IBM i), with an **Upload to IBM i** button, and read-only reference copies. The others go on;
+2. suggests the project and release the member was checked out with, when it was checked out through **Check Out Through Change Management…** here, otherwise the last ones you used; asks for the library it was checked out from only when the command uses `&OPENLIB` and it isn't known;
+3. shows the exact command for each member and runs them only when you choose **Run**, on the IBM i, one after another. A failed member is reported with the IBM i's message and doesn't stop the others. Nothing runs while a different IBM i is connected;
+4. asks whether to **Discard Checkout** (delete the local copy and stop tracking it) or **Keep** it.
+
+The same placeholders as the checkout command are available, with these values:
+
+| Placeholder | Value |
+|---|---|
+| `&DEVLIB` | the library the member is checked out in (your development library) |
+| `&OPENSPF` | its source file |
+| `&OPENMBR` | the member |
+| `&EXT` | its source type |
+| `&OPENLIB` | the library it was checked out from (the production library): recorded by **Check Out Through Change Management…**, otherwise asked |
+| `&PROJECT` | the project (task), suggested from the checkout or the last one you used |
+| `&RELEASE` | the release, suggested from the checkout or `ibmi-member-workspace.changeManagement.release` |
+| `&USER` | the user profile Code for IBM i is connected with |
+
+For example, Rocket LMI's check-in command:
+
+```jsonc
+"ibmi-member-workspace.changeManagement.checkinCommand":
+  "ACMSLIB/ACMSCHKIN OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(&RELEASE)"
+```
+
+As with the checkout command, try it once yourself on a test member first, to check its parameters and your authority. Values are filled in uppercase and unquoted, only valid IBM i names are used, and the setting is read from user settings only. A failed check-in leaves the member checked out in both places, so you can fix the cause and try again.
+
 Dependencies whose source can't be found are listed afterwards, and in the output panel with the line that refers to them. Common reasons: the source is in a library that wasn't searched, the name is only known at run time (`CALL PGM(&PGM)`), or the copybook is an IFS file.
 
 VS Code opens read-only files as read-only when `files.readonlyFromPermissions` is on.
@@ -385,6 +421,7 @@ Right-click a checkout for comparison tools: **Select for Compare** (mark one ch
 - **Reveal in File Explorer** — show the local file in your OS file manager
 - **Copy Member Path** — copy `LIBRARY/SOURCEFILE(MEMBER)` to the clipboard
 - **Find Member** panel — search source members by name (or a program's source, or member text), keep the results and recent searches, and check members out (see **Running Your Change-Management Checkout**)
+- **Check In Through Change Management…** — run your change-management check-in command for uploaded members (see **Running Your Change-Management Check-In**)
 - **Discard Checkout** — delete the local file and stop tracking it (with confirmation)
 
 ### Multi-Select
@@ -405,6 +442,9 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.dependencies.transitive.maxDepth` | `3` | How many levels **Find All Dependencies** looks through before asking whether to keep going (1 to 10). |
 | `ibmi-member-workspace.dependencies.transitive.maxMembers` | `50` | How many members **Find All Dependencies** lists before asking whether to keep going (5 to 500). |
 | `ibmi-member-workspace.dependencies.crossReferences` | `[]` | Cross-reference tool queries (Abstract, Pathfinder, MDXREF…). User settings only. See **Dependencies**. |
+| `ibmi-member-workspace.changeManagement.checkoutCommand` | `""` | CL command that checks a member out in your change-management system, run for **Check Out Through Change Management…** and **I Need to Change Some…**. User settings only. See **Running Your Change-Management Checkout**. |
+| `ibmi-member-workspace.changeManagement.checkinCommand` | `""` | CL command that checks a member in to your change-management system, run for **Check In Through Change Management…** and **Check In…** after an upload. User settings only. See **Running Your Change-Management Check-In**. |
+| `ibmi-member-workspace.changeManagement.release` | `""` | The release `&RELEASE` stands for in those commands, for example `MYGROUP/MYAPP/BASE`. User settings only. |
 | `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. User settings only. See **Upload on Save**. |
 | `ibmi-member-workspace.backgroundRefresh.onConnect` | `false` | Refresh the remote status of your checkouts when Code for IBM i connects. User settings only. See **Background Refresh**. |
 | `ibmi-member-workspace.backgroundRefresh.intervalMinutes` | `0` | Refresh the remote status of your checkouts every this many minutes while connected (at least 5); `0` turns it off. User settings only. |

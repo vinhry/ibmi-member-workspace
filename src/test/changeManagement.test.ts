@@ -1,12 +1,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  ChangeCheckinDeps,
   ChangeCheckoutDeps,
   ChangeMember,
+  CheckinMember,
+  checkinMemberOf,
+  checkinRefusal,
   checkoutTemplateProblem,
   commandFailureMessages,
+  commandTemplateProblem,
   releaseProblem,
+  expandCheckinCommand,
   expandCheckoutCommand,
+  runChangeManagementCheckin,
   runChangeManagementCheckout,
 } from "../changeManagement";
 
@@ -278,5 +285,198 @@ describe("&RELEASE", () => {
     for (const value of ["A/B/C/D", "A//B", "A B", "A)", "", "/BASE"]) {
       assert.ok(releaseProblem(value), value);
     }
+  });
+});
+
+const CHECKIN_TEMPLATE = "ACMSLIB/ACMSCHKIN OBJ((&OPENSPF (&OPENMBR))) PROJECT(&PROJECT) DVP(&USER) REL(&RELEASE)";
+
+function checkout(memberName: string, origin: Partial<Pick<CheckinMember, "openLibrary" | "project" | "release">> = {}): CheckinMember {
+  return { library: "DEVLIB", sourceFile: "QRPGLESRC", memberName, extension: "rpgle", ...origin };
+}
+
+function checkinDeps(overrides: Partial<ChangeCheckinDeps> = {}) {
+  const ran: string[] = [];
+  const logs: string[] = [];
+  const confirmed: string[][] = [];
+  const asked: Array<{ what: string; suggested: string | undefined }> = [];
+  const value: ChangeCheckinDeps = {
+    askOpenLibrary: async () => {
+      asked.push({ what: "openLibrary", suggested: undefined });
+      return "prodlib";
+    },
+    askProject: async (suggested) => {
+      asked.push({ what: "project", suggested });
+      return suggested ?? "prj009999";
+    },
+    askRelease: async (suggested) => {
+      asked.push({ what: "release", suggested });
+      return suggested ?? "mygroup/myapp/base";
+    },
+    confirm: async (commands) => {
+      confirmed.push(commands);
+      return true;
+    },
+    connectedSystem: () => "PUB400",
+    currentUser: () => "devuser",
+    runCommand: async (command) => {
+      ran.push(command);
+    },
+    log: (message) => logs.push(message),
+    ...overrides,
+  };
+  return { deps: value, ran, logs, confirmed, asked };
+}
+
+describe("expandCheckinCommand", () => {
+  it("fills Rocket LMI's check-in with the checkout's names and what its checkout recorded", () => {
+    assert.equal(
+      expandCheckinCommand(CHECKIN_TEMPLATE, checkout("ord100", { openLibrary: "PRODLIB", project: "PRJ001234", release: "MYGROUP/MYAPP/BASE" }), { user: "devuser" }),
+      "ACMSLIB/ACMSCHKIN OBJ((QRPGLESRC (ORD100))) PROJECT(PRJ001234) DVP(DEVUSER) REL(MYGROUP/MYAPP/BASE)"
+    );
+  });
+
+  it("fills &DEVLIB with the library the member is checked out in, and &OPENLIB with the one it came from", () => {
+    assert.equal(
+      expandCheckinCommand("MYCHKIN SRCF(&DEVLIB/&OPENSPF) MBR(&OPENMBR) TYPE(&EXT) TOLIB(&OPENLIB)", checkout("ord100", { openLibrary: "prodlib" })),
+      "MYCHKIN SRCF(DEVLIB/QRPGLESRC) MBR(ORD100) TYPE(RPGLE) TOLIB(PRODLIB)"
+    );
+    assert.equal(
+      expandCheckinCommand("MYCHKIN MBR(&OPENMBR) TOLIB(&OPENLIB)", checkout("ord100"), { openLibrary: "otherlib" }),
+      "MYCHKIN MBR(ORD100) TOLIB(OTHERLIB)"
+    );
+  });
+
+  it("refuses &OPENLIB, &PROJECT or &RELEASE when nothing is known for them", () => {
+    assert.throws(() => expandCheckinCommand("MYCHKIN TOLIB(&OPENLIB)", checkout("ord100")), /uses &OPENLIB, but no production library is known/);
+    assert.throws(() => expandCheckinCommand("MYCHKIN PROJECT(&PROJECT)", checkout("ord100")), /uses &PROJECT, but no project is known/);
+    assert.throws(() => expandCheckinCommand("MYCHKIN REL(&RELEASE)", checkout("ord100")), /uses &RELEASE, but no release is known/);
+    assert.throws(() => expandCheckinCommand("MYCHKIN TOLIB(&OPENLIB)", checkout("ord100", { openLibrary: "bad lib" })), /not a valid production library/);
+  });
+
+  it("names the check-in command in its messages", () => {
+    assert.equal(commandTemplateProblem("", "checkin"), "The change-management check-in command is empty.");
+    assert.match(commandTemplateProblem("CHKIN &NOPE", "checkin")!, /^The change-management check-in command uses unknown placeholders: &NOPE\./);
+    assert.throws(() => expandCheckinCommand("", checkout("ord100")), /check-in command is empty/);
+    assert.equal(checkoutTemplateProblem(""), "The change-management checkout command is empty.");
+  });
+});
+
+describe("checkinMemberOf and checkinRefusal", () => {
+  it("takes the checkout's names and what change management recorded", () => {
+    const base = { library: "DEVLIB", sourceFile: "QRPGLESRC", memberName: "ORD100", extension: "rpgle" };
+    assert.deepEqual(checkinMemberOf(base), base);
+    assert.deepEqual(
+      checkinMemberOf({ ...base, changeManagement: { openLibrary: "PRODLIB", project: "PRJ001234", checkedOutAt: "2026-10-06T10:00:00.000Z" } }),
+      { ...base, openLibrary: "PRODLIB", project: "PRJ001234" }
+    );
+  });
+
+  it("refuses reference copies and members with changes not yet uploaded", () => {
+    assert.match(checkinRefusal({ kind: "reference", status: "in-sync" })!, /reference copy/);
+    assert.match(checkinRefusal({ status: "modified" })!, /upload it first/);
+    assert.match(checkinRefusal({ status: "conflict" })!, /upload it first/);
+    for (const status of ["in-sync", "merged", "checked-out", "remote-changed"] as const) {
+      assert.equal(checkinRefusal({ status }), undefined, status);
+    }
+  });
+});
+
+describe("runChangeManagementCheckin", () => {
+  it("suggests the project and release recorded at checkout, shows the commands, then runs them", async () => {
+    const d = checkinDeps();
+    const members = [
+      checkout("ord100", { openLibrary: "PRODLIB", project: "PRJ001234", release: "MYGROUP/MYAPP/BASE" }),
+      checkout("ord200", { openLibrary: "PRODLIB", project: "PRJ001234", release: "MYGROUP/MYAPP/BASE" }),
+    ];
+    const result = await runChangeManagementCheckin(members, "PUB400", CHECKIN_TEMPLATE, d.deps);
+    assert.deepEqual(d.asked, [
+      { what: "project", suggested: "PRJ001234" },
+      { what: "release", suggested: "MYGROUP/MYAPP/BASE" },
+    ]);
+    const expected = [
+      "ACMSLIB/ACMSCHKIN OBJ((QRPGLESRC (ORD100))) PROJECT(PRJ001234) DVP(DEVUSER) REL(MYGROUP/MYAPP/BASE)",
+      "ACMSLIB/ACMSCHKIN OBJ((QRPGLESRC (ORD200))) PROJECT(PRJ001234) DVP(DEVUSER) REL(MYGROUP/MYAPP/BASE)",
+    ];
+    assert.deepEqual(d.confirmed, [expected]);
+    assert.deepEqual(d.ran, expected);
+    assert.deepEqual(result, { project: "PRJ001234", release: "MYGROUP/MYAPP/BASE", succeeded: members, failed: [] });
+  });
+
+  it("asks for the production library only when the command uses it and a member's isn't known", async () => {
+    const known = checkinDeps();
+    await runChangeManagementCheckin([checkout("ord100", { openLibrary: "PRODLIB" })], "PUB400", "MYCHKIN MBR(&OPENMBR) TOLIB(&OPENLIB)", known.deps);
+    assert.deepEqual(known.asked, []);
+    assert.deepEqual(known.ran, ["MYCHKIN MBR(ORD100) TOLIB(PRODLIB)"]);
+
+    const unknown = checkinDeps();
+    await runChangeManagementCheckin([checkout("ord100", { openLibrary: "PRODLIB" }), checkout("ord200")], "PUB400", "MYCHKIN MBR(&OPENMBR) TOLIB(&OPENLIB)", unknown.deps);
+    assert.deepEqual(unknown.asked, [{ what: "openLibrary", suggested: undefined }]);
+    assert.deepEqual(unknown.ran, ["MYCHKIN MBR(ORD100) TOLIB(PRODLIB)", "MYCHKIN MBR(ORD200) TOLIB(PRODLIB)"]);
+
+    const unused = checkinDeps();
+    await runChangeManagementCheckin([checkout("ord200")], "PUB400", "MYCHKIN MBR(&OPENMBR)", unused.deps);
+    assert.deepEqual(unused.asked, []);
+  });
+
+  it("runs nothing when a prompt is cancelled or the commands are declined", async () => {
+    for (const overrides of [
+      { askOpenLibrary: async () => undefined },
+      { askProject: async () => "" },
+      { askRelease: async () => undefined },
+      { confirm: async () => false },
+    ] as Partial<ChangeCheckinDeps>[]) {
+      const d = checkinDeps(overrides);
+      const result = await runChangeManagementCheckin([checkout("ord100")], "PUB400", "CHKIN &OPENMBR &OPENLIB &PROJECT &RELEASE", d.deps);
+      assert.equal(result, undefined);
+      assert.deepEqual(d.ran, []);
+    }
+  });
+
+  it("refuses a bad template before asking anything", async () => {
+    const d = checkinDeps();
+    await assert.rejects(runChangeManagementCheckin([checkout("ord100")], "PUB400", "CHKIN &NOPE", d.deps), /check-in command uses unknown placeholders: &NOPE/);
+    assert.deepEqual(d.asked, []);
+    assert.deepEqual(d.confirmed, []);
+  });
+
+  it("goes on after a failed member and reports it with the IBM i's message", async () => {
+    const d = checkinDeps({
+      runCommand: async (command) => {
+        if (command.includes("ORD100")) {
+          throw new Error("CMS9913 ACMSCHKIN ended ABNORMALLY");
+        }
+      },
+    });
+    const members = [checkout("ord100"), checkout("ord200")];
+    const result = await runChangeManagementCheckin(members, "PUB400", "CHKIN &OPENMBR", d.deps);
+    assert.deepEqual(result?.succeeded, [members[1]]);
+    assert.deepEqual(result?.failed, [{ member: members[0], command: "CHKIN ORD100", error: "CMS9913 ACMSCHKIN ended ABNORMALLY" }]);
+  });
+
+  it("refuses to start while another system is connected, and the rest when it changes afterwards", async () => {
+    const other = checkinDeps({ connectedSystem: () => "OTHER" });
+    await assert.rejects(runChangeManagementCheckin([checkout("ord100")], "PUB400", "CHKIN &OPENMBR", other.deps), /Connected to OTHER, not PUB400/);
+    assert.deepEqual(other.ran, []);
+
+    let connected = "PUB400";
+    const d = checkinDeps({
+      connectedSystem: () => connected,
+      runCommand: async () => {
+        connected = "OTHER";
+      },
+    });
+    const result = await runChangeManagementCheckin([checkout("ord100"), checkout("ord200")], "PUB400", "CHKIN &OPENMBR", d.deps);
+    assert.equal(result?.succeeded.length, 1);
+    assert.equal(result?.failed[0].error, "Connected to OTHER, not PUB400.");
+  });
+});
+
+describe("runChangeManagementCheckout reports the project", () => {
+  it("returns the project the commands used, for the checkouts that follow", async () => {
+    const d = deps();
+    const result = await runChangeManagementCheckout([member("ord100")], "PUB400", "CHKOUT &OPENMBR PROJECT(&PROJECT)", d.deps);
+    assert.equal(result?.project, "PRJ001234");
+    const without = await runChangeManagementCheckout([member("ord100")], "PUB400", TEMPLATE, deps().deps);
+    assert.equal(without?.project, undefined);
   });
 });

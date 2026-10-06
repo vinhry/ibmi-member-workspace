@@ -6,7 +6,7 @@ import { mergeDocumentKey } from "../mergeHandler";
 import { countLocalChanges, resolveMember, resolveMemberSelections, saveDirtyLocalFiles } from "../prompts";
 import { CheckedOutMember, RefreshTally, TreeItemType, formatMemberPath, isReferenceCopy } from "../types";
 import { CommandContext } from "./context";
-import { uploadWithConflictHandling } from "./uploadMember";
+import { offerCheckin, uploadWithConflictHandling } from "./uploadMember";
 
 export function registerSyncCommands(ctx: CommandContext): void {
   const { context, service, mergeHandler, pendingMergeBacks, log } = ctx;
@@ -86,6 +86,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
             let errors = 0;
             let cancelled = false;
             const uploaded: string[] = [];
+            const uploadedEntries: CheckedOutMember[] = [];
 
             await service.runBatch(async () => {
               for (let i = 0; i < selections.length; i++) {
@@ -104,6 +105,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
                   const result = await service.uploadToRemote(entry, { deferCheckpointTo: uploaded });
                   if (result === "uploaded") {
                     succeeded++;
+                    uploadedEntries.push(entry);
                   } else if (result === "uploaded-altered") {
                     succeeded++;
                     altered++;
@@ -156,9 +158,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
               );
               log.show();
             } else {
-              vscode.window.showInformationMessage(
-                `Successfully uploaded ${succeeded} member(s) to IBM i.`
-              );
+              offerCheckin(`Successfully uploaded ${succeeded} member(s) to IBM i.`, uploadedEntries, log);
             }
           }
         );

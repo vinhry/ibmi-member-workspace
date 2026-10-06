@@ -197,6 +197,17 @@ describe("CheckoutIndexStore", () => {
     assert.deepEqual(reloaded.store.index.systems.SYS.workItems.workspace[0].remoteSeen, { stamp: "2026-10-01|t|12|900", hash: "abc" });
   });
 
+  it("keeps where change management got a member from across a save and load", async () => {
+    const h = harness();
+    h.store.index = v3Index("PROG");
+    const origin = { openLibrary: "PRODLIB", project: "PRJ001234", release: "MYGROUP/MYAPP/BASE", checkedOutAt: "2026-10-06T10:00:00.000Z" };
+    h.store.index.systems.SYS.workItems.workspace[0].changeManagement = origin;
+    await h.store.save();
+    const reloaded = harness(h.storage);
+    await reloaded.store.load();
+    assert.deepEqual(reloaded.store.index.systems.SYS.workItems.workspace[0].changeManagement, origin);
+  });
+
   it("writes through a temp file and renames it into place", async () => {
     const h = harness();
     h.store.index = v3Index("PROG");

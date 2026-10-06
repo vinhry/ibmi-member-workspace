@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
+  ChangeManagementOrigin,
   CheckedOutMember,
   CheckoutIndex,
   DEFAULT_WORK_ITEM,
@@ -103,6 +104,8 @@ export interface CheckoutOptions {
   system?: string;
   /** Cancels the checkout, also while it waits for the IBM i; nothing is written then. */
   signal?: AbortSignal;
+  /** What the change-management checkout this follows recorded, kept with the member for its check-in. */
+  changeManagement?: ChangeManagementOrigin;
 }
 
 export class CheckoutService implements vscode.Disposable {
@@ -931,6 +934,7 @@ export class CheckoutService implements vscode.Disposable {
       reference = false,
       system: expectedSystem,
       signal,
+      changeManagement,
     } = options ?? {};
     const checkoutRoot = this.getCheckoutRoot();
     if (!checkoutRoot) {
@@ -1028,8 +1032,11 @@ export class CheckoutService implements vscode.Disposable {
       checkedOutAt: new Date().toISOString(),
       remoteHashAtCheckout: "",
       ...(reference ? { kind: "reference" as const } : {}),
-      // A re-download keeps the member's own upload-on-save choice.
+      // A re-download keeps the member's own upload-on-save choice, and where change management got it from.
       ...(!reference && existing?.uploadOnSave ? { uploadOnSave: existing.uploadOnSave } : {}),
+      ...(!reference && (changeManagement ?? existing?.changeManagement)
+        ? { changeManagement: changeManagement ?? existing?.changeManagement }
+        : {}),
       ...(sourceLayout ? { sourceLayout } : {}),
       status: "checked-out",
     };

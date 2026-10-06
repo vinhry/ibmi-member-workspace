@@ -167,6 +167,12 @@
         "icon": "$(cloud-download)"
       },
       {
+        "command": "ibmi-member-workspace.checkinThroughChangeManagement",
+        "title": "Check In Through Change Management…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(cloud-upload)"
+      },
+      {
         "command": "ibmi-member-workspace.findMember.rerun",
         "title": "Search Again",
         "category": "IBM i Member Workspace",
@@ -506,6 +512,10 @@
           "when": "false"
         },
         {
+          "command": "ibmi-member-workspace.checkinThroughChangeManagement",
+          "when": "false"
+        },
+        {
           "command": "ibmi-member-workspace.findMember.rerun",
           "when": "false"
         },
@@ -749,6 +759,11 @@
           "command": "ibmi-member-workspace.checkoutThroughChangeManagement",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
           "group": "0_bob@4"
+        },
+        {
+          "command": "ibmi-member-workspace.checkinThroughChangeManagement",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^checkout/",
+          "group": "0_bob@5"
         },
         {
           "command": "ibmi-member-workspace.copyMemberPath",
@@ -1087,6 +1102,13 @@
           "scope": "application",
           "editPresentation": "multilineText",
           "markdownDescription": "CL command that checks a member out in your change-management system (for example Rocket LMI), run on the IBM i for each member when you choose **Check Out Through Change Management…** (Find Member, the Object Browser, Checked Out Members) or **I Need to Change Some…** (Find Dependencies). Placeholders: `&OPENLIB`, `&OPENSPF`, `&OPENMBR` and `&EXT` (the member's library, source file, member and source type), `&DEVLIB` (the development library, asked each time), `&PROJECT` (the change-management project or task, asked each time the command uses it), `&RELEASE` (the release, pre-filled from `changeManagement.release`) and `&USER` (the user profile Code for IBM i is connected with). The commands are shown before they run. Empty: the steps are explained instead. User settings only. Line breaks are joined with spaces, so a long command can be split over lines."
+        },
+        "ibmi-member-workspace.changeManagement.checkinCommand": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "editPresentation": "multilineText",
+          "markdownDescription": "CL command that checks a member in to your change-management system (for example Rocket LMI), run on the IBM i for each member when you choose **Check In Through Change Management…** (Checked Out Members) or **Check In…** after an upload. Placeholders: `&DEVLIB` (the library the member is checked out in), `&OPENSPF`, `&OPENMBR` and `&EXT` (its source file, member and source type), `&OPENLIB` (the library it was checked out from, known for members checked out with **Check Out Through Change Management…**, otherwise asked), `&PROJECT` (the project, suggested from the checkout), `&RELEASE` (the release, suggested from the checkout or `changeManagement.release`) and `&USER` (the user profile Code for IBM i is connected with). The commands are shown before they run. Members with changes not yet uploaded, and reference copies, are never checked in. Empty: Check In… isn't offered. User settings only. Line breaks are joined with spaces."
         },
         "ibmi-member-workspace.changeManagement.release": {
           "type": "string",

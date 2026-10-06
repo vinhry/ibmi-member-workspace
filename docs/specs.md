@@ -177,3 +177,19 @@ A checkout could wait forever on an IBM i request that never answered; Code for 
 
 **Validation**
 - `src/test/deadline.test.ts`: in time, rejected, timed out, cancelled before and during, slow reported once, no timer left.
+
+### 12. Check In Through Change Management (shipped in 1.8.3)
+
+The checkout command (section 2) started a change in VS Code; finishing it still needed a 5250 session for the check-in.
+
+- `ibmi-member-workspace.changeManagement.checkinCommand` (user settings only, `scope: application`, in `manifest.test.ts`'s list) is the check-in CL command. It takes the same eight placeholders, read for a checkout: `&DEVLIB` = `entry.library`, `&OPENSPF`/`&OPENMBR`/`&EXT` = the checkout's names, `&OPENLIB` = the library it was checked out from, `&PROJECT`/`&RELEASE` suggested from the checkout, `&USER` = the connection's user.
+- `CheckedOutMember.changeManagement` (`ChangeManagementOrigin`: `openLibrary`, `project?`, `release?`, `checkedOutAt`) is set by **Check Out from DEVLIB** after a change-management checkout (`CheckoutOptions.changeManagement`, passed through `checkoutMembersBatch`), kept across a re-download, never set on reference copies. Optional, so no index migration.
+- `src/changeManagement.ts` (vscode-free): `commandTemplateProblem(template, verb)` names the command in its messages; `expandCheckinCommand`, `checkinMemberOf`, `checkinRefusal` (reference copies, `modified`/`conflict`), `runChangeManagementCheckin` (asks `&OPENLIB` once only when used and unknown, suggests project and release from the first member that recorded them, one answer for all; shared `runCommands` loop with the checkout).
+- `src/commands/changeManagement.ts` (vscode; the checkout flow moved here from `dependencies.ts`): `checkInThroughChangeManagement` also refuses members `service.hasLocalChanges` finds changed (unsaved edits included), lists refused members with an **Upload to IBM i** button, runs the commands after a modal listing them, offers **Make Default** for another release, then **Discard Checkout** (`service.discardEntries`, no second modal) or **Keep**. `checkinCommandConfigured()` gates the **Check In…** button `offerCheckin` (`commands/uploadMember.ts`) adds to the single and all-succeeded multi-upload messages.
+- Command `ibmi-member-workspace.checkinThroughChangeManagement` on Checked Out Members items only (`viewItem =~ /^checkout/`, group `0_bob@5`); not in the Command Palette.
+
+**Validation**
+- `src/test/changeManagement.test.ts`: `expandCheckinCommand` (LMI's `ACMSCHKIN` exactly, `&DEVLIB`/`&OPENLIB` meanings, refusals, check-in wording), `checkinMemberOf`, `checkinRefusal`, `runChangeManagementCheckin` (suggestions, open library asked only when needed, cancels, bad template, failed member, system changes), the checkout result's `project`.
+- `src/test/checkoutIndexStore.test.ts`: the origin survives save and load.
+- `manifest.test.ts`: the new setting is application-scoped; the command is contributed.
+- README "Running Your Change-Management Check-In"; the Settings table lists the change-management settings.

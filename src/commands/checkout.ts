@@ -13,7 +13,7 @@ import {
 } from "../memberInfo";
 import { countLocalChanges, saveDirtyLocalFiles } from "../prompts";
 import { ReferenceCopyResult, bringReferenceCopies } from "../referenceCopies";
-import { CheckedOutMember, systemKey } from "../types";
+import { ChangeManagementOrigin, CheckedOutMember, systemKey } from "../types";
 import { CommandContext } from "./context";
 import { suggestDependencies } from "./dependencies";
 import { ensureWorkItemForCheckout } from "./git";
@@ -192,7 +192,7 @@ export function registerCheckoutCommands(ctx: CommandContext): void {
 export async function checkoutMembersBatch(
   service: CheckoutService,
   system: string,
-  memberInfoList: MemberInfo[],
+  memberInfoList: Array<MemberInfo & { changeManagement?: ChangeManagementOrigin }>,
   log: vscode.OutputChannel,
   { reference = false }: { reference?: boolean } = {}
 ): Promise<void> {
@@ -264,7 +264,10 @@ export async function checkoutMembersBatch(
           try {
             await service.checkoutMember(
               m.library, m.sourceFile, m.memberName, m.extension,
-              { redownloadBehavior, suppressAutoOpen: true, discardLocalChanges, deferCheckpointTo: downloaded, reference, system, signal: controller.signal }
+              {
+                redownloadBehavior, suppressAutoOpen: true, discardLocalChanges, deferCheckpointTo: downloaded, reference, system,
+                signal: controller.signal, changeManagement: m.changeManagement,
+              }
             );
             succeeded++;
           } catch (err) {

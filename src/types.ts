@@ -25,7 +25,24 @@ export interface CheckedOutMember {
   sourceLayout?: SourceLayout;
   /** The member's change stamp and hash at its last full comparison, for quick refresh; cleared by writes to it. */
   remoteSeen?: RemoteSeen;
+  /**
+   * Set when the member was checked out here right after a change-management checkout (Check Out
+   * from DEVLIB): where it came from, for Check In Through Change Management to fill in.
+   */
+  changeManagement?: ChangeManagementOrigin;
   status: CheckoutStatus;
+}
+
+/** What a change-management checkout recorded about a member checked out here afterwards. */
+export interface ChangeManagementOrigin {
+  /** The library the member was checked out from (the production library). */
+  openLibrary: string;
+  /** The change-management project (task) it was checked out for. */
+  project?: string;
+  /** The release it was checked out from. */
+  release?: string;
+  /** When the change-management checkout ran (ISO 8601). */
+  checkedOutAt: string;
 }
 
 export function isReferenceCopy(entry: Pick<CheckedOutMember, "kind">): boolean {

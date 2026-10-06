@@ -6,6 +6,7 @@ import { summarizeProblems } from "../sourceCheck";
 import { showSourceProblems } from "../sourceDiagnostics";
 import { CheckedOutMember, formatMemberPath } from "../types";
 import { UploadFlowOutcome, runUploadFlow } from "../uploadFlow";
+import { checkinCommandConfigured } from "./changeManagement";
 
 /**
  * Uploads one checkout with the same prompts for the Upload command and upload
@@ -72,12 +73,12 @@ export function uploadWithConflictHandling(
 
     openMerge: (member) => mergeHandler.openMergeDiff(member),
 
-    notifyUploaded: (_member, isQuiet) => {
+    notifyUploaded: (member, isQuiet) => {
       log.appendLine(`[upload] Uploaded ${memberPath}`);
       if (isQuiet) {
         vscode.window.setStatusBarMessage(`$(cloud-upload) Uploaded ${memberPath} to IBM i`, 4000);
       } else {
-        vscode.window.showInformationMessage(`Successfully uploaded ${memberPath} to IBM i.`);
+        offerCheckin(`Successfully uploaded ${memberPath} to IBM i.`, [member], log);
       }
     },
 
@@ -96,4 +97,24 @@ export function uploadWithConflictHandling(
       }
     },
   }, { quiet, ignoreSourceProblems });
+}
+
+/**
+ * Reports an upload and, when a change-management check-in command is set, offers to check the
+ * uploaded members in. The offer waits in the notification; nothing else does.
+ */
+export function offerCheckin(message: string, uploaded: CheckedOutMember[], log: vscode.OutputChannel): void {
+  if (!checkinCommandConfigured() || uploaded.length === 0) {
+    vscode.window.showInformationMessage(message);
+    return;
+  }
+  const checkIn = "Check In…";
+  void vscode.window.showInformationMessage(message, checkIn)
+    .then((choice) => {
+      if (choice === checkIn) {
+        const items = uploaded.map((entry) => ({ kind: "member" as const, entry }));
+        return vscode.commands.executeCommand("ibmi-member-workspace.checkinThroughChangeManagement", items[0], items);
+      }
+    })
+    .then(undefined, (err) => log.appendLine(`[change management] ${errorMessage(err)}`));
 }

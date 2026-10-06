@@ -103,6 +103,7 @@ describe("extension manifest", () => {
       "backgroundRefresh.intervalMinutes",
       "agents.researchTools",
       "changeManagement.release",
+      "changeManagement.checkinCommand",
     ]) {
       assert.equal(properties[`ibmi-member-workspace.${setting}`].scope, "application", setting);
     }
