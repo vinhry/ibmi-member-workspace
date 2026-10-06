@@ -1,5 +1,10 @@
 # Change Log
 
+## 1.8.2 - 2026-10-06
+
+- Fix: **Find Member** treated `_` in a name as "any one character", so `ORD_HDR` also found `ORD1HDR`, and `%` or `_` typed in a member-text search matched anything. Both are now looked for literally. `*` (and `%`) in a name still stand for any characters.
+- Fix: a research-tools request larger than 1 MB closed the connection without an answer, which the agent saw as a reset. It's now answered with a "request too large" error, and the next request is served as before.
+
 ## 1.8.1 - 2026-10-02
 
 - Fix: **Configure Checkout Folder** refused to change the folder while members were tracked, even when Checked Out Members showed none. They were in another work item (such as members checked out without one), or on another IBM i system. It now says where they are and how many have unsent changes, and offers **Stop Tracking and Change Folder**. Their files stay where they are.
