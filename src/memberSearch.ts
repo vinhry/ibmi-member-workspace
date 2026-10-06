@@ -33,6 +33,26 @@ export function isWildcard(pattern: string): boolean {
 }
 
 /**
+ * The escape character of the `LIKE … ESCAPE` clauses in `codeForIBMi.ts`; `likeMemberPattern` and
+ * `likeText` escape with it. Not a name character, and plain in SQL, JSON and a shell, whichever way
+ * Code for IBM i sends the statement.
+ */
+export const LIKE_ESCAPE = "+";
+
+/**
+ * A member pattern as a `LIKE` value: `*` and `%` match any characters, and `_` (valid in IBM i
+ * names) is kept literal rather than matching any one character, so ORD_HDR doesn't find ORD$HDR.
+ */
+export function likeMemberPattern(pattern: string): string {
+  return pattern.replace(/[+_]/g, (char) => `${LIKE_ESCAPE}${char}`).replace(/\*/g, "%");
+}
+
+/** Text to look for anywhere in a value, as a `LIKE` value: every character literal. */
+export function likeText(text: string): string {
+  return `%${text.replace(/[+%_]/g, (char) => `${LIKE_ESCAPE}${char}`)}%`;
+}
+
+/**
  * The members found, each once, in the order to offer them: the exact name first, then by the
  * search libraries' order (others after them), then by name.
  */

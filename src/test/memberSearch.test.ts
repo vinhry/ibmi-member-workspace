@@ -6,6 +6,8 @@ import {
   describeSearch,
   foundMemberInfo,
   isWildcard,
+  likeMemberPattern,
+  likeText,
   memberPattern,
   memberPatternProblem,
   orderFound,
@@ -81,6 +83,22 @@ describe("addToHistory", () => {
     }
     assert.equal(history.length, 20);
     assert.equal(history[0].input, "M24");
+  });
+});
+
+describe("likeMemberPattern and likeText", () => {
+  it("keeps _ literal in a member pattern and turns * into %", () => {
+    assert.equal(likeMemberPattern("ORD_HDR"), "ORD+_HDR");
+    assert.equal(likeMemberPattern("ORD*"), "ORD%");
+    assert.equal(likeMemberPattern("ORD%"), "ORD%");
+    assert.equal(likeMemberPattern("ORD100"), "ORD100");
+  });
+
+  it("escapes every wildcard in text to find it anywhere", () => {
+    assert.equal(likeText("ORD_HDR"), "%ORD+_HDR%");
+    assert.equal(likeText("100%"), "%100+%%");
+    assert.equal(likeText("A+B"), "%A++B%");
+    assert.equal(likeText("ORDER"), "%ORDER%");
   });
 });
 

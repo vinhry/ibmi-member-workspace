@@ -9,6 +9,7 @@ import {
 } from "./dependencySources";
 import { commandFailureMessages } from "./changeManagement";
 import { TimedOutError, withDeadline } from "./deadline";
+import { LIKE_ESCAPE, likeMemberPattern, likeText } from "./memberSearch";
 import { changeStamp } from "./remoteStamps";
 import { SourceLayout, layoutFromColumn } from "./sourceCheck";
 import { CheckedOutMember, buildLocalFileName } from "./types";
@@ -493,7 +494,7 @@ export async function searchSourceMembers(
   const libraryFilter = libraries
     ? `AND SYSTEM_TABLE_SCHEMA IN (${libraries.map(() => "?").join(", ")}) `
     : `AND ${USER_LIBRARIES_ONLY} `;
-  const bindings = [...(libraries ?? []), pattern.trim().toUpperCase().replace(/\*/g, "%")];
+  const bindings = [...(libraries ?? []), likeMemberPattern(pattern.trim().toUpperCase())];
   let filters = "";
   if (options.sourceType) {
     filters += " AND UPPER(SOURCE_TYPE) = ?";
@@ -504,8 +505,8 @@ export async function searchSourceMembers(
     bindings.push(options.sourceFile.trim().toUpperCase());
   }
   if (options.text) {
-    filters += " AND UPPER(PARTITION_TEXT) LIKE ?";
-    bindings.push(`%${options.text.trim().toUpperCase()}%`);
+    filters += ` AND UPPER(PARTITION_TEXT) LIKE ? ESCAPE '${LIKE_ESCAPE}'`;
+    bindings.push(likeText(options.text.trim().toUpperCase()));
   }
   const rows = await requireConnection().runSQL(
     "SELECT RTRIM(SYSTEM_TABLE_SCHEMA) AS LIBRARY, RTRIM(SYSTEM_TABLE_NAME) AS SOURCE_FILE, " +
@@ -514,7 +515,7 @@ export async function searchSourceMembers(
     "COALESCE(VARCHAR_FORMAT(LAST_SOURCE_UPDATE_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'), '') AS LAST_CHANGED " +
     "FROM QSYS2.SYSPARTITIONSTAT WHERE SOURCE_TYPE IS NOT NULL " +
     libraryFilter +
-    `AND SYSTEM_TABLE_MEMBER LIKE ?${filters} ` +
+    `AND SYSTEM_TABLE_MEMBER LIKE ? ESCAPE '${LIKE_ESCAPE}'${filters} ` +
     `ORDER BY SYSTEM_TABLE_MEMBER, SYSTEM_TABLE_SCHEMA FETCH FIRST ${Math.max(1, Math.floor(options.limit))} ROWS ONLY`,
     { bindings }
   );
