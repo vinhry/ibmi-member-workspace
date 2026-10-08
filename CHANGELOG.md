@@ -1,5 +1,11 @@
 # Change Log
 
+## 1.8.8 - 2026-10-07
+
+- **Find Dependencies reads more CL and fixed-form RPG.** In CL it now finds the files `DCLF` declares, the SQL script `RUNSQLSTM` runs (listed with the copybooks), and `CALL`s inside a quoted `SBMJOB CMD('…')`, `ADDJOBSCDE CMD('…')` or `RQSDTA('…')`. In fixed-form RPG it finds `CALL 'PGM'` and `CALLB 'PROC'` in C-specs, in RPG IV and RPG III columns. Calls through a field are still skipped, since the name is only known at run time.
+- The README's Settings table is grouped by task: checkout and sync, uploads, dependencies, change management, AI agents and IBM Bob, and Local Change History.
+- Internal: the sorting, filtering, descriptions and icons of Checked Out Members and Find Member moved into modules with unit tests. Nothing changes on screen.
+
 ## 1.8.7 - 2026-10-07
 
 - Internal: Local Change History's work-item handling (setting up the repository, switching and moving between work items, saving checkpoints) moved into its own module with unit tests. Nothing changes in how it works.
