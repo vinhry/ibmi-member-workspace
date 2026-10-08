@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.8.7 - 2026-10-07
+
+- Internal: Local Change History's work-item handling (setting up the repository, switching and moving between work items, saving checkpoints) moved into its own module with unit tests. Nothing changes in how it works.
+
 ## 1.8.6 - 2026-10-06
 
 - **Four more research tools for Bob, Claude Code, Codex and GitHub Copilot**, all read-only:
