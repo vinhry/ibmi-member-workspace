@@ -1,10 +1,11 @@
 /**
  * Finds what a member refers to, from its text alone: copybooks (/COPY,
- * /INCLUDE, COBOL COPY, EXEC SQL INCLUDE), called programs (CL CALL, TFRCTL,
- * RPG EXTPGM prototypes), referenced files (RPG F-specs, dcl-f, EXTNAME; COBOL
- * COPY DDS; DDS REF, REFFLD, PFILE, JFILE), SQL tables and views (embedded
- * SQL), and bound procedures (RPG
- * prototypes, SQL CALL, CL CALLPRC). Pure text in, references out; resolving
+ * /INCLUDE, COBOL COPY, EXEC SQL INCLUDE, the script CL RUNSQLSTM runs), called
+ * programs (CL CALL and TFRCTL, also quoted in SBMJOB CMD; RPG EXTPGM prototypes
+ * and fixed-form CALL), referenced files (RPG F-specs, dcl-f, EXTNAME; CL DCLF;
+ * COBOL COPY DDS; DDS REF, REFFLD, PFILE, JFILE), SQL tables and views (embedded
+ * SQL), and bound procedures (RPG prototypes and fixed-form CALLB, SQL CALL,
+ * CL CALLPRC). Pure text in, references out; resolving
  * them to members on the IBM i is `dependencyResolve`, and other providers are
  * in `dependencySources`.
  */
@@ -148,6 +149,14 @@ function scanRpg(lines: string[]): RawReference[] {
       lastFixedFile = undefined;
     }
 
+    // Fixed-form C-spec: CALL 'PGM' calls a program, CALLB 'PROC' a bound procedure.
+    if (!fullyFree && /^C$/i.test(raw.charAt(5))) {
+      const call = fixedFormCall(raw);
+      if (call) {
+        refs.push({ ...call, ...at });
+      }
+    }
+
     const dclF = /^\s*DCL-F\s+([A-Z0-9_$#@]+)/i.exec(line);
     if (dclF) {
       const statement = rpgStatement(lines, index, fullyFree);
@@ -167,6 +176,39 @@ function scanRpg(lines: string[]): RawReference[] {
     }
   });
   return refs;
+}
+
+/**
+ * Operation and factor 2 columns of a fixed-form C-spec: RPG IV (26-35 and 36-49), then RPG III and
+ * RPG/400 (28-32 and 33-42).
+ */
+const FIXED_CALC_LAYOUTS: ReadonlyArray<{ opcode: [number, number]; factor2: [number, number] }> = [
+  { opcode: [25, 35], factor2: [35, 49] },
+  { opcode: [27, 32], factor2: [32, 42] },
+];
+
+/**
+ * A fixed-form CALL or CALLB naming its target as a literal. A target in a field or named constant
+ * is only known at run time (or from the definitions), so it is skipped.
+ */
+function fixedFormCall(raw: string): Pick<RawReference, "kind" | "library" | "member"> | undefined {
+  for (const layout of FIXED_CALC_LAYOUTS) {
+    // Operation extenders, as in CALL(E), don't change what is called.
+    const opcode = raw.slice(...layout.opcode).trim().toUpperCase().replace(/\(.*$/, "");
+    if (opcode !== "CALL" && opcode !== "CALLB") {
+      continue;
+    }
+    const literal = /^'([^']+)'/.exec(raw.slice(...layout.factor2).trim());
+    if (!literal) {
+      return undefined;
+    }
+    if (opcode === "CALL") {
+      const { library, name } = splitQualified(literal[1].trim());
+      return { kind: "program", library, member: name };
+    }
+    return { kind: "procedure", member: literal[1].trim() };
+  }
+  return undefined;
 }
 
 /** The code part of an RPG line, or undefined for a comment line. */
@@ -519,26 +561,64 @@ function scanCl(lines: string[]): RawReference[] {
         refs.push({ kind: "procedure", member: name.toUpperCase(), ...at });
       }
     }
+    // A command quoted as a parameter (SBMJOB CMD('CALL PGM(X)'), ADDJOBSCDE CMD(…), RQSDTA('…')) runs
+    // too: its calls are read before quoted text is blanked below.
+    for (const match of command.matchAll(/\b(?:CMD|RQSDTA)\(\s*'((?:[^']|'')*)'\s*\)/gi)) {
+      scanClCalls(blankQuoted(match[1].replace(/''/g, "'")), at, refs);
+    }
     // Text in quotes (messages, commands built at run time) is never a call target here.
-    command = command.replace(/'[^']*'/g, (quoted) => " ".repeat(quoted.length));
-    // The positional form must not be a keyword such as PGM( whose value failed to parse.
-    const pattern = new RegExp(
-      `\\b(?:CALL|TFRCTL)\\s+(?:PGM\\(\\s*([^)\\s]+)\\s*\\)|(?![A-Z0-9_$#@./&*]*\\()([&*]?${NAME}(?:/${NAME})?))`,
+    command = blankQuoted(command);
+    scanClCalls(command, at, refs);
+    // A file the program declares; positional or FILE(…), as for CALL.
+    const dclf = new RegExp(
+      `\\bDCLF\\s+(?:FILE\\(\\s*([^)\\s]+)\\s*\\)|(?![A-Z0-9_$#@./&*]*\\()([&*]?${NAME}(?:/${NAME})?))`,
       "gi"
     );
-    for (const match of command.matchAll(pattern)) {
-      const target = match[1] ?? match[2];
-      // A program name held in a variable is only known at run time.
-      if (target.startsWith("&")) {
-        continue;
+    for (const match of command.matchAll(dclf)) {
+      const { library, name } = splitQualified(match[1] ?? match[2]);
+      if (name && !/^[&*]/.test(name)) {
+        refs.push({ kind: "file", library, member: name, ...at });
       }
-      const { library, name } = splitQualified(target);
-      if (name && !name.startsWith("&")) {
-        refs.push({ kind: "program", library, member: name, ...at });
+    }
+    // The SQL script RUNSQLSTM runs is a source member, read like a copybook.
+    const runSqlStm = /\bRUNSQLSTM\b(.*)$/i.exec(command);
+    if (runSqlStm) {
+      const sourceFile = /\bSRCFILE\(\s*([^)\s]+)\s*\)/i.exec(runSqlStm[1])?.[1];
+      const member = /\bSRCMBR\(\s*([^)\s]+)\s*\)/i.exec(runSqlStm[1])?.[1];
+      if (sourceFile && member && !/^[&*]/.test(member)) {
+        const { library, name } = splitQualified(sourceFile);
+        if (name && !/^[&*]/.test(name) && !library?.startsWith("&")) {
+          refs.push({ kind: "copybook", library, sourceFile: name, member: member.toUpperCase(), ...at });
+        }
       }
     }
   }
   return refs;
+}
+
+/** The text with everything in quotes replaced by blanks, keeping its length. */
+function blankQuoted(text: string): string {
+  return text.replace(/'[^']*'/g, (quoted) => " ".repeat(quoted.length));
+}
+
+/** The programs CALL and TFRCTL name in one CL command, quotes already blanked. */
+function scanClCalls(command: string, at: { line: number; text: string }, refs: RawReference[]): void {
+  // The positional form must not be a keyword such as PGM( whose value failed to parse.
+  const pattern = new RegExp(
+    `\\b(?:CALL|TFRCTL)\\s+(?:PGM\\(\\s*([^)\\s]+)\\s*\\)|(?![A-Z0-9_$#@./&*]*\\()([&*]?${NAME}(?:/${NAME})?))`,
+    "gi"
+  );
+  for (const match of command.matchAll(pattern)) {
+    const target = match[1] ?? match[2];
+    // A program name held in a variable is only known at run time.
+    if (target.startsWith("&")) {
+      continue;
+    }
+    const { library, name } = splitQualified(target);
+    if (name && !name.startsWith("&")) {
+      refs.push({ kind: "program", library, member: name, ...at });
+    }
+  }
 }
 
 function scanDds(lines: string[]): RawReference[] {

@@ -43,6 +43,15 @@ describe("resolveReferences", () => {
     assert.deepEqual(result.resolved[0].candidates, [rows[0]]);
   });
 
+  it("resolves a RUNSQLSTM script by its source file, whatever its source type", () => {
+    const result = resolveReferences(
+      [ref({ kind: "copybook", sourceFile: "QSQLSRC", member: "CRTTABLES" })],
+      [...rows, row("PRODLIB", "QSQLSRC", "CRTTABLES", "SQL")],
+      ["PRODLIB"]
+    );
+    assert.deepEqual(result.resolved[0].candidates, [row("PRODLIB", "QSQLSRC", "CRTTABLES", "SQL")]);
+  });
+
   it("looks for a copybook without a source file in QRPGLESRC first", () => {
     const result = resolveReferences([ref({ kind: "copybook", member: "PROTOS" })], rows, ["PRODLIB"]);
     assert.deepEqual(result.resolved[0].candidates.map((c) => c.sourceFile), ["QRPGLESRC", "QCPYSRC"]);

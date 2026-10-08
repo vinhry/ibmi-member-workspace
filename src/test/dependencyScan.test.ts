@@ -434,6 +434,78 @@ describe("scanReferences: CL", () => {
   });
 });
 
+describe("scanReferences: CL files, scripts and quoted commands", () => {
+  it("declares files with DCLF, positional or FILE(), skipping variables", () => {
+    const source = [
+      "  DCLF FILE(PRODLIB/CUSTMAST)",
+      "  DCLF ORDHDR OPNID(HDR)",
+      "  DCLF FILE(*LIBL/ORDDTL)",
+      "  DCLF FILE(&FILE)",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "clle")), [
+      "file|PRODLIB||CUSTMAST|",
+      "file|||ORDHDR|",
+      "file|||ORDDTL|",
+    ]);
+  });
+
+  it("finds the SQL script RUNSQLSTM runs, as a member with its source file", () => {
+    const source = [
+      "  RUNSQLSTM SRCFILE(PRODLIB/QSQLSRC) SRCMBR(CRTTABLES) COMMIT(*NONE)",
+      "  RUNSQLSTM SRCMBR(nightly) SRCFILE(QSQLSRC)",
+      "  RUNSQLSTM SRCFILE(QSQLSRC) SRCMBR(&MBR)",
+      "  RUNSQLSTM SRCSTMF('/home/dev/x.sql')",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "clle")), [
+      "copybook|PRODLIB|QSQLSRC|CRTTABLES|",
+      "copybook||QSQLSRC|NIGHTLY|",
+    ]);
+  });
+
+  it("finds calls quoted inside SBMJOB CMD and RQSDTA, but not in messages", () => {
+    const source = [
+      "  SBMJOB CMD('CALL PGM(PRODLIB/NIGHTLY) PARM(''X'')') JOB(NIGHT)",
+      "  SBMJOB RQSDTA('CALL WEEKLY')",
+      "  ADDJOBSCDE JOB(EOM) CMD('CALL PGM(MONTHEND)') FRQ(*MONTHLY)",
+      "  SNDPGMMSG MSG('CALL PGM(NOTME)')",
+    ].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "clle")), [
+      "program|PRODLIB||NIGHTLY|",
+      "program|||WEEKLY|",
+      "program|||MONTHEND|",
+    ]);
+  });
+});
+
+describe("scanReferences: RPG fixed-form calls", () => {
+  /** A fixed-form RPG IV C-spec with the operation in columns 26-35 and factor 2 from column 36. */
+  const calc = (opcode: string, factor2: string) => `     C${" ".repeat(19)}${opcode.padEnd(10)}${factor2}`;
+
+  it("reads CALL with a quoted program name, with or without a library", () => {
+    const source = [calc("CALL", "'ORD200'"), calc("CALL(E)", "'MYLIB/ORD300'")].join("\n");
+    assert.deepEqual(brief(scanReferences(source, "rpgle")), ["program|||ORD200|", "program|MYLIB||ORD300|"]);
+  });
+
+  it("reads CALLB as a bound procedure, keeping its case", () => {
+    assert.deepEqual(brief(scanReferences(calc("CALLB", "'getCust'"), "rpgle")), ["procedure|||getCust|"]);
+  });
+
+  it("skips a CALL through a field, CALLP, and comment lines", () => {
+    const source = [
+      calc("CALL", "PGMNAME"),
+      calc("CALLP", "'ORD400'"),
+      `     C*${" ".repeat(18)}${"CALL".padEnd(10)}'OLDPGM'`,
+    ].join("\n");
+    assert.deepEqual(scanReferences(source, "rpgle"), []);
+  });
+
+  it("reads RPG III's columns too", () => {
+    // RPG/400: operation in columns 28-32, factor 2 in 33-42.
+    const source = `     C${" ".repeat(21)}CALL 'ORD500'`;
+    assert.deepEqual(brief(scanReferences(source, "rpg")), ["program|||ORD500|"]);
+  });
+});
+
 describe("scanReferences: DDS", () => {
   it("reads REF, REFFLD, PFILE and JFILE", () => {
     const source = [
