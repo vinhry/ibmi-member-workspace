@@ -237,3 +237,15 @@ Agents could see relationships and source, but not a program's attributes, why a
 - `src/test/bobPrompts.test.ts`, `manifest.test.ts`.
 - On a real system: `describe_object` on an ILE program with bound service programs and on an OPM program; `read_job_log` default and with a WRKACTJOB job name; `sample_file_data` off, on, with a member, on an empty file; `compare_checkout` on in-sync and modified members.
 
+### 16. Work items in their own module (shipped in 1.8.7)
+
+`checkoutService.ts` mixed Local Change History with checkout logic and IBM i I/O, so none of the work-item logic could be tested. Same approach as the 1.7.3 index store: no behavior change.
+
+- `src/workItemHistory.ts` (vscode-free): `WorkItemHistory` holds what was in the service: `ensureGitReady` (one preparation shared by concurrent calls, reused through a batch until `endBatch`), repository preparation with the author prompt and the consent for a repository the extension didn't create (remembered per session, trusted through `RepositoryTrust`), `synchronizeWorkItem`, `activateWorkItem`, `startWorkItem`, `moveEntries` (commit on the target before removing from the source, roll back on failure), `saveCheckpoint`/`saveBatchCheckpoint`, `logGitFailure` (warns once), `assertEntryInActiveWorkItem`, legacy-layout migration and archive, `needsWorkItemChoice`/`confirmWorkItem`, and `pathIsInside`.
+- Its ports: `HistoryGit` (a `Pick` of `GitService`), `HistoryFiles` (exists/read/write/remove/setReadOnly), `HistoryUi` (author prompt, repository consent, warning), the trust list, and callbacks into the index (`ensureSystemState`, `activeEntries`, `persist`…). Paths are file-system strings; the service converts from `vscode.Uri`.
+- `CheckoutService` keeps its public API as one-line delegates, so `commands/git.ts`, `extension.ts`, `commands/checkout.ts` and `commands/sync.ts` are untouched. It still owns `getGitRoot` (a `Uri`), the setting and workspaceState reads (`gitIntegrationState`, `confirmGitIntegration`, `trustRepositoriesInUse`) and the checkpoint `checkoutMemberNow` saves.
+
+**Validation**
+- `src/test/workItemHistory.test.ts`: first preparation trusts the new repository and adopts its branch; author asked once, a cancel remembered; foreign repository only with consent, asked once per session, again after a reset; one preparation per batch; Git off or missing warns once; checkpoint paths stay in the system's repository; batch checkpoints; activate/start; the once-per-session work-item choice; moves in order, rolled back, refused; legacy migration.
+- Every existing test passes unchanged.
+
