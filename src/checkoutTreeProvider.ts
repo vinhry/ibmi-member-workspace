@@ -1,14 +1,29 @@
 import * as fs from "node:fs";
 import * as vscode from "vscode";
-import {
-  CheckedOutMember,
-  TreeItemType,
-  buildLocalFileName,
-  formatMemberPath,
-  isReferenceCopy,
-} from "./types";
+import { CheckedOutMember, TreeItemType, buildLocalFileName } from "./types";
 import { CheckoutService } from "./checkoutService";
+import {
+  DateFormat,
+  IconSpec,
+  contextValueFor,
+  matchesSearch,
+  memberDescription,
+  memberIcon,
+  memberTooltip,
+  membersOf,
+  sourceFileGroups,
+} from "./checkoutTreeModel";
 import { getSystemName } from "./codeForIBMi";
+
+/** Dates as VS Code's locale shows them. */
+const LOCAL_DATES: DateFormat = {
+  date: (iso) => new Date(iso).toLocaleDateString(),
+  dateTime: (iso) => new Date(iso).toLocaleString(),
+};
+
+function themeIcon({ id, colorId }: IconSpec): vscode.ThemeIcon {
+  return new vscode.ThemeIcon(id, colorId ? new vscode.ThemeColor(colorId) : undefined);
+}
 
 export class CheckoutTreeProvider
   implements vscode.TreeDataProvider<TreeItemType>, vscode.Disposable
@@ -52,14 +67,7 @@ export class CheckoutTreeProvider
     }
     return this.service
       .getEntriesForSystem(system)
-      .filter((e) => this.matchesSearch(e)).length;
-  }
-
-  private matchesSearch(entry: CheckedOutMember): boolean {
-    if (!this.searchTerm) {
-      return true;
-    }
-    return entry.memberName.toLowerCase().includes(this.searchTerm);
+      .filter((e) => matchesSearch(e, this.searchTerm)).length;
   }
 
   getTreeItem(element: TreeItemType): vscode.TreeItem {
@@ -111,37 +119,8 @@ export class CheckoutTreeProvider
     if (!system) {
       return [];
     }
-
-    const entries = this.service
-      .getEntriesForSystem(system)
-      .filter((e) => this.matchesSearch(e));
-    if (entries.length === 0) {
-      return [];
-    }
-
-    const seen = new Set<string>();
-    const result: Extract<TreeItemType, { kind: "sourceFile" }>[] = [];
-
-    for (const entry of entries) {
-      const key = `${entry.library}/${entry.sourceFile}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        result.push({
-          kind: "sourceFile",
-          system,
-          library: entry.library,
-          sourceFile: entry.sourceFile,
-        });
-      }
-    }
-
-    result.sort(
-      (a, b) =>
-        a.library.localeCompare(b.library) ||
-        a.sourceFile.localeCompare(b.sourceFile)
-    );
-
-    return result;
+    return sourceFileGroups(this.service.getEntriesForSystem(system), this.searchTerm)
+      .map(({ library, sourceFile }) => ({ kind: "sourceFile" as const, system, library, sourceFile }));
   }
 
   private getMembersForSourceFile(
@@ -149,15 +128,7 @@ export class CheckoutTreeProvider
     library: string,
     sourceFile: string
   ): TreeItemType[] {
-    return this.service
-      .getEntriesForSystem(system)
-      .filter(
-        (e) =>
-          e.library.toUpperCase() === library.toUpperCase() &&
-          e.sourceFile.toUpperCase() === sourceFile.toUpperCase()
-      )
-      .filter((e) => this.matchesSearch(e))
-      .sort((a, b) => a.memberName.localeCompare(b.memberName))
+    return membersOf(this.service.getEntriesForSystem(system), library, sourceFile, this.searchTerm)
       .map((entry) => ({ kind: "member" as const, entry }));
   }
 
@@ -187,20 +158,11 @@ export class CheckoutTreeProvider
     item.id = `member:${entry.id}`;
     item.resourceUri = vscode.Uri.file(entry.localPath);
     const localMissing = !fs.existsSync(entry.localPath);
-    const reference = isReferenceCopy(entry);
-    item.description = localMissing
-      ? "local file missing — Refresh to re-checkout or remove"
-      : reference
-        ? `reference · ${this.getStatusDescription(entry)}`
-        : this.getStatusDescription(entry);
-    item.tooltip = this.getTooltip(entry, localMissing);
-    item.iconPath = localMissing
-      ? new vscode.ThemeIcon("error", new vscode.ThemeColor("problemsErrorIcon.foreground"))
-      : reference
-        ? new vscode.ThemeIcon("lock")
-        : this.getStatusIcon(entry);
+    item.description = memberDescription(entry, localMissing, LOCAL_DATES);
+    item.tooltip = new vscode.MarkdownString(memberTooltip(entry, localMissing, LOCAL_DATES));
+    item.iconPath = themeIcon(memberIcon(entry, localMissing));
     // Reference copies get their own prefix so Upload, Merge Back and Run Action don't apply.
-    item.contextValue = `${reference ? "reference" : "checkout"}-${entry.status}`;
+    item.contextValue = contextValueFor(entry);
 
     item.command = {
       command: "ibmi-member-workspace.openLocalFile",
@@ -209,92 +171,5 @@ export class CheckoutTreeProvider
     };
 
     return item;
-  }
-
-  private getStatusDescription(entry: CheckedOutMember): string {
-    const checkedOutDate = new Date(entry.checkedOutAt).toLocaleDateString();
-    const checkedDate = entry.lastCheckedAt
-      ? new Date(entry.lastCheckedAt).toLocaleDateString()
-      : checkedOutDate;
-
-    switch (entry.status) {
-      case "checked-out":
-        return `checked out ${checkedOutDate}`;
-      case "merged":
-        return `merged ${checkedDate}`;
-      case "modified":
-        return `local changes pending (checked ${checkedDate})`;
-      case "remote-changed":
-        return `remote changed ${checkedDate}`;
-      case "conflict":
-        return `conflict detected ${checkedDate}`;
-      case "in-sync":
-        return `in sync ${checkedDate}`;
-      case "remote-missing":
-        return `deleted on IBM i (checked ${checkedDate})`;
-    }
-  }
-
-  private getTooltip(entry: CheckedOutMember, localMissing: boolean): vscode.MarkdownString {
-    const md = new vscode.MarkdownString();
-    md.appendMarkdown(`**${formatMemberPath(entry)}**\n\n`);
-    if (isReferenceCopy(entry)) {
-      md.appendMarkdown("Read-only reference copy: it can't be uploaded or merged back.\n\n");
-    }
-    if (entry.status === "remote-missing") {
-      md.appendMarkdown("The member no longer exists on the IBM i. Your local copy is kept: remove the checkout, or keep the file.\n\n");
-    }
-    md.appendMarkdown(`- **System:** ${entry.system}\n`);
-    md.appendMarkdown(`- **Status:** ${entry.status}\n`);
-    md.appendMarkdown(
-      `- **Checked out:** ${new Date(entry.checkedOutAt).toLocaleString()}\n`
-    );
-    if (entry.lastCheckedAt) {
-      md.appendMarkdown(
-        `- **Last checked:** ${new Date(entry.lastCheckedAt).toLocaleString()}\n`
-      );
-    }
-    md.appendMarkdown(`- **Local:** ${entry.localPath}${localMissing ? " (missing)" : ""}\n`);
-    return md;
-  }
-
-  private getStatusIcon(entry: CheckedOutMember): vscode.ThemeIcon {
-    switch (entry.status) {
-      case "checked-out":
-        return new vscode.ThemeIcon(
-          "edit",
-          new vscode.ThemeColor("charts.yellow")
-        );
-      case "merged":
-        return new vscode.ThemeIcon(
-          "check",
-          new vscode.ThemeColor("charts.green")
-        );
-      case "modified":
-        return new vscode.ThemeIcon(
-          "pencil",
-          new vscode.ThemeColor("charts.orange")
-        );
-      case "remote-changed":
-        return new vscode.ThemeIcon(
-          "cloud-download",
-          new vscode.ThemeColor("charts.blue")
-        );
-      case "conflict":
-        return new vscode.ThemeIcon(
-          "warning",
-          new vscode.ThemeColor("charts.red")
-        );
-      case "in-sync":
-        return new vscode.ThemeIcon(
-          "check-all",
-          new vscode.ThemeColor("charts.green")
-        );
-      case "remote-missing":
-        return new vscode.ThemeIcon(
-          "circle-slash",
-          new vscode.ThemeColor("charts.red")
-        );
-    }
   }
 }

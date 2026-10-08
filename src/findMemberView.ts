@@ -1,31 +1,17 @@
 import * as vscode from "vscode";
 import { CheckoutService } from "./checkoutService";
 import { getSystemName } from "./codeForIBMi";
-import { FoundMember, MemberSearch, describeSearch, foundMemberInfo } from "./memberSearch";
-import { MemberInfo } from "./memberInfo";
+import {
+  FindMemberResults,
+  FindMemberRow,
+  HISTORY_KEY,
+  findMemberRows,
+  foundDescription,
+  foundIcon,
+} from "./findMemberModel";
+import { MemberSearch, describeSearch } from "./memberSearch";
 
-/** workspaceState key of Find Member's recent searches, newest first. */
-export const HISTORY_KEY = "findMember.history";
-
-/** The last search and what it found, shown until the next search or Clear Results. */
-export interface FindMemberResults {
-  search: MemberSearch;
-  /** Where it searched, e.g. "the library list". */
-  scopeLabel: string;
-  /** Whether the search ran in all user libraries, so that isn't offered again. */
-  everywhere: boolean;
-  state: "searching" | "done" | "failed";
-  found: FoundMember[];
-  error?: string;
-}
-
-export type FindMemberRow =
-  | { kind: "results" }
-  | { kind: "found"; member: MemberInfo; found: FoundMember }
-  | { kind: "suggestion"; label: string; search: MemberSearch }
-  | { kind: "message"; label: string }
-  | { kind: "history" }
-  | { kind: "past"; search: MemberSearch };
+export { FindMemberResults, FindMemberRow, HISTORY_KEY, foundMembersOf } from "./findMemberModel";
 
 /**
  * The Find Member panel below Checked Out Members: the last search's results, to act on one after
@@ -67,33 +53,7 @@ export class FindMemberProvider implements vscode.TreeDataProvider<FindMemberRow
   }
 
   getChildren(element?: FindMemberRow): FindMemberRow[] {
-    if (!element) {
-      return [
-        ...(this.results ? [{ kind: "results" as const }] : []),
-        ...(this.history().length > 0 ? [{ kind: "history" as const }] : []),
-      ];
-    }
-    if (element.kind === "history") {
-      return this.history().map((search) => ({ kind: "past", search }));
-    }
-    if (element.kind !== "results" || !this.results) {
-      return [];
-    }
-    const { search, state, found, error, everywhere } = this.results;
-    if (state === "searching") {
-      return [{ kind: "message", label: "Searching…" }];
-    }
-    if (state === "failed") {
-      return [{ kind: "message", label: `Search failed: ${error ?? "unknown error"}` }];
-    }
-    if (found.length > 0) {
-      return found.map((member) => ({ kind: "found", member: foundMemberInfo(member), found: member }));
-    }
-    return [
-      { kind: "message", label: search.byText ? "No member text contains it." : "No source member or program has this name." },
-      ...(search.byText ? [] : [{ kind: "suggestion" as const, label: `Search member text for "${search.input}"`, search: { ...search, byText: true } }]),
-      ...(everywhere ? [] : [{ kind: "suggestion" as const, label: "Search all user libraries", search: { ...search, scope: "everywhere" as const } }]),
-    ];
+    return findMemberRows(element, this.results, this.history());
   }
 
   getTreeItem(row: FindMemberRow): vscode.TreeItem {
@@ -148,9 +108,8 @@ export class FindMemberProvider implements vscode.TreeDataProvider<FindMemberRow
     const { found, member } = row;
     const system = getSystemName();
     const entry = system ? this.service.findEntry(system, member.library, member.sourceFile, member.memberName) : undefined;
-    const state = entry ? (entry.kind === "reference" ? "reference copy" : "checked out") : undefined;
     const item = new vscode.TreeItem(found.member, vscode.TreeItemCollapsibleState.None);
-    item.description = [`${found.library}/${found.sourceFile}`, found.sourceType, state].filter(Boolean).join(" · ");
+    item.description = foundDescription(found, entry);
     const tooltip = new vscode.MarkdownString();
     tooltip.appendMarkdown(`**${found.library}/${found.sourceFile}(${found.member})** ${found.sourceType}\n\n`);
     for (const line of [found.via, found.text, found.lastChanged && `Changed ${found.lastChanged}`]) {
@@ -160,7 +119,7 @@ export class FindMemberProvider implements vscode.TreeDataProvider<FindMemberRow
     }
     tooltip.appendMarkdown("Click to read it. Right-click to check it out.");
     item.tooltip = tooltip;
-    item.iconPath = new vscode.ThemeIcon(entry ? (entry.kind === "reference" ? "lock" : "check") : "file-code");
+    item.iconPath = new vscode.ThemeIcon(foundIcon(entry));
     item.contextValue = "foundMember";
     item.command = {
       command: "vscode.open",
@@ -173,13 +132,4 @@ export class FindMemberProvider implements vscode.TreeDataProvider<FindMemberRow
     };
     return item;
   }
-}
-
-/** The members of the Find Member results a command was run on: the selection, or the row clicked. */
-export function foundMembersOf(arg: unknown, all?: unknown[]): MemberInfo[] {
-  const rows = all && all.length > 1 ? all : [arg];
-  return rows.flatMap((row) => {
-    const found = row as Partial<Extract<FindMemberRow, { kind: "found" }>> | undefined;
-    return found?.kind === "found" && found.found ? [foundMemberInfo(found.found)] : [];
-  });
 }
