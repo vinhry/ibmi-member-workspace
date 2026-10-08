@@ -12,6 +12,42 @@ IBM i Member Workspace (`vinhry.ibmi-member-workspace`) is a VS Code extension t
 - `CHANGELOG.md` has a user-facing entry, and `readme.md` is updated wherever behavior changes.
 - No manual check against a real IBM i is required.
 
+## Shop constraints (Rocket LMI)
+
+Environment reality:
+- Production objects reference production objects.
+- Rocket LMI checkout brings ONLY the one object the developer named into the dev
+  library. It does NOT pull referenced/related objects. (This is the gap the
+  dependency feature fills — LMI won't do it.)
+- Therefore discovered dependencies (B, C, D…) usually exist ONLY in production;
+  the dev library has just the checked-out object.
+
+### Two modes per discovered dependency (REQUIRED — do not collapse into one)
+1. **Bring for reference** (expected to be the common case):
+   - Read-only local pull, straight from production. No LMI involvement.
+   - Clearly marked read-only so it is NEVER merged/uploaded back.
+   - Use for copybooks and called programs you only need to READ to understand A.
+2. **Check out for change**:
+   - Must hand off to LMI's real checkout process, NOT write to the dev library
+     directly. Otherwise the change-management record would not reflect what
+     actually changed (an edited B outside LMI = change tracking lying).
+
+### DSPPGMREF in this context
+- Run it against the PRODUCTION object to discover the graph (dev lib has only the
+  one object). References may resolve against production libs / compile-time *LIBL,
+  so treat resolved libraries as discovery hints, then decide per node:
+  reference-only pull vs LMI checkout.
+- Still complementary with source parsing: DSPPGMREF misses `/COPY` copybooks
+  (expanded at compile, no object ref); source parsing misses dynamic calls.
+  Keep both; keep a permanent "source not found" unresolved list.
+
+### Net design principle
+LMI stays the source of truth for what is being CHANGED. The extension adds the
+local dependency picture LMI doesn't provide — defaulting to read-only reference
+copies, and delegating any actual change-checkout back to LMI.
+
+These constraints are why reference copies are read-only and never uploaded (`assertEditable`), and why changes go through the change-management checkout and check-in commands (sections 2, 10 and 12).
+
 ## Requirements
 
 ### 1. COBOL `COPY` in the dependency scan (shipped in 1.7.5)
@@ -79,7 +115,7 @@ The moved code keeps all of today's behavior (`loadIndex`, `saveIndex`, `persist
 - All existing tests pass unchanged.
 - `checkoutService.ts` no longer reads or writes the index file directly.
 - `CLAUDE.md`'s list of vscode-free modules includes the new module.
-- The HANDOFF.md status line no longer lists this as open.
+- HANDOFF.md (since removed) no longer listed this as open.
 
 ### 5. Dependency search scope (shipped in 1.7.7)
 
@@ -248,4 +284,31 @@ Agents could see relationships and source, but not a program's attributes, why a
 **Validation**
 - `src/test/workItemHistory.test.ts`: first preparation trusts the new repository and adopts its branch; author asked once, a cancel remembered; foreign repository only with consent, asked once per session, again after a reset; one preparation per batch; Git off or missing warns once; checkpoint paths stay in the system's repository; batch checkpoints; activate/start; the once-per-session work-item choice; moves in order, rolled back, refused; legacy migration.
 - Every existing test passes unchanged.
+
+### 17. More CL and fixed-form RPG, testable views, grouped settings (shipped in 1.8.8)
+
+- `scanCl` (`dependencyScan.ts`): `DCLF` (positional or `FILE()`) gives a `file`; `RUNSQLSTM SRCFILE() SRCMBR()` gives a `copybook` with its library and source file (the resolver's `typeMatches` accepts any source type for a copybook, so no new kind); a command quoted in `CMD('…')` or `RQSDTA('…')` is unquoted (`''` → `'`) and scanned for `CALL`/`TFRCTL` before quoted text is blanked (`scanClCalls`). Variables, `*SAME`-style values and `SRCSTMF` are skipped.
+- `scanRpg`: fixed-form C-specs with `CALL` or `CALLB` (extenders dropped) and a quoted factor 2, in RPG IV columns (operation 26-35, factor 2 36-49) or RPG III columns (28-32, 33-42) (`fixedFormCall`). A target in a field or named constant is skipped.
+- `checkoutTreeModel.ts` and `findMemberModel.ts` (vscode-free) hold what Checked Out Members and Find Member show; the providers only build tree items. Dates are formatted by the caller. `findMemberView.ts` re-exports the moved types and `foundMembersOf`.
+- README Settings: one table per group (checkout and sync, uploads, dependencies, change management, AI agents and IBM Bob, Local Change History).
+- HANDOFF.md and git-integration-plan.md were removed; their lasting content is in this file (Shop constraints, History).
+
+**Validation**
+- `src/test/dependencyScan.test.ts`: DCLF, RUNSQLSTM, quoted SBMJOB/ADDJOBSCDE/RQSDTA (not messages), fixed-form CALL/CALLB in both layouts, skipped cases. `dependencyResolve.test.ts`: a RUNSQLSTM script resolves by its source file.
+- `src/test/checkoutTreeModel.test.ts`, `findMemberModel.test.ts`.
+
+## History
+
+Shipped before the requirements above were written down here (from the former HANDOFF.md):
+
+| Shipped in | What |
+|---|---|
+| 1.2.2 | Hash fixes: a leading BOM and trailing blanks no longer make an untouched member look changed; baselines carry `hashVersion: 2` and older ones are upgraded on the next save, refresh or upload. |
+| 1.2.3, 1.2.4 | Git hardening: paths through stdin (Git 2.25+), no signing or hooks, `git switch`, inspection fails safe; 1.2.4 fixed an EPIPE crash on Linux. A deleted local file shows as "local file missing". |
+| 1.3.0 | Upload on save (`autoUploadOnSave`), sharing `uploadFlow.ts` with the Upload command. |
+| 1.4.0 | Find Dependencies v1: direct dependencies, read-only reference copies, a guide for the LMI hand-off. |
+| 1.5.0, 1.5.1 | Pluggable dependency sources (source scan, DSPPGMREF with OBJECT_STATISTICS, user-defined cross-reference queries such as Abstract). |
+| 1.7.2, 1.7.3 | Find All Dependencies (`dependencyWalk.ts`); the checkout index store extracted from `checkoutService.ts`. |
+
+Local Change History was planned in the former `git-integration-plan.md`; all of its sub-tasks shipped, and `src/gitService.ts` and `src/workItemHistory.ts` are the source of truth now.
 

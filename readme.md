@@ -146,8 +146,8 @@ Find Dependencies asks up to three kinds of sources. Every IBM i is different, s
 
 | Source type | What is found |
 |---|---|
-| RPGLE, SQLRPGLE, RPGLEINC, RPG | `/COPY` and `/INCLUDE` (`LIB/FILE,MEMBER`, `FILE,MEMBER`, or `MEMBER`), `EXEC SQL INCLUDE`, externally described files (F-specs and `dcl-f`, honoring `EXTDESC`), `EXTNAME` data structures, SQL tables and views used by embedded SQL (`FROM`, `JOIN`, `INSERT INTO`, `UPDATE`, `DELETE FROM`, `MERGE INTO`), programs called through `EXTPGM` prototypes, and bound procedures (other prototypes, and SQL `CALL`) |
-| CLLE, CLP, CL | `CALL` and `TFRCTL` programs, including calls inside `SBMJOB CMD(...)`, and `CALLPRC` procedures |
+| RPGLE, SQLRPGLE, RPGLEINC, RPG | `/COPY` and `/INCLUDE` (`LIB/FILE,MEMBER`, `FILE,MEMBER`, or `MEMBER`), `EXEC SQL INCLUDE`, externally described files (F-specs and `dcl-f`, honoring `EXTDESC`), `EXTNAME` data structures, SQL tables and views used by embedded SQL (`FROM`, `JOIN`, `INSERT INTO`, `UPDATE`, `DELETE FROM`, `MERGE INTO`), programs called through `EXTPGM` prototypes or a fixed-form `CALL 'PGM'`, and bound procedures (other prototypes, fixed-form `CALLB 'PROC'`, and SQL `CALL`) |
+| CLLE, CLP, CL | `CALL` and `TFRCTL` programs, including calls inside `SBMJOB CMD(...)`, quoted or not, and `RQSDTA('...')`; `CALLPRC` procedures; files declared with `DCLF`; and the SQL script `RUNSQLSTM SRCFILE(...) SRCMBR(...)` runs, listed with the copybooks |
 | PF, LF, DSPF, PRTF | Files named in `REF`, `REFFLD`, `PFILE`, and `JFILE` |
 | CBLLE, SQLCBLLE, CBL, SQLCBL | `COPY` (`COPY MEMBER`, `OF`/`IN` a source file, optionally `OF`/`IN` a library or written `LIB/FILE`), `EXEC SQL INCLUDE`, files whose record formats are copied with `COPY DDS-…` (also `DDSR-`, `DD-`, `DDR-`), and the SQL tables, views and `CALL`ed procedures of embedded SQL. Comment lines and columns 73–80 are ignored. |
 
@@ -440,11 +440,28 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 
 ## Settings
 
+Settings marked *User settings only* are read from your user settings alone, so a workspace you open can't turn on anything that runs on your IBM i.
+
+### Checkout and sync
+
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `ibmi-member-workspace.warnOnRedownload` | `true` | Show warning when checking out a member that is already checked out. |
 | `ibmi-member-workspace.autoOpenOnCheckout` | `true` | Automatically open the file in the editor after a single-member checkout. |
 | `ibmi-member-workspace.allowCheckoutFromProtectedFilter` | `false` | Allow checking out members from protected (read-only) filters. |
+| `ibmi-member-workspace.backgroundRefresh.onConnect` | `false` | Refresh the remote status of your checkouts when Code for IBM i connects. User settings only. See **Background Refresh**. |
+| `ibmi-member-workspace.backgroundRefresh.intervalMinutes` | `0` | Refresh the remote status of your checkouts every this many minutes while connected (at least 5); `0` turns it off. User settings only. |
+
+### Uploads
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. User settings only. See **Upload on Save**. |
+
+### Dependencies
+
+| Setting | Default | Description |
+|---------|---------|-------------|
 | `ibmi-member-workspace.dependencies.suggestAfterCheckout` | `true` | After checking out a single member, offer to review the members it uses. |
 | `ibmi-member-workspace.dependencies.searchScope` | **Automatic** | Where dependencies are looked for: **Library List**, **Search Libraries** or **All User Libraries**. **Automatic** uses the search libraries when some are listed, otherwise the library list. |
 | `ibmi-member-workspace.dependencies.searchLibraries` | `[]` | Libraries to search, in order, for the source members and compiled programs of dependencies when the scope is **Search Libraries** or **Automatic** (for example, `PRODOBJ`, `PRODSRC`). Empty uses the connection's library list. |
@@ -452,18 +469,30 @@ The Checked Out Members panel supports selecting multiple checkouts at once. **O
 | `ibmi-member-workspace.dependencies.transitive.maxDepth` | `3` | How many levels **Find All Dependencies** looks through before asking whether to keep going (1 to 10). |
 | `ibmi-member-workspace.dependencies.transitive.maxMembers` | `50` | How many members **Find All Dependencies** lists before asking whether to keep going (5 to 500). |
 | `ibmi-member-workspace.dependencies.crossReferences` | `[]` | Cross-reference tool queries (Abstract, Pathfinder, MDXREF…). User settings only. See **Dependencies**. |
+
+### Change management
+
+| Setting | Default | Description |
+|---------|---------|-------------|
 | `ibmi-member-workspace.changeManagement.checkoutCommand` | `""` | CL command that checks a member out in your change-management system, run for **Check Out Through Change Management…** and **I Need to Change Some…**. User settings only. See **Running Your Change-Management Checkout**. |
 | `ibmi-member-workspace.changeManagement.checkinCommand` | `""` | CL command that checks a member in to your change-management system, run for **Check In Through Change Management…** and **Check In…** after an upload. User settings only. See **Running Your Change-Management Check-In**. |
 | `ibmi-member-workspace.changeManagement.release` | `""` | The release `&RELEASE` stands for in those commands, for example `MYGROUP/MYAPP/BASE`. User settings only. |
-| `ibmi-member-workspace.autoUploadOnSave` | `off` | Upload a checked-out member to the IBM i when you save it: `off`, `ask`, or `silent`. User settings only. See **Upload on Save**. |
-| `ibmi-member-workspace.backgroundRefresh.onConnect` | `false` | Refresh the remote status of your checkouts when Code for IBM i connects. User settings only. See **Background Refresh**. |
-| `ibmi-member-workspace.backgroundRefresh.intervalMinutes` | `0` | Refresh the remote status of your checkouts every this many minutes while connected (at least 5); `0` turns it off. User settings only. |
-| `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. A workspace setting asks once before it turns this on. |
+
+### AI agents and IBM Bob
+
+| Setting | Default | Description |
+|---------|---------|-------------|
 | `ibmi-member-workspace.bob.researchTools` | `true` | **IBM Bob only.** Offer the IBM i research tools to Bob's agent. User settings only. See **Using with IBM Bob**. |
 | `ibmi-member-workspace.bob.whereUsedMaxLibraries` | `10` | **IBM Bob only.** How many search libraries `find_where_used` reads when Bob names none, from 1 to 25. |
 | `ibmi-member-workspace.agents.researchTools` | `true` | Let Claude Code, Codex (VS Code and IBM Bob) or GitHub Copilot (VS Code) use the IBM i research tools once you connect them. User settings only. See **Using with Claude Code, Codex and GitHub Copilot**. |
-| `ibmi-member-workspace.researchTools.allowDataSamples` | `false` | Let the `sample_file_data` research tool return the first rows of a file or table (at most 100) to Bob's agent, Claude Code, Codex or GitHub Copilot. The other tools return only metadata and source. User settings only. |
 | `ibmi-member-workspace.agents.whereUsedMaxLibraries` | `10` | **Claude Code, Codex and GitHub Copilot.** How many search libraries `find_where_used` reads when the agent names none, from 1 to 25. |
+| `ibmi-member-workspace.researchTools.allowDataSamples` | `false` | Let the `sample_file_data` research tool return the first rows of a file or table (at most 100) to Bob's agent, Claude Code, Codex or GitHub Copilot. The other tools return only metadata and source. User settings only. |
+
+### Local Change History
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `ibmi-member-workspace.gitIntegration` | `false` | Keep local checkpoints organized by work item in one Git repository per IBM i system. Does not upload or push changes. A workspace setting asks once before it turns this on. |
 
 ## Local Change History
 

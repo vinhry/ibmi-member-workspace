@@ -44,7 +44,7 @@ npm run compile && node --test --test-name-pattern="ignores a leading BOM" out/t
 - `src/gitService.ts`, `src/repositoryTrust.ts`: Local Change History over the `git` CLI.
 - `src/bobIde.ts`, `src/bobMcpServer.ts`, `src/bobMcpTools.ts`, `src/bobPrompts.ts`: IBM Bob support.
 - `src/test/*.test.ts`: unit tests, one file per vscode-free module, plus `manifest.test.ts`.
-- `readme.md` is the user manual, and `CHANGELOG.md` holds user-facing release notes. `HANDOFF.md` and `git-integration-plan.md` are historical design notes.
+- `readme.md` is the user manual, and `CHANGELOG.md` holds user-facing release notes. `docs/specs.md` holds the per-feature specs, the Rocket LMI shop constraints and the release history.
 
 ## Conventions
 

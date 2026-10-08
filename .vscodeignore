@@ -10,8 +10,6 @@ node_modules/**
 **/*.ts
 **/*.map
 eslint.config.mjs
-git-integration-plan.md
-HANDOFF.md
 *.vsix
 out/test/**
 .github/**
