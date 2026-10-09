@@ -60,10 +60,9 @@ export function registerAutoUpload(options: {
   context: vscode.ExtensionContext;
   service: CheckoutService;
   mergeHandler: MergeHandler;
-  pendingMergeBacks: Map<string, CheckedOutMember>;
   log: vscode.OutputChannel;
 }): AutoUploadScheduler {
-  const { context, service, mergeHandler, pendingMergeBacks, log } = options;
+  const { context, service, mergeHandler, log } = options;
 
   const scheduler = new AutoUploadScheduler({
     mode: getAutoUploadMode,
@@ -79,8 +78,8 @@ export function registerAutoUpload(options: {
       if (isConnectionReadOnly()) {
         return "the Code for IBM i connection is read-only";
       }
-      if ([...pendingMergeBacks.values()].some((pending) => pending.id === entry.id)) {
-        return "a Merge Back is open for it";
+      if (mergeHandler.hasOpenMerge(entry.id)) {
+        return "a Merge Back is open for it and not yet saved";
       }
       return undefined;
     },

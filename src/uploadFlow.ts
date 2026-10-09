@@ -14,10 +14,13 @@ export interface UploadFlowDeps {
   resolveSourceProblems(entry: CheckedOutMember, quiet: boolean): Promise<"upload" | undefined>;
   /** Asks what to do about changes made on the IBM i since checkout; undefined when dismissed. */
   resolveRemoteChange(entry: CheckedOutMember): Promise<"overwrite" | "diff" | undefined>;
+  /** Opens Merge Back for a member changed on the IBM i. */
   openMerge(entry: CheckedOutMember): Promise<void>;
+  /** Shows how the stored member differs from the local file after an altered upload. */
+  openCompare(entry: CheckedOutMember): Promise<void>;
   /** Reports a successful upload; `quiet` for automatic uploads, which only flash the status bar. */
   notifyUploaded(entry: CheckedOutMember, quiet: boolean): void;
-  /** Warns that the stored member differs from the local file; true when the user chose Merge Back. */
+  /** Warns that the stored member differs from the local file; true when the user chose to compare them. */
   notifyAltered(entry: CheckedOutMember): Promise<boolean>;
   notifyFailed(entry: CheckedOutMember, error?: unknown): void;
 }
@@ -73,7 +76,7 @@ export async function runUploadFlow(
         return "uploaded";
       case "uploaded-altered":
         if (await deps.notifyAltered(entry)) {
-          await deps.openMerge(entry);
+          await deps.openCompare(entry);
         }
         return "uploaded-altered";
       default:

@@ -42,7 +42,13 @@ Checkout is hidden by default for members in a protected (read-only) filter. Ena
 
 ### Merge Back to IBM i
 
-Right-click a checkout and choose **Merge Back to IBM i** to open a diff view — your local changes on the left, the live remote member on the right. Use VS Code's merge arrows to selectively apply changes, then save the remote side; Code for IBM i handles the upload and **preserves source dates**.
+When a member changed both locally and on the IBM i, right-click it and choose **Merge Back to IBM i**. It opens VS Code's merge editor with three texts: the member as it was when you checked it out (the base), the IBM i's copy now (left, **IBM i now**) and your local copy (right, **Local (yours)**). Changes that don't overlap are applied for you; only the lines both sides changed are left for you to decide, with the merge editor's **Accept** buttons. The result is your local file: save it, then **Upload to IBM i** (or upload on save) sends it, with the usual checks. Nothing is written to the IBM i by the merge itself.
+
+Once you save the merged result, the IBM i's copy you merged against becomes the checkout's baseline, so the upload doesn't ask again about those remote changes; a change made on the IBM i after that still does. If you save without having merged anything (the result is still your local copy), the baseline stays and the upload asks before overwriting the IBM i.
+
+When only one side changed there is nothing to merge, and Merge Back says so: **Upload** when only your copy changed, **Re-checkout** when only the IBM i's did, with **Compare with IBM i** either way. Members checked out before 1.8.10 have no base text yet; their Merge Back is a two-way comparison instead (the IBM i's copy on the left, yours on the right, editable), until a Refresh or an upload keeps one. The base text is kept in the workspace's extension storage, next to the checkout list.
+
+Two more comparisons are on the same menus: **Compare with IBM i** shows the IBM i's copy (left) against your local file (right, editable), for any checkout, and **Show Changes Since Checkout** shows what you changed since the member was checked out or last uploaded. Both work on a multi-selection, as does Merge Back, which asks which members to merge and opens a merge editor for each.
 
 ### Upload to IBM i
 
@@ -50,9 +56,9 @@ For a quick full replace, use **Upload to IBM i**. This overwrites the remote me
 
 When **Enable source dates** is on in Code for IBM i's connection settings (Source Code), the upload saves through Code for IBM i just like editing the member there: unchanged lines **keep their source dates**, and inserted or changed lines are dated today. Sequence numbers are renumbered, as when saving in the Code for IBM i editor. Line endings (CRLF or LF) in the local file do not affect the dates, and blank lines at the end of the local file are not uploaded, so the member never ends with empty records. When source dates are disabled, the confirmation warns that every date will be reset to 0.
 
-Before uploading, the extension checks whether the member has changed on the IBM i since you checked it out. If it has, you're asked to **Overwrite Anyway** or **Show Diff** instead of silently losing the remote changes. In a multi-member upload, members changed on the IBM i are skipped and listed in the IBM i Member Workspace output panel.
+Before uploading, the extension checks whether the member has changed on the IBM i since you checked it out. If it has, you're asked to **Overwrite Anyway** or **Merge Back** instead of silently losing the remote changes. In a multi-member upload, members changed on the IBM i are skipped and listed in the IBM i Member Workspace output panel.
 
-After uploading, the member is read back from the IBM i. If what was stored differs from your local file (for example, a line longer than the record length was truncated), you're warned and the checkout stays **Modified** so you can review it with Merge Back.
+After uploading, the member is read back from the IBM i. If what was stored differs from your local file (for example, a line longer than the record length was truncated), you're warned and the checkout stays **Modified** so you can review it with **Compare with IBM i**.
 
 #### Checks Before Uploading
 
@@ -75,11 +81,11 @@ Set `ibmi-member-workspace.autoUploadOnSave` in your user settings to upload a c
 - **`ask`**: after each save, a notification asks **Upload**, **Always Upload** (switches to `silent`), or **Not Now**.
 - **`silent`**: upload without asking. Success shows briefly in the status bar.
 
-Upload on save uses the same checks and messages as **Upload to IBM i**. If the member changed on the IBM i since checkout, you're always asked to **Overwrite Anyway** or **Show Diff**, even in `silent` mode. Lines too long for the source file and characters it can't store always ask too (see **Checks Before Uploading**). A save is skipped when:
+Upload on save uses the same checks and messages as **Upload to IBM i**. If the member changed on the IBM i since checkout, you're always asked to **Overwrite Anyway** or **Merge Back**, even in `silent` mode. Lines too long for the source file and characters it can't store always ask too (see **Checks Before Uploading**). A save is skipped when:
 
 - it has no local changes (for example, saving an unchanged file);
 - Code for IBM i is not connected to the checkout's system, or the connection is read-only;
-- a Merge Back is open for that member.
+- a Merge Back is open for that member and its result not yet saved.
 
 Rapid saves are combined into one upload. A save made while an upload is running is uploaded right after it. Only saves in the editor upload: files changed by other tools, such as AI agents or scripts, are never uploaded automatically.
 
@@ -101,9 +107,9 @@ Compares your local file, the live remote content, and the remote content as it 
 - **Conflict** — changed both locally *and* on the IBM i (re-checkout would discard your edits — review with Merge Back first)
 - **Deleted on IBM i** — the member no longer exists on the IBM i (deleted, renamed or moved). Your local copy is kept
 
-Local edits update the status to **Modified** automatically, whether you save in VS Code or another tool (an AI assistant, a script, git) writes the file. Saving the remote member from VS Code (from **Show Diff** or **Open Remote File**) also re-checks it. Changes made on the IBM i itself are detected by a refresh, which can also run in the background (see **Background Refresh**).
+Local edits update the status to **Modified** automatically, whether you save in VS Code or another tool (an AI assistant, a script, git) writes the file. Saving the remote member from VS Code (from **Open Remote File**) also re-checks it. Changes made on the IBM i itself are detected by a refresh, which can also run in the background (see **Background Refresh**).
 
-Refresh per member (inline icon or context menu, with a prompt to Re-checkout or review the diff when the remote has changed), per source file group, or for every checkout at once from the panel toolbar. Bulk refreshes show per-member progress and can be cancelled.
+Refresh per member (inline icon or context menu, with a prompt to Re-checkout, Compare with IBM i or Merge Back when the remote has changed), per source file group, or for every checkout at once from the panel toolbar. Bulk refreshes show per-member progress and can be cancelled.
 
 Refreshing a source file group or every checkout is quick: one query per source file asks the IBM i which members changed since they were last compared, and only those are downloaded. For the others, only the local copy is read. Refreshing one member, or a selection of members, always downloads and compares each one. Whatever a refresh found, an upload always checks the member on the IBM i first.
 
@@ -439,7 +445,7 @@ Right-click a checkout for comparison tools: **Select for Compare** (mark one ch
 With a checked-out member open, you don't need the side bar:
 
 - **Editor title buttons** — **Upload to IBM i**, **Merge Back to IBM i** and **Refresh Remote Status** are at the top right of the editor. A read-only reference copy shows only Refresh.
-- **Right-click menu** — the **IBM i Member** submenu in the editor and in VS Code's Explorer has Upload, Merge Back, Refresh, Run Action, Check In Through Change Management, Open Remote File, Find Dependencies, Find All Dependencies, Compare With, Copy Member Path and Reveal in File Explorer. **Bob, Investigate** and **Investigate with AI** are next to it, as before in the Explorer.
+- **Right-click menu** — the **IBM i Member** submenu in the editor and in VS Code's Explorer has Upload, Merge Back, Refresh, Run Action, Check In Through Change Management, Open Remote File, Find Dependencies, Find All Dependencies, Compare with IBM i, Show Changes Since Checkout, Compare With, Copy Member Path and Reveal in File Explorer. **Bob, Investigate** and **Investigate with AI** are next to it, as before in the Explorer.
 - **Command Palette** — the same commands are listed under **IBM i Member Workspace** while a checked-out member is the active editor.
 - **Keyboard** — `Ctrl+Alt+U` (`Cmd+Alt+U` on macOS) uploads the open member, `Ctrl+Alt+M` opens Merge Back, `Ctrl+Alt+R` refreshes its remote status and `Ctrl+Alt+K` checks it in through change management. Change them under **Keyboard Shortcuts** like any other.
 
@@ -447,7 +453,7 @@ Actions that write to the IBM i (Upload, Merge Back, Run Action, Check In) aren'
 
 ### Multi-Select
 
-The Checked Out Members panel supports selecting multiple checkouts at once. **Open Local/Remote File, Run Action, Upload to IBM i, Refresh Remote Status,** and **Discard Checkout** all work on a multi-selection, each confirming with a message naming how many members the action will affect before proceeding. Actions that only make sense for one item at a time (Merge Back, Compare With, Copy Member Path, Reveal in File Explorer) are single-selection only.
+The Checked Out Members panel supports selecting multiple checkouts at once. **Open Local/Remote File, Run Action, Upload to IBM i, Refresh Remote Status,** and **Discard Checkout** all work on a multi-selection, each confirming with a message naming how many members the action will affect before proceeding. **Merge Back** asks which of the selected members to merge, and **Compare with IBM i** and **Show Changes Since Checkout** open one comparison per member. Actions that only make sense for one item at a time (Compare With, Copy Member Path, Reveal in File Explorer) are single-selection only.
 
 ## Settings
 
@@ -543,7 +549,7 @@ Every checkout belongs to a work item, so members from different tickets are nev
 - The first checkout in each VS Code session asks you to confirm the active work item, so a checkout never goes into the previous ticket by accident. Choosing a work item with **Switch Work Item** counts as confirming it.
 - A new work item starts empty: it does not include another work item's members.
 
-Before switching, the extension asks you to save open editors and checkpoint local changes. It never discards changes automatically. Work items cannot be changed while a checkout, upload, or Merge Back is in progress. Each work item has its own checked-out-member list and synchronization baselines.
+Before switching, the extension asks you to save open editors and checkpoint local changes. It never discards changes automatically. Work items cannot be changed while a checkout or upload is in progress, or while a Merge Back is open with its result not yet saved. Each work item has its own checked-out-member list and synchronization baselines.
 
 #### How a checkout chooses its work item
 
@@ -642,7 +648,7 @@ The following events save a checkpoint on the active work item:
 | Member uploaded to IBM i | `upload: LIBRARY/SOURCEFILE(MEMBER) to SYSTEM` |
 | Several members uploaded together | `upload: N members to SYSTEM` (one checkpoint for the batch) |
 | Member re-checked out | `recheckout: LIBRARY/SOURCEFILE(MEMBER) from SYSTEM` |
-| Merge-back saved | `merge-back: LIBRARY/SOURCEFILE(MEMBER) to SYSTEM` |
+| Merge Back result saved | `merge: LIBRARY/SOURCEFILE(MEMBER) with SYSTEM` |
 | Checkout discarded | `discard: LIBRARY/SOURCEFILE(MEMBER)` |
 | Members moved to another work item | `move: … from WORKITEM` in the target, `move: … to WORKITEM` in the source |
 

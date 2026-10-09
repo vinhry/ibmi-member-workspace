@@ -1,35 +1,74 @@
 import * as vscode from "vscode";
 import { CheckoutService } from "../checkoutService";
-import { getSystemName, memberUri, sourceDatesEnabled } from "../codeForIBMi";
+import { getSystemName, sourceDatesEnabled } from "../codeForIBMi";
 import { LocalFileMissingError, RemoteMemberMissingError, errorMessage } from "../errors";
-import { mergeDocumentKey } from "../mergeHandler";
-import { countLocalChanges, resolveMember, resolveMemberSelections, saveDirtyLocalFiles } from "../prompts";
+import { selectMergeCandidates } from "../mergePreparation";
+import { countLocalChanges, resolveMemberSelections, saveDirtyLocalFiles } from "../prompts";
 import { CheckedOutMember, RefreshTally, TreeItemType, formatMemberPath, isReferenceCopy } from "../types";
 import { CommandContext } from "./context";
 import { reportRemoteMissing } from "./remoteMissing";
 import { offerCheckin, uploadWithConflictHandling } from "./uploadMember";
 
 export function registerSyncCommands(ctx: CommandContext): void {
-  const { context, service, mergeHandler, pendingMergeBacks, log } = ctx;
+  const { context, service, mergeHandler, log } = ctx;
+
+  /** Runs a per-member comparison, reporting a missing local file or member the usual way. */
+  const forEachMember = async (
+    entries: CheckedOutMember[],
+    what: string,
+    run: (entry: CheckedOutMember) => Promise<void>
+  ) => {
+    for (const entry of entries) {
+      try {
+        await run(entry);
+      } catch (err) {
+        if (err instanceof LocalFileMissingError) {
+          await handleMissingLocalFile(service, entry);
+        } else if (err instanceof RemoteMemberMissingError) {
+          await reportRemoteMissing(service, [entry]);
+        } else {
+          vscode.window.showErrorMessage(`${what} failed for ${formatMemberPath(entry)}: ${errorMessage(err)}`);
+        }
+      }
+    }
+  };
 
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "ibmi-member-workspace.mergeBack",
-      async (item: TreeItemType) => {
-        const entry = resolveMember(service, item);
-        if (!entry) {
+      async (item: TreeItemType, allSelections?: TreeItemType[]) => {
+        const entries = resolveMemberSelections(service, item, allSelections).map((s) => s.entry);
+        if (entries.length === 0) {
           return;
         }
-        const key = mergeDocumentKey(memberUri(entry, { editable: true }));
-        try {
-          pendingMergeBacks.set(key, entry);
-          await mergeHandler.openMergeDiff(entry);
-        } catch (err) {
-          pendingMergeBacks.delete(key);
-          vscode.window.showErrorMessage(
-            `Merge failed: ${errorMessage(err)}`
-          );
+        const chosen = entries.length === 1 ? entries : await pickMembersToMerge(entries);
+        await forEachMember(chosen, "Merge Back", (entry) => mergeHandler.openMergeEditor(entry));
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "ibmi-member-workspace.compareWithRemote",
+      async (item: TreeItemType, allSelections?: TreeItemType[]) => {
+        const entries = resolveMemberSelections(service, item, allSelections).map((s) => s.entry);
+        if (!(await saveDirtyLocalFiles(entries))) {
+          return;
         }
+        await forEachMember(entries, "Compare with IBM i", (entry) => mergeHandler.compareWithRemote(entry));
+      }
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      "ibmi-member-workspace.showChangesSinceCheckout",
+      async (item: TreeItemType, allSelections?: TreeItemType[]) => {
+        const entries = resolveMemberSelections(service, item, allSelections).map((s) => s.entry);
+        if (!(await saveDirtyLocalFiles(entries))) {
+          return;
+        }
+        await forEachMember(entries, "Show Changes Since Checkout", (entry) => mergeHandler.showChangesSinceCheckout(entry));
       }
     )
   );
@@ -289,7 +328,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
               const choice = await vscode.window.showInformationMessage(
                 `${memberPath} has changed on the IBM i. Your local copy has no changes, so re-checking out is safe.`,
                 "Re-checkout",
-                "Show Diff"
+                "Compare with IBM i"
               );
               if (choice === "Re-checkout") {
                 if (await confirmRecheckout(service, entry)) {
@@ -298,8 +337,8 @@ export function registerSyncCommands(ctx: CommandContext): void {
                     `Re-checked out ${memberPath} from IBM i.`
                   );
                 }
-              } else if (choice === "Show Diff") {
-                await mergeHandler.openMergeDiff(entry);
+              } else if (choice === "Compare with IBM i") {
+                await mergeHandler.compareWithRemote(entry);
               }
             } else {
               const choice = await vscode.window.showWarningMessage(
@@ -318,7 +357,7 @@ export function registerSyncCommands(ctx: CommandContext): void {
                   `Re-checked out ${memberPath} from IBM i.`
                 );
               } else if (choice === "Merge Back") {
-                await mergeHandler.openMergeDiff(entry);
+                await mergeHandler.openMergeEditor(entry);
               }
             }
           } catch (err) {
@@ -407,6 +446,37 @@ export function registerSyncCommands(ctx: CommandContext): void {
       }
     )
   );
+}
+
+/**
+ * Which of a multi-selection to merge: members changed on the IBM i are preselected; reference
+ * copies and members deleted on the IBM i can't be merged and are left out.
+ */
+async function pickMembersToMerge(entries: CheckedOutMember[]): Promise<CheckedOutMember[]> {
+  const candidates = selectMergeCandidates(entries);
+  const skipped = candidates.filter((candidate) => candidate.skip);
+  const items = candidates
+    .filter((candidate) => !candidate.skip)
+    .map((candidate) => ({
+      label: formatMemberPath(candidate.entry),
+      description: candidate.entry.status,
+      picked: candidate.picked,
+      entry: candidate.entry,
+    }));
+  if (items.length === 0) {
+    vscode.window.showWarningMessage(
+      "None of the selected members can be merged: reference copies are read-only, and a member deleted on the IBM i has nothing to merge with."
+    );
+    return [];
+  }
+  const chosen = await vscode.window.showQuickPick(items, {
+    canPickMany: true,
+    title: "Merge Back",
+    placeHolder: skipped.length > 0
+      ? `Members to merge (${skipped.length} left out: reference copies or deleted on the IBM i)`
+      : "Members to merge; each opens in its own merge editor",
+  });
+  return chosen?.map((item) => item.entry) ?? [];
 }
 
 async function handleMissingLocalFile(

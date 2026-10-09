@@ -41,6 +41,8 @@ import {
   statusAfterLocalSave,
   statusAfterUpload,
 } from "./sync";
+import { BASELINE_DIR, BaselineFiles, BaselineStore, referencedBaselineHashes } from "./baselineStore";
+import { MergeSide, baselineAfterMergeSave } from "./mergePreparation";
 import {
   GitOperationResult,
   GitService,
@@ -108,6 +110,8 @@ export interface CheckoutOptions {
 export class CheckoutService implements vscode.Disposable {
   private readonly storageUri: vscode.Uri | undefined;
   private readonly store: CheckoutIndexStore;
+  /** The text behind each checkout's baseline hash, for three-way Merge Back. */
+  private readonly baselines: BaselineStore;
 
   private readonly repositoryTrust: RepositoryTrust;
   /** Local Change History's work items and checkpoints; the service delegates to it. */
@@ -134,6 +138,10 @@ export class CheckoutService implements vscode.Disposable {
       showWarning: (message) => void vscode.window.showWarningMessage(message),
       showError: (message) => void vscode.window.showErrorMessage(message),
     });
+    this.baselines = new BaselineStore(
+      this.storageUri ? workspaceBaselineFiles(this.storageUri) : undefined,
+      (message) => this.log.appendLine(message)
+    );
     this.history = new WorkItemHistory({
       git: gitService,
       files: {
@@ -196,6 +204,7 @@ export class CheckoutService implements vscode.Disposable {
       this.ensureSystemState(system);
       await this.store.save();
     }
+    await this.pruneBaselines();
   }
 
   dispose(): void {
@@ -395,25 +404,65 @@ export class CheckoutService implements vscode.Disposable {
     return this.track(() => this.history.moveEntries(system, entries, target, options.create));
   }
 
-  recordMergeBack(entry: CheckedOutMember, content: string): Promise<GitOperationResult> {
-    return this.track(() => this.recordMergeBackNow(entry, content));
+  /**
+   * Records that the merge editor's result (`savedText`) was saved over the local copy of a Merge
+   * Back against `remote`. The IBM i's text becomes the baseline once something was merged (see
+   * `baselineAfterMergeSave`), so the upload that follows doesn't ask about those remote changes;
+   * the member is then "modified" (or in sync) rather than in conflict.
+   */
+  adoptMergeBaseline(
+    entry: CheckedOutMember,
+    remote: MergeSide,
+    localSnapshotHash: string,
+    savedText: string
+  ): Promise<GitOperationResult> {
+    return this.track(async () => {
+      assertEditable(entry);
+      await this.assertEntryInActiveWorkItem(entry);
+      const savedHash = hashContent(savedText);
+      const next = baselineAfterMergeSave(savedHash, localSnapshotHash, remote.hash, entry.remoteHashAtCheckout);
+      if (next !== entry.remoteHashAtCheckout) {
+        await this.setBaseline(entry, next, remote.text);
+      }
+      entry.status = classifyStatus(savedHash, remote.hash, entry.remoteHashAtCheckout);
+      entry.lastCheckedAt = new Date().toISOString();
+      this.log.appendLine(
+        `[merge] ${formatMemberPath(entry)} saved from the merge editor` +
+        `  baseline=${entry.remoteHashAtCheckout.substring(0, 12)}  → ${entry.status}`
+      );
+      await this.persist();
+      return this.saveCheckpoint(entry.system,
+        [entry.localPath],
+        `merge: ${formatMemberPath(entry)} with ${entry.system}`
+      );
+    });
   }
 
-  private async recordMergeBackNow(entry: CheckedOutMember, content: string): Promise<GitOperationResult> {
-    assertEditable(entry);
-    await this.assertEntryInActiveWorkItem(entry);
+  /** The member's text on the IBM i now, for Merge Back and Compare with IBM i. */
+  readRemoteText(entry: CheckedOutMember, signal?: AbortSignal): Promise<string> {
+    this.assertConnectedTo(entry.system);
+    return this.downloadForEntry(entry, signal);
+  }
+
+  /** The local copy's text, never read through a link. */
+  readLocalText(entry: CheckedOutMember): Promise<string> {
     this.assertLocalPathSafe(entry.localPath);
-    const localUri = vscode.Uri.file(entry.localPath);
-    await vscode.workspace.fs.writeFile(localUri, Buffer.from(content, "utf-8"));
-    this.setBaseline(entry, hashContent(content));
-    delete entry.remoteSeen;
-    entry.lastCheckedAt = new Date().toISOString();
-    entry.status = "merged";
-    await this.persist();
-    return this.saveCheckpoint(entry.system,
-      [entry.localPath],
-      `merge-back: ${formatMemberPath(entry)} to ${entry.system}`
-    );
+    return this.readLocal(vscode.Uri.file(entry.localPath));
+  }
+
+  /**
+   * The text the checkout's baseline hash stands for, when it is kept. A `candidate` (the live
+   * remote or local text) that hashes to the baseline is kept for next time: checkouts made before
+   * 1.8.10 have a hash but no text.
+   */
+  async baselineText(entry: CheckedOutMember, candidates: readonly string[] = []): Promise<string | undefined> {
+    const before = entry.remoteHashAtCheckout;
+    await this.upgradeBaseline(entry, candidates);
+    if (entry.remoteHashAtCheckout !== before) {
+      await this.persist();
+    }
+    await this.baselines.ensure(entry.remoteHashAtCheckout, candidates);
+    return this.baselines.read(entry.remoteHashAtCheckout);
   }
 
   /**
@@ -662,7 +711,7 @@ export class CheckoutService implements vscode.Disposable {
     entry.localPath = localPath;
 
     const hash = hashContent(content);
-    this.setBaseline(entry, hash);
+    await this.setBaseline(entry, hash, content);
 
     this.log.appendLine(
       `[checkout] ${library}/${sourceFile}/${memberName}  remoteHashAtCheckout=${hash.substring(0, 12)}`
@@ -739,12 +788,14 @@ export class CheckoutService implements vscode.Disposable {
       throw err;
     }
     const localContent = await this.readLocal(localUri);
-    this.upgradeBaseline(entry, [remoteContent, localContent]);
+    await this.upgradeBaseline(entry, [remoteContent, localContent]);
     const remoteHash = hashContent(remoteContent);
     const localHash = hashContent(localContent);
 
     const status = classifyStatus(localHash, remoteHash, entry.remoteHashAtCheckout);
-    this.adoptNextBaseline(entry, localHash, remoteHash);
+    await this.adoptNextBaseline(entry, localHash, remoteHash, remoteContent);
+    // A checkout made before baselines were kept gets its text from whichever side is still the base.
+    await this.baselines.ensure(entry.remoteHashAtCheckout, [remoteContent, localContent]);
     // Read again in case the source file changed; one query per source file per connection.
     await this.fillSourceLayout(entry, { replace: true });
 
@@ -772,9 +823,12 @@ export class CheckoutService implements vscode.Disposable {
    */
   private async refreshFromSeen(entry: CheckedOutMember, remoteHash: string): Promise<RemoteStatus> {
     await this.assertEntryInActiveWorkItem(entry);
-    const localHash = hashContent(await this.readLocal(vscode.Uri.file(entry.localPath)));
+    const localContent = await this.readLocal(vscode.Uri.file(entry.localPath));
+    const localHash = hashContent(localContent);
     const status = classifyStatus(localHash, remoteHash, entry.remoteHashAtCheckout);
-    this.adoptNextBaseline(entry, localHash, remoteHash);
+    // When local and remote match, the local text is the remote's.
+    await this.adoptNextBaseline(entry, localHash, remoteHash, localContent);
+    await this.baselines.ensure(entry.remoteHashAtCheckout, [localContent]);
     this.log.appendLine(
       `[refresh] ${entry.library}/${entry.sourceFile}/${entry.memberName}  unchanged on the IBM i` +
       `  local=${localHash.substring(0, 12)}  → ${status}`
@@ -871,7 +925,7 @@ export class CheckoutService implements vscode.Disposable {
       await this.setReadOnly(entry.localPath, true);
     }
 
-    this.setBaseline(entry, hashContent(content));
+    await this.setBaseline(entry, hashContent(content), content);
     delete entry.remoteSeen;
     entry.checkedOutAt = new Date().toISOString();
     entry.lastCheckedAt = entry.checkedOutAt;
@@ -926,9 +980,10 @@ export class CheckoutService implements vscode.Disposable {
 
     if (!options?.overwriteRemoteChanges) {
       const remoteContent = await this.downloadForEntry(entry);
-      this.upgradeBaseline(entry, [remoteContent, localContent]);
+      await this.upgradeBaseline(entry, [remoteContent, localContent]);
       const remoteHash = hashContent(remoteContent);
-      this.adoptNextBaseline(entry, localHash, remoteHash);
+      await this.adoptNextBaseline(entry, localHash, remoteHash, remoteContent);
+      await this.baselines.ensure(entry.remoteHashAtCheckout, [remoteContent, localContent]);
       if (remoteHash !== entry.remoteHashAtCheckout) {
         this.log.appendLine(
           `[upload] ${formatMemberPath(entry)} changed on the remote since checkout — not uploaded`
@@ -962,8 +1017,9 @@ export class CheckoutService implements vscode.Disposable {
     }
 
     let after = statusAfterUpload(localHash, localHash);
+    let storedContent: string | undefined;
     try {
-      const storedContent = await this.download(entry.library, entry.sourceFile, entry.memberName);
+      storedContent = await this.download(entry.library, entry.sourceFile, entry.memberName);
       after = statusAfterUpload(localHash, hashContent(storedContent));
     } catch (err) {
       this.log.appendLine(
@@ -977,7 +1033,8 @@ export class CheckoutService implements vscode.Disposable {
       );
     }
 
-    this.setBaseline(entry, after.baseline);
+    // Without a read-back the baseline is the local text, which was sent as it is.
+    await this.setBaseline(entry, after.baseline, storedContent ?? localContent);
     // The upload changed the member's stamp; the next refresh compares it in full.
     delete entry.remoteSeen;
     entry.lastCheckedAt = new Date().toISOString();
@@ -1255,7 +1312,7 @@ export class CheckoutService implements vscode.Disposable {
     const localUri = vscode.Uri.file(entry.localPath);
     try {
       const localContent = await this.readLocal(localUri);
-      this.upgradeBaseline(entry, [localContent]);
+      await this.upgradeBaseline(entry, [localContent]);
       return hashContent(localContent) !== entry.remoteHashAtCheckout;
     } catch (err) {
       if (err instanceof LocalFileMissingError) {
@@ -1315,6 +1372,15 @@ export class CheckoutService implements vscode.Disposable {
         .filter((entry) => !ids.has(entry.id));
     }
     await this.persist();
+    await this.pruneBaselines();
+  }
+
+  /** Drops the baseline texts no checkout refers to any more. */
+  private async pruneBaselines(): Promise<void> {
+    const deleted = await this.baselines.prune(referencedBaselineHashes(this.index));
+    if (deleted > 0) {
+      this.log.appendLine(`[baseline] Removed ${deleted} baseline text(s) no checkout uses`);
+    }
   }
 
   /**
@@ -1342,17 +1408,23 @@ export class CheckoutService implements vscode.Disposable {
     }
   }
 
-  /** Records a baseline computed with the current {@link hashContent}. */
-  private setBaseline(entry: CheckedOutMember, hash: string): void {
+  /**
+   * Records a baseline computed with the current {@link hashContent}, keeping its text for Merge
+   * Back when given (the text must hash to it).
+   */
+  private async setBaseline(entry: CheckedOutMember, hash: string, content?: string): Promise<void> {
     entry.remoteHashAtCheckout = hash;
     entry.hashVersion = HASH_VERSION;
+    if (content !== undefined) {
+      await this.baselines.write(hash, content);
+    }
   }
 
-  /** Adopts the shared content as the new baseline when local and remote match. */
-  private adoptNextBaseline(entry: CheckedOutMember, localHash: string, remoteHash: string): void {
+  /** Adopts the shared content (`sharedText`, hashing to `remoteHash`) as the new baseline when local and remote match. */
+  private async adoptNextBaseline(entry: CheckedOutMember, localHash: string, remoteHash: string, sharedText: string): Promise<void> {
     const next = nextBaseline(localHash, remoteHash, entry.remoteHashAtCheckout);
     if (next !== entry.remoteHashAtCheckout) {
-      this.setBaseline(entry, next);
+      await this.setBaseline(entry, next, sharedText);
     }
   }
 
@@ -1363,13 +1435,13 @@ export class CheckoutService implements vscode.Disposable {
    * sides changed and the legacy baseline correctly yields "conflict" until a
    * Merge Back or matching content replaces it.
    */
-  private upgradeBaseline(entry: CheckedOutMember, texts: string[]): void {
+  private async upgradeBaseline(entry: CheckedOutMember, texts: readonly string[]): Promise<void> {
     if (entry.hashVersion === HASH_VERSION) {
       return;
     }
     const migrated = migrateLegacyBaseline(entry.remoteHashAtCheckout, texts);
     if (migrated !== undefined) {
-      this.setBaseline(entry, migrated);
+      await this.setBaseline(entry, migrated, texts.find((text) => hashContent(text) === migrated));
       this.log.appendLine(`[status] Upgraded the sync baseline of ${formatMemberPath(entry)}`);
     }
   }
@@ -1389,7 +1461,7 @@ export class CheckoutService implements vscode.Disposable {
   }
 
   /** Refuses a checkout path that leaves the checkout folder or passes through a link inside it. */
-  private assertLocalPathSafe(localPath: string): void {
+  assertLocalPathSafe(localPath: string): void {
     const root = this.getCheckoutRoot();
     if (!root) {
       throw new Error("Choose a checkout folder first.");
@@ -1493,6 +1565,38 @@ export function assertEditable(entry: CheckedOutMember): void {
   if (isReferenceCopy(entry)) {
     throw new ReferenceCopyError(formatMemberPath(entry));
   }
+}
+
+/** The baseline texts' files in the workspace's extension storage. */
+function workspaceBaselineFiles(folder: vscode.Uri): BaselineFiles {
+  const dir = vscode.Uri.joinPath(folder, BASELINE_DIR);
+  const file = (name: string) => vscode.Uri.joinPath(dir, name);
+  return {
+    exists: async (name) => {
+      try {
+        await vscode.workspace.fs.stat(file(name));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    read: async (name) => vscode.workspace.fs.readFile(file(name)),
+    write: async (name, data) => {
+      await vscode.workspace.fs.createDirectory(dir);
+      await vscode.workspace.fs.writeFile(file(name), data);
+    },
+    rename: async (from, to) => vscode.workspace.fs.rename(file(from), file(to), { overwrite: true }),
+    delete: async (name) => vscode.workspace.fs.delete(file(name), { useTrash: false }),
+    list: async () => {
+      try {
+        return (await vscode.workspace.fs.readDirectory(dir))
+          .filter(([, type]) => type === vscode.FileType.File)
+          .map(([name]) => name);
+      } catch {
+        return [];
+      }
+    },
+  };
 }
 
 /** The checkout index's files in the workspace's extension storage. */

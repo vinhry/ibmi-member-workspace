@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { CheckoutService } from "./checkoutService";
 import { CheckoutTreeProvider } from "./checkoutTreeProvider";
-import { MergeHandler, mergeDocumentKey } from "./mergeHandler";
+import { MergeHandler } from "./mergeHandler";
 import { GitService } from "./gitService";
 import { isBobProduct } from "./bobIde";
 import { getSystemName, onConnectionChange, resetWhereUsedSnapshots } from "./codeForIBMi";
@@ -11,7 +11,7 @@ import { LocalFileWatcher } from "./localFileWatcher";
 import { registerSourceDiagnostics } from "./sourceDiagnostics";
 import { CheckoutDecorations } from "./checkoutDecorations";
 import { extractMemberInfo } from "./memberInfo";
-import { CheckedOutMember, formatMemberPath, isDefaultWorkItem } from "./types";
+import { formatMemberPath, isDefaultWorkItem } from "./types";
 import {
   offerCheckoutFolderSetup,
   registerCheckoutFolderCommands,
@@ -56,7 +56,9 @@ export async function activate(
   context.subscriptions.push(treeProvider);
   const decorations = new CheckoutDecorations(service);
   context.subscriptions.push(decorations, vscode.window.registerFileDecorationProvider(decorations));
-  const mergeHandler = new MergeHandler();
+  const mergeHandler = new MergeHandler(service, context.storageUri, log);
+  context.subscriptions.push(mergeHandler);
+  await mergeHandler.initialize();
 
   const treeView = vscode.window.createTreeView("ibmi-member-workspace.checkoutView", {
     treeDataProvider: treeProvider,
@@ -186,10 +188,8 @@ export async function activate(
   context.subscriptions.push(fileWatcher);
   fileWatcher.setRoot(service.getCheckoutRoot());
 
-  // Only documents opened by the explicit Merge Back command are tracked here.
-  const pendingMergeBacks = new Map<string, CheckedOutMember>();
   // Only editor saves upload; files written by other tools (see LocalFileWatcher) never do.
-  const autoUpload = registerAutoUpload({ context, service, mergeHandler, pendingMergeBacks, log });
+  const autoUpload = registerAutoUpload({ context, service, mergeHandler, log });
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (doc) => {
       if (doc.uri.scheme === "file") {
@@ -202,34 +202,16 @@ export async function activate(
         } catch (err) {
           log.appendLine(`[status] Could not update ${formatMemberPath(entry)}: ${errorMessage(err)}`);
         }
+        // The first save of a Merge Back's result adopts the IBM i's text as the baseline, before
+        // upload on save sends the result.
+        await mergeHandler.onDidSaveLocal(entry, doc.getText());
         autoUpload.schedule(doc.uri.fsPath);
         return;
       }
-      if (doc.uri.scheme !== "member") {
-        return;
-      }
-      const entry = pendingMergeBacks.get(mergeDocumentKey(doc.uri));
-      if (!entry) {
-        // The remote member was saved some other way, e.g. from Show Diff.
+      if (doc.uri.scheme === "member") {
+        // The member was saved from Open Remote File (or Code for IBM i's own editor).
         await refreshAfterRemoteSave(service, doc.uri, log);
-        return;
       }
-      pendingMergeBacks.delete(mergeDocumentKey(doc.uri));
-      try {
-        const result = await service.recordMergeBack(entry, doc.getText());
-        if (result.status !== "success" && result.status !== "noChanges") {
-          vscode.window.showWarningMessage(result.message ?? "The merge was saved, but its local checkpoint failed.");
-        }
-      } catch (err) {
-        vscode.window.showWarningMessage(
-          `The remote member was saved, but its local checkout was not updated: ${errorMessage(err)}`
-        );
-      }
-    })
-  );
-  context.subscriptions.push(
-    vscode.workspace.onDidCloseTextDocument((doc) => {
-      pendingMergeBacks.delete(mergeDocumentKey(doc.uri));
     })
   );
 
@@ -242,7 +224,6 @@ export async function activate(
     fileWatcher,
     gitService,
     refreshGitStatusBar,
-    pendingMergeBacks,
     log,
     dependencyAvailability,
   };

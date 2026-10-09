@@ -64,15 +64,16 @@ export function uploadWithConflictHandling(
         `${memberPath} has changed on the IBM i since it was checked out. Uploading will overwrite those remote changes.`,
         {
           modal: true,
-          detail: "Use Show Diff to review and combine the remote changes instead.",
+          detail: "Use Merge Back to review and combine the remote changes with yours instead.",
         },
         "Overwrite Anyway",
-        "Show Diff"
+        "Merge Back"
       );
-      return choice === "Overwrite Anyway" ? "overwrite" : choice === "Show Diff" ? "diff" : undefined;
+      return choice === "Overwrite Anyway" ? "overwrite" : choice === "Merge Back" ? "diff" : undefined;
     },
 
-    openMerge: (member) => mergeHandler.openMergeDiff(member),
+    openMerge: (member) => mergeHandler.openMergeEditor(member),
+    openCompare: (member) => mergeHandler.compareWithRemote(member),
 
     notifyUploaded: (member, isQuiet) => {
       log.appendLine(`[upload] Uploaded ${memberPath}`);
@@ -86,8 +87,8 @@ export function uploadWithConflictHandling(
     notifyAltered: async () =>
       (await vscode.window.showWarningMessage(
         `Uploaded ${memberPath}, but the IBM i copy differs from your local file (for example, lines longer than the record length were truncated).`,
-        "Merge Back"
-      )) === "Merge Back",
+        "Compare with IBM i"
+      )) === "Compare with IBM i",
 
     notifyFailed: (member, error) => {
       if (error === undefined) {

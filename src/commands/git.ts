@@ -466,9 +466,9 @@ async function switchWorkItemFlow(
 }
 
 function canChangeWorkItem(ctx: CommandContext): boolean {
-  if (ctx.pendingMergeBacks.size > 0) {
+  if (ctx.mergeHandler.openMergeCount > 0) {
     vscode.window.showWarningMessage(
-      "Finish or close the open Merge Back comparison before changing work items."
+      "Save or close the open Merge Back before changing work items."
     );
     return false;
   }

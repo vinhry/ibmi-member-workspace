@@ -47,6 +47,9 @@ function fakeDeps(options: {
       calls.push("resolveRemoteChange");
       return options.remoteChoice;
     },
+    openCompare: async () => {
+      calls.push("openCompare");
+    },
     openMerge: async () => {
       calls.push("openMerge");
     },
@@ -98,7 +101,7 @@ describe("runUploadFlow", () => {
   it("offers Merge Back when the IBM i stored something different", async () => {
     const accepted = fakeDeps({ results: ["uploaded-altered"], mergeBack: true });
     assert.equal(await runUploadFlow(entry, accepted.deps), "uploaded-altered");
-    assert.deepEqual(accepted.calls, ["upload", "notifyAltered", "openMerge"]);
+    assert.deepEqual(accepted.calls, ["upload", "notifyAltered", "openCompare"]);
 
     const dismissed = fakeDeps({ results: ["uploaded-altered"] });
     assert.equal(await runUploadFlow(entry, dismissed.deps), "uploaded-altered");

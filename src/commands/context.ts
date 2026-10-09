@@ -5,7 +5,7 @@ import { ProviderAvailabilityCache } from "../dependencySources";
 import { GitService } from "../gitService";
 import { LocalFileWatcher } from "../localFileWatcher";
 import { MergeHandler } from "../mergeHandler";
-import { CheckedOutMember, TreeItemType } from "../types";
+import { TreeItemType } from "../types";
 
 /** Everything command handlers need, created once in `activate`. */
 export interface CommandContext {
@@ -17,8 +17,6 @@ export interface CommandContext {
   fileWatcher: LocalFileWatcher;
   gitService: GitService;
   refreshGitStatusBar: () => Promise<void>;
-  /** Member documents opened by Merge Back, keyed by `mergeDocumentKey`, awaiting their save. */
-  pendingMergeBacks: Map<string, CheckedOutMember>;
   log: vscode.OutputChannel;
   /** Which dependency providers work on each system, checked once per connection. */
   dependencyAvailability: ProviderAvailabilityCache;
