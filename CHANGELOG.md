@@ -1,5 +1,10 @@
 # Change Log
 
+## 1.8.11 - 2026-10-09
+
+- **Research on IBM i, for you.** The questions the AI research tools answer are on the menus too: right-click a member in Checked Out Members, Find Member, the Object Browser, the editor or the Explorer for **Find Where Used…** (with **Bring for Reference** for the programs found), **Describe File…**, **Describe Program…**, **Service Program Exports…** and **Show Job Log…**. From the Command Palette each asks for a name, suggesting the member open in the editor. Results open as read-only documents you can search and copy. See **Research on IBM i** in the README.
+- **Two more research tools for Bob, Claude Code, Codex and GitHub Copilot.** `sql_query` runs one read-only SQL statement (SELECT, WITH or VALUES) and returns its rows; it refuses anything that changes data or objects, CALL, SET and functions that run commands or reach other systems, adds a row limit, and, like `sample_file_data`, works only while `ibmi-member-workspace.researchTools.allowDataSamples` is on. `read_spool_file` reads a spooled file, by default the newest one of a name for your user profile (a compile listing is named after its program), so an agent can read why a compile failed; it can also list the matching spooled files. The rules files written for the agents mention both.
+
 ## 1.8.10 - 2026-10-09
 
 - **Merge Back is a real three-way merge.** For a member changed both locally and on the IBM i, **Merge Back to IBM i** now opens VS Code's merge editor with the member as it was at checkout, the IBM i's copy now (**IBM i now**) and yours (**Local (yours)**). Changes that don't overlap are applied for you; only the lines both sides changed are left to decide. The result is your local file: save it, then Upload (or upload on save) sends it through the usual checks. The merge itself no longer writes to the IBM i, so the line-length and CCSID checks always apply. Once the result is saved, the IBM i's copy you merged against becomes the baseline, so the upload doesn't ask again about those remote changes. When only one side changed, Merge Back offers **Upload** or **Re-checkout** instead, since there is nothing to merge.

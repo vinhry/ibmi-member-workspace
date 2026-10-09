@@ -2,7 +2,7 @@
   "name": "ibmi-member-workspace",
   "displayName": "IBM i Member Workspace",
   "description": "Work with IBM i source members locally, compare changes, and synchronize them safely. Works with Code for IBM i.",
-  "version": "1.8.10",
+  "version": "1.8.11",
   "publisher": "vinhry",
   "author": "Vinhry",
   "license": "GPL-3.0",
@@ -62,6 +62,10 @@
       {
         "id": "ibmi-member-workspace.editorCompareWith",
         "label": "Compare With"
+      },
+      {
+        "id": "ibmi-member-workspace.research",
+        "label": "Research on IBM i"
       }
     ],
     "viewsContainers": {
@@ -161,6 +165,36 @@
         "command": "ibmi-member-workspace.findAllDependencies",
         "title": "Find All Dependencies…",
         "category": "IBM i Member Workspace"
+      },
+      {
+        "command": "ibmi-member-workspace.research.findWhereUsed",
+        "title": "Find Where Used…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(references)"
+      },
+      {
+        "command": "ibmi-member-workspace.research.describeFile",
+        "title": "Describe File…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(table)"
+      },
+      {
+        "command": "ibmi-member-workspace.research.describeObject",
+        "title": "Describe Program…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(symbol-method)"
+      },
+      {
+        "command": "ibmi-member-workspace.research.serviceProgramExports",
+        "title": "Service Program Exports…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(symbol-interface)"
+      },
+      {
+        "command": "ibmi-member-workspace.research.jobLog",
+        "title": "Show Job Log…",
+        "category": "IBM i Member Workspace",
+        "icon": "$(output)"
       },
       {
         "command": "ibmi-member-workspace.findMember",
@@ -524,6 +558,26 @@
           "when": "ibmi-member-workspace:checkoutActive"
         },
         {
+          "command": "ibmi-member-workspace.research.findWhereUsed",
+          "when": "code-for-ibmi:connected"
+        },
+        {
+          "command": "ibmi-member-workspace.research.describeFile",
+          "when": "code-for-ibmi:connected"
+        },
+        {
+          "command": "ibmi-member-workspace.research.describeObject",
+          "when": "code-for-ibmi:connected"
+        },
+        {
+          "command": "ibmi-member-workspace.research.serviceProgramExports",
+          "when": "code-for-ibmi:connected"
+        },
+        {
+          "command": "ibmi-member-workspace.research.jobLog",
+          "when": "code-for-ibmi:connected"
+        },
+        {
           "command": "ibmi-member-workspace.findMember",
           "when": "code-for-ibmi:connected"
         },
@@ -714,6 +768,11 @@
           "group": "ibmiCheckout@3"
         },
         {
+          "submenu": "ibmi-member-workspace.research",
+          "when": "view == objectBrowser && viewItem =~ /^member/",
+          "group": "ibmiCheckout@4"
+        },
+        {
           "command": "ibmi-member-workspace.checkoutAllMembers",
           "when": "view == objectBrowser && (viewItem == SPF || (viewItem == SPF_readonly && config.ibmi-member-workspace.allowCheckoutFromProtectedFilter))",
           "group": "ibmiCheckout@1"
@@ -794,6 +853,11 @@
           "group": "0_bob@3"
         },
         {
+          "submenu": "ibmi-member-workspace.research",
+          "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
+          "group": "0_bob@4"
+        },
+        {
           "command": "ibmi-member-workspace.checkoutThroughChangeManagement",
           "when": "view == ibmi-member-workspace.checkoutView && viewItem =~ /^(checkout|reference)/",
           "group": "0_bob@4"
@@ -852,6 +916,11 @@
           "command": "ibmi-member-workspace.findMember.checkoutForChange",
           "when": "view == ibmi-member-workspace.findMemberView && viewItem == foundMember",
           "group": "1_checkout@3"
+        },
+        {
+          "submenu": "ibmi-member-workspace.research",
+          "when": "view == ibmi-member-workspace.findMemberView && viewItem == foundMember",
+          "group": "2_research@1"
         },
         {
           "command": "ibmi-member-workspace.findMember.removeFromHistory",
@@ -1116,6 +1185,11 @@
           "group": "4_deps@2"
         },
         {
+          "submenu": "ibmi-member-workspace.research",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "4_deps@3"
+        },
+        {
           "command": "ibmi-member-workspace.compareWithRemote",
           "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
           "group": "5_compare@1"
@@ -1162,6 +1236,28 @@
         {
           "command": "ibmi-member-workspace.compareWithMember",
           "group": "compare@5"
+        }
+      ],
+      "ibmi-member-workspace.research": [
+        {
+          "command": "ibmi-member-workspace.research.findWhereUsed",
+          "group": "research@1"
+        },
+        {
+          "command": "ibmi-member-workspace.research.describeFile",
+          "group": "research@2"
+        },
+        {
+          "command": "ibmi-member-workspace.research.describeObject",
+          "group": "research@3"
+        },
+        {
+          "command": "ibmi-member-workspace.research.serviceProgramExports",
+          "group": "research@4"
+        },
+        {
+          "command": "ibmi-member-workspace.research.jobLog",
+          "group": "research@5"
         }
       ]
     },
