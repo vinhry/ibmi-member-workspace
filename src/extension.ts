@@ -30,6 +30,7 @@ import { registerAgentCommands } from "./commands/agents";
 import { registerBobCommands } from "./commands/bob";
 import { registerSyncCommands } from "./commands/sync";
 import { registerViewCommands } from "./commands/view";
+import { registerResearchCommands } from "./commands/research";
 
 export async function activate(
   context: vscode.ExtensionContext
@@ -235,6 +236,7 @@ export async function activate(
   registerChangeManagementCommands(ctx);
   registerFindMemberCommands(ctx);
   registerViewCommands(ctx);
+  registerResearchCommands(ctx);
   registerGitCommands(ctx);
   registerSourceDiagnostics(context, service);
   registerBackgroundRefresh(ctx);

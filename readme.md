@@ -354,8 +354,10 @@ In [IBM Bob](https://bob.ibm.com), Bob's agent can use the extension to research
 | `describe_object` | A program or service program: ILE or OPM, text, owner, when it was created and last used, the source it was compiled from, activation group, adopted authority, entry module, and the modules and service programs bound into it |
 | `read_job_log` | The recent messages of the job the extension runs commands in (where a failed command or compile left its messages), or of a job you name |
 | `sample_file_data` | The first rows of a file or table (10 by default, at most 100), only while `ibmi-member-workspace.researchTools.allowDataSamples` is on |
+| `sql_query` | The rows of one read-only SQL statement (SELECT, WITH or VALUES; 50 by default, at most 500), only while `ibmi-member-workspace.researchTools.allowDataSamples` is on. Anything that changes data or objects, CALL, SET, and functions that run commands or reach other systems are refused |
+| `read_spool_file` | The lines of a spooled file, by default the newest one of that name for your user profile (a compile listing is named after its program), or a listing of the matching spooled files |
 
-All of them are read-only. `sample_file_data` is the one tool that returns data rather than metadata or source: rows can hold customers, prices or personal data, so it stays off until you turn on `ibmi-member-workspace.researchTools.allowDataSamples` in your user settings (one setting for Bob and the other agents). Until then it tells the agent which setting to ask you for.
+All of them are read-only. `sample_file_data` and `sql_query` are the two tools that return data rather than metadata or source: rows can hold customers, prices or personal data, so they stay off until you turn on `ibmi-member-workspace.researchTools.allowDataSamples` in your user settings (one setting for Bob and the other agents). Until then they tell the agent which setting to ask you for. `sql_query` checks the statement before running it (one SELECT, WITH or VALUES, no second statement, no INSERT, UPDATE, DELETE, MERGE, CREATE, DROP, CALL, SET, QCMDEXC, HTTP functions and the like) and adds a row limit; a user-defined function does whatever its author wrote, so the setting, not the check, is what allows the tool.
 
 #### Bob, Investigate (right-click)
 
@@ -426,6 +428,16 @@ Right-click one or more members and choose **Investigate with AI** (in Bob, next
 
 The prompt is never sent: review it and press Enter. It's also left on the clipboard. Checked-out files are named so the agent reads them: `@path` for Claude Code and `#file:path` for Copilot.
 
+### Research on IBM i
+
+The questions the AI research tools answer are on the menus for you too. Right-click a member in Checked Out Members, Find Member, the Object Browser, the editor or the Explorer, and choose from the **Research on IBM i** submenu; from the Command Palette, each asks for a name, suggesting the member open in the editor. The libraries looked in are the dependency search libraries (see **Dependencies: Search Scope**). Each result opens as a read-only document you can search and copy.
+
+- **Find Where Used…** — the programs and service programs that refer to a program, service program or file (DSPPGMREF of every program in each search library, at most 25 libraries, with Cancel). For a file member (PF, LF, DSPF, PRTF…) only file references are listed. Afterwards you can pick programs whose source to **Bring for Reference**.
+- **Describe File…** — a file's or table's columns (name, type, length, nulls, text) and the logical files, views and indexes built over it.
+- **Describe Program…** — a program's or service program's attributes: ILE or OPM, text, owner, when it was created and last used, the source it was compiled from, activation group, adopted authority, and the modules and service programs bound into it.
+- **Service Program Exports…** — the procedures and data a service program exports.
+- **Show Job Log…** — the recent messages of the job this connection runs commands in (where a failed command or compile left its messages), or of any job you name.
+
 ### Compare With
 
 Right-click a checkout for comparison tools: **Select for Compare** (mark one checkout, then **Compare with Selected** on another), **Compare with Active File**, **Compare with Local File**, **Compare with IFS File**, or **Compare with Member** (any source member by path).
@@ -445,7 +457,7 @@ Right-click a checkout for comparison tools: **Select for Compare** (mark one ch
 With a checked-out member open, you don't need the side bar:
 
 - **Editor title buttons** — **Upload to IBM i**, **Merge Back to IBM i** and **Refresh Remote Status** are at the top right of the editor. A read-only reference copy shows only Refresh.
-- **Right-click menu** — the **IBM i Member** submenu in the editor and in VS Code's Explorer has Upload, Merge Back, Refresh, Run Action, Check In Through Change Management, Open Remote File, Find Dependencies, Find All Dependencies, Compare with IBM i, Show Changes Since Checkout, Compare With, Copy Member Path and Reveal in File Explorer. **Bob, Investigate** and **Investigate with AI** are next to it, as before in the Explorer.
+- **Right-click menu** — the **IBM i Member** submenu in the editor and in VS Code's Explorer has Upload, Merge Back, Refresh, Run Action, Check In Through Change Management, Open Remote File, Find Dependencies, Find All Dependencies, Compare with IBM i, Show Changes Since Checkout, Compare With, Research on IBM i, Copy Member Path and Reveal in File Explorer. **Bob, Investigate** and **Investigate with AI** are next to it, as before in the Explorer.
 - **Command Palette** — the same commands are listed under **IBM i Member Workspace** while a checked-out member is the active editor.
 - **Keyboard** — `Ctrl+Alt+U` (`Cmd+Alt+U` on macOS) uploads the open member, `Ctrl+Alt+M` opens Merge Back, `Ctrl+Alt+R` refreshes its remote status and `Ctrl+Alt+K` checks it in through change management. Change them under **Keyboard Shortcuts** like any other.
 

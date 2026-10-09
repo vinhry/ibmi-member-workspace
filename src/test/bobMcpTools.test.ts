@@ -196,6 +196,21 @@ function fakeIo(overrides: Partial<ResearchIo> = {}) {
       }
       : undefined,
     allowDataSamples: () => false,
+    runQuery: async (sql) => (sql.includes("sysdummy1") ? [{ N: 1, TEXT: "x".repeat(250) }, { N: 2, TEXT: null }] : []),
+    listSpooledFiles: async ({ name, user, job, limit }) => {
+      const all = [
+        { job: "123456/DEV/QPADEV0001", name: "ORD100", number: 3, user: "DEV", userData: "ORD100", status: "READY", created: "2026-10-09 10:00:00", pages: 12, outputQueue: "QGPL/QPRINT" },
+        { job: "123455/DEV/QPADEV0001", name: "ORD100", number: 1, user: "DEV", userData: "ORD100", status: "READY", created: "2026-10-08 10:00:00", pages: 10, outputQueue: "QGPL/QPRINT" },
+        { job: "123455/DEV/QPADEV0001", name: "QSYSPRT", number: 2, user: "DEV", userData: "", status: "READY", created: "2026-10-08 09:00:00", pages: 1, outputQueue: "QGPL/QPRINT" },
+      ];
+      return all
+        .filter((f) => (!name || f.name === name) && (!job || f.job === job) && (!user || f.user === user))
+        .slice(0, limit);
+    },
+    readSpooledFile: async (file, { startLine, endLine }) => {
+      const lines = Array.from({ length: 10 }, (_, i) => `${file.name} ${file.number} line ${i + 1}`);
+      return { lines: lines.slice(startLine - 1, endLine), totalLines: lines.length };
+    },
     ...overrides,
   };
   return { io, checkouts, brought };
@@ -224,6 +239,8 @@ describe("research tools", () => {
       "describe_object",
       "read_job_log",
       "sample_file_data",
+      "sql_query",
+      "read_spool_file",
     ]);
     for (const name of names) {
       assert.doesNotMatch(name, /upload|merge|write|edit|delete|discard|compile|run/);
@@ -525,5 +542,66 @@ describe("research tools", () => {
   it("says so when not connected", async () => {
     const { io } = fakeIo({ connectedSystem: () => undefined });
     await assert.rejects(tool(createResearchTools(io), "list_checkouts").call({}), /Not connected/);
+  });
+});
+
+describe("sql_query", () => {
+  it("is off until the user allows data samples, and says which setting", async () => {
+    await assert.rejects(
+      tool(createResearchTools(fakeIo().io), "sql_query").call({ sql: "select 1 from sysibm.sysdummy1" }),
+      /ibmi-member-workspace\.researchTools\.allowDataSamples/
+    );
+  });
+
+  it("refuses anything but one SELECT, as an input error", async () => {
+    const query = tool(createResearchTools(fakeIo({ allowDataSamples: () => true }).io), "sql_query");
+    await assert.rejects(query.call({ sql: "delete from prodlib.custmast" }), /refused: Only a SELECT/);
+    await assert.rejects(query.call({ sql: "select 1 from t; select 2 from t" }), /one statement/);
+    await assert.rejects(query.call({ sql: "values qsys2.qcmdexc('DLTLIB X')" }), /QCMDEXC/);
+  });
+
+  it("runs the wrapped query and returns rows as text, cut short and counted", async () => {
+    const ran: string[] = [];
+    const io = fakeIo({ allowDataSamples: () => true }).io;
+    const inner = io.runQuery;
+    io.runQuery = (sql) => {
+      ran.push(sql);
+      return inner(sql);
+    };
+    const result = await tool(createResearchTools(io), "sql_query").call({ sql: "select n, text from sysibm.sysdummy1;", maxRows: 2 }) as {
+      columns: string[]; rows: Array<Array<string | null>>; rowCount: number; notes?: string[];
+    };
+    assert.deepEqual(ran, ["SELECT * FROM (select n, text from sysibm.sysdummy1) AS IMW_QUERY FETCH FIRST 2 ROWS ONLY"]);
+    assert.deepEqual(result.columns, ["N", "TEXT"]);
+    assert.equal(result.rowCount, 2);
+    assert.deepEqual(result.rows[1], ["2", null]);
+    assert.equal(result.rows[0][1]?.length, 201);
+    assert.ok(result.notes?.some((note) => /Stopped at 2 rows/.test(note)));
+    assert.ok(result.notes?.some((note) => /cut short/.test(note)));
+  });
+});
+
+describe("read_spool_file", () => {
+  it("reads the newest spooled file of that name for the connected user", async () => {
+    const result = await tool(createResearchTools(fakeIo().io), "read_spool_file").call({ name: "ord100", startLine: 2, endLine: 3 }) as {
+      job: string; number: number; totalLines: number; startLine: number; endLine: number; more?: string; text: string;
+    };
+    assert.equal(result.job, "123456/DEV/QPADEV0001");
+    assert.equal(result.number, 3);
+    assert.deepEqual([result.totalLines, result.startLine, result.endLine], [10, 2, 3]);
+    assert.equal(result.text, "ORD100 3 line 2\nORD100 3 line 3");
+    assert.match(result.more ?? "", /Lines 4-10 not shown/);
+  });
+
+  it("reads a given job's spooled file, and lists matches with listOnly", async () => {
+    const read = tool(createResearchTools(fakeIo().io), "read_spool_file");
+    const named = await read.call({ job: "123455/dev/qpadev0001", number: 1, name: "ORD100" }) as { job: string; number: number; text: string };
+    assert.equal(named.job, "123455/DEV/QPADEV0001");
+    assert.match(named.text, /^ORD100 1 line 1\n/);
+    const listed = await read.call({ listOnly: true, user: "DEV" }) as { spooledFiles: Array<{ name: string }> };
+    assert.deepEqual(listed.spooledFiles.map((f) => f.name), ["ORD100", "ORD100", "QSYSPRT"]);
+    await assert.rejects(read.call({ name: "NOPE" }), /No spooled file named NOPE for the connected user/);
+    await assert.rejects(read.call({}), /Give "name"/);
+    await assert.rejects(read.call({ name: "ORD100", job: "bad" }), /"job" must be/);
   });
 });

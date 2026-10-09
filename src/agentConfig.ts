@@ -69,7 +69,8 @@ export const RULES_BODY = `# IBM i Member Workspace
   member uses, \`find_where_used\` for what uses a program or file, \`describe_file\` for file layouts,
   \`describe_object\` for a program's attributes and what is bound into it, \`read_member_source\` to read a
   member, \`compare_checkout\` for how a checked-out member differs from the IBM i, \`read_job_log\` for why
-  a command failed, and \`sample_file_data\` for a few rows of a file (only when the user has allowed it).
+  a command failed, \`read_spool_file\` for a compile listing, and, only when the user has allowed it,
+  \`sample_file_data\` for a few rows of a file and \`sql_query\` for one read-only SELECT.
 - Members these tools bring into the checkout folder are **read-only reference copies**. They may be
   production source. Never edit, chmod, rename, delete or overwrite a reference copy, and never copy one
   over another file. \`list_checkouts\` shows which files are reference copies.

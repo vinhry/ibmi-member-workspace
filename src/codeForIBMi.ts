@@ -1068,3 +1068,98 @@ export async function listSourceFileMembers(
 ): Promise<IBMiMember[]> {
   return getContent().getMemberList({ library, sourceFile });
 }
+
+/** Runs a statement the SQL guard (`sqlGuard.ts`) already checked and wrapped. */
+export function runReadOnlyQuery(sql: string): Promise<Array<Record<string, unknown>>> {
+  return requireConnection().runSQL(sql);
+}
+
+export interface SpooledFileInfo {
+  /** number/user/name */
+  job: string;
+  name: string;
+  number: number;
+  user: string;
+  userData: string;
+  status: string;
+  created: string;
+  pages: number;
+  outputQueue: string;
+}
+
+/** Spooled files one call lists at most. */
+export const MAX_SPOOLED_FILES = 50;
+
+/**
+ * Spooled files, newest first: of a job, or else of a user (the connected one when none is named),
+ * optionally only those named `name` (a compile listing is named after its program).
+ */
+export async function listSpooledFiles(
+  options: { name?: string; user?: string; job?: string; limit: number }
+): Promise<SpooledFileInfo[]> {
+  const conditions: string[] = [];
+  const bindings: string[] = [];
+  if (options.name) {
+    conditions.push("SPOOLED_FILE_NAME = ?");
+    bindings.push(objectName(options.name, "spooled file"));
+  }
+  if (options.job) {
+    conditions.push("JOB_NAME = ?");
+    bindings.push(jobName(options.job));
+  } else if (options.user) {
+    conditions.push("USER_NAME = ?");
+    bindings.push(objectName(options.user, "user"));
+  } else {
+    conditions.push("USER_NAME = USER");
+  }
+  const limit = Math.min(MAX_SPOOLED_FILES, Math.max(1, Math.floor(options.limit)));
+  const rows = await requireConnection().runSQL(
+    "SELECT JOB_NAME, SPOOLED_FILE_NAME, FILE_NUMBER, USER_NAME, USER_DATA, STATUS, VARCHAR(CREATE_TIMESTAMP) AS CREATED, " +
+    "TOTAL_PAGES, OUTPUT_QUEUE_LIBRARY_NAME, OUTPUT_QUEUE_NAME FROM QSYS2.OUTPUT_QUEUE_ENTRIES_BASIC " +
+    `WHERE ${conditions.join(" AND ")} ORDER BY CREATE_TIMESTAMP DESC FETCH FIRST ${limit} ROWS ONLY`,
+    { bindings }
+  );
+  return rows.map((row) => ({
+    job: columnValue(row, "JOB_NAME") ?? "",
+    name: columnValue(row, "SPOOLED_FILE_NAME") ?? "",
+    number: Number(row.FILE_NUMBER ?? 0),
+    user: columnValue(row, "USER_NAME") ?? "",
+    userData: columnValue(row, "USER_DATA") ?? "",
+    status: columnValue(row, "STATUS") ?? "",
+    created: columnValue(row, "CREATED") ?? "",
+    pages: Number(row.TOTAL_PAGES ?? 0),
+    outputQueue: `${columnValue(row, "OUTPUT_QUEUE_LIBRARY_NAME") ?? ""}/${columnValue(row, "OUTPUT_QUEUE_NAME") ?? ""}`,
+  }));
+}
+
+/** The lines `startLine` to `endLine` (counted from 1) of a spooled file, trailing blanks removed. */
+export async function readSpooledFile(
+  file: { job: string; name: string; number: number },
+  range: { startLine: number; endLine: number }
+): Promise<{ lines: string[]; totalLines: number }> {
+  const job = jobName(file.job);
+  const name = objectName(file.name, "spooled file");
+  const number = Math.floor(file.number);
+  if (!Number.isInteger(number) || number < 1) {
+    throw new Error(`Not a spooled file number: ${file.number}`);
+  }
+  // The names are validated above, so they can be written into the statement; the table function
+  // copies the whole spooled file, so it is read once and cut here.
+  const rows = await requireConnection().runSQL(
+    "SELECT ORDINAL_POSITION, SPOOLED_DATA FROM TABLE(SYSTOOLS.SPOOLED_FILE_DATA(" +
+    `JOB_NAME => '${job}', SPOOLED_FILE_NAME => '${name}', SPOOLED_FILE_NUMBER => ${number})) X ORDER BY ORDINAL_POSITION`
+  );
+  const all = rows.map((row) => String(row.SPOOLED_DATA ?? "").replace(/\s+$/, ""));
+  const start = Math.max(1, Math.floor(range.startLine));
+  const end = Math.max(start, Math.floor(range.endLine));
+  return { lines: all.slice(start - 1, end), totalLines: all.length };
+}
+
+/** A qualified job name as number/user/name, upper-cased. */
+function jobName(job: string): string {
+  const upper = job.trim().toUpperCase();
+  if (!JOB_NAME.test(upper)) {
+    throw new Error(`Not a job name: ${job}. Use number/user/name, for example 123456/QUSER/QZDASOINIT.`);
+  }
+  return upper;
+}

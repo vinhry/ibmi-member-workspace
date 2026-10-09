@@ -11,6 +11,9 @@ import {
   findSourceMembers,
   getSystemName,
   jobLogMessages,
+  listSpooledFiles,
+  readSpooledFile,
+  runReadOnlyQuery,
   sampleFileRows,
   searchSourceMembers,
   serviceProgramExports,
@@ -237,6 +240,9 @@ function createTools(ctx: CommandContext, whereUsedSetting: string): McpTool[] {
     sampleFileRows,
     allowDataSamples: () => vscode.workspace.getConfiguration("ibmi-member-workspace").get<boolean>("researchTools.allowDataSamples", false),
     dataSamplesSetting: "ibmi-member-workspace.researchTools.allowDataSamples",
+    runQuery: runReadOnlyQuery,
+    listSpooledFiles,
+    readSpooledFile,
   });
 }
 
