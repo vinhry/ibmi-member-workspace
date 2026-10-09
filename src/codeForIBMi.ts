@@ -45,9 +45,9 @@ export function getInstance(): CodeForIBMi["instance"] | undefined {
   return getCodeForIBMi()?.instance;
 }
 
-/** The typings declare a connection is always returned, but it is undefined while disconnected. */
+/** The connection, undefined while disconnected. */
 export function getConnection(): IBMi | undefined {
-  return getInstance()?.getConnection() as IBMi | undefined;
+  return getInstance()?.getConnection();
 }
 
 function getContent(): IBMiContent {
@@ -340,22 +340,61 @@ export async function sourceFileLayout(library: string, sourceFile: string): Pro
 
 /** The first *PGM or *SRVPGM named `name` in `libraries`, in order. Libraries that can't be read are skipped. */
 export async function findCompiledObject(name: string, libraries: string[]): Promise<CompiledObject | undefined> {
+  const row = await firstObjectRow("OBJLIB, OBJNAME, OBJTYPE", libraries, "*PGM *SRVPGM", name);
+  return row
+    ? {
+      library: String(row.OBJLIB).trim(),
+      name: String(row.OBJNAME).trim(),
+      type: String(row.OBJTYPE).trim() === "*SRVPGM" ? "*SRVPGM" : "*PGM",
+    }
+    : undefined;
+}
+
+/** Libraries asked about per statement in `firstObjectRow`. */
+const LIBRARIES_PER_PROBE = 25;
+
+/**
+ * The OBJECT_STATISTICS row of the first library in `libraries` that holds object `name` of a type
+ * in `typeList`, with the given columns. Libraries are asked about in groups, one statement per
+ * group; a group whose statement fails (a library that doesn't exist or isn't authorized fails the
+ * whole statement) is asked about one library at a time.
+ */
+async function firstObjectRow(
+  columns: string,
+  libraries: string[],
+  typeList: string,
+  name: string
+): Promise<Record<string, unknown> | undefined> {
   const connection = requireConnection();
-  for (const library of libraries) {
+  const select = (index: number) =>
+    `SELECT ${index} AS IDX, ${columns} FROM TABLE(QSYS2.OBJECT_STATISTICS(?, '${typeList}', OBJECT_NAME => ?)) X`;
+  for (let start = 0; start < libraries.length; start += LIBRARIES_PER_PROBE) {
+    const group = libraries.slice(start, start + LIBRARIES_PER_PROBE);
+    let rows: Array<Record<string, unknown>> | undefined;
     try {
-      const [row] = await connection.runSQL(
-        "SELECT OBJLIB, OBJNAME, OBJTYPE FROM TABLE(QSYS2.OBJECT_STATISTICS(?, '*PGM *SRVPGM', OBJECT_NAME => ?)) X",
-        { bindings: [library, name] }
+      rows = await connection.runSQL(
+        group.map((_library, index) => select(index)).join(" UNION ALL "),
+        { bindings: group.flatMap((library) => [library, name]) }
       );
-      if (row) {
-        return {
-          library: String(row.OBJLIB).trim(),
-          name: String(row.OBJNAME).trim(),
-          type: String(row.OBJTYPE).trim() === "*SRVPGM" ? "*SRVPGM" : "*PGM",
-        };
-      }
     } catch {
-      // A library that doesn't exist or isn't authorized just holds no object.
+      rows = undefined;
+    }
+    if (rows) {
+      const first = rows.sort((a, b) => Number(a.IDX) - Number(b.IDX))[0];
+      if (first) {
+        return first;
+      }
+      continue;
+    }
+    for (const library of group) {
+      try {
+        const [row] = await connection.runSQL(select(0), { bindings: [library, name] });
+        if (row) {
+          return row;
+        }
+      } catch {
+        // A library that doesn't exist or isn't authorized just holds no object.
+      }
     }
   }
   return undefined;
@@ -752,7 +791,7 @@ export async function describeFile(name: string, libraries: string[]): Promise<F
         : [];
     });
   } catch (err) {
-    description.notes.push(`Dependent files could not be read: ${err instanceof Error ? err.message : String(err)}`);
+    description.notes.push(`Dependent files could not be read: ${errorMessage(err)}`);
   }
   return description;
 }
@@ -837,22 +876,13 @@ export async function describeObject(
   const connection = requireConnection();
   const object = objectName(name, "object");
   const typeList = types.map((type) => objectType(type)).join(" ");
-  let found: Record<string, unknown> | undefined;
-  for (const library of libraries) {
-    try {
-      [found] = await connection.runSQL(
-        "SELECT OBJLIB, OBJNAME, OBJTYPE, OBJATTRIBUTE, OBJTEXT, OBJOWNER, OBJCREATED, CHANGE_TIMESTAMP, " +
-        "LAST_USED_TIMESTAMP, DAYS_USED_COUNT, SOURCE_LIBRARY, SOURCE_FILE, SOURCE_MEMBER, SOURCE_TIMESTAMP " +
-        `FROM TABLE(QSYS2.OBJECT_STATISTICS(?, '${typeList}', OBJECT_NAME => ?)) X`,
-        { bindings: [objectName(library, "library"), object] }
-      );
-    } catch {
-      // A library that doesn't exist or isn't authorized just holds no object.
-    }
-    if (found) {
-      break;
-    }
-  }
+  const found = await firstObjectRow(
+    "OBJLIB, OBJNAME, OBJTYPE, OBJATTRIBUTE, OBJTEXT, OBJOWNER, OBJCREATED, CHANGE_TIMESTAMP, " +
+    "LAST_USED_TIMESTAMP, DAYS_USED_COUNT, SOURCE_LIBRARY, SOURCE_FILE, SOURCE_MEMBER, SOURCE_TIMESTAMP",
+    libraries.map((library) => objectName(library, "library")),
+    typeList,
+    object
+  );
   if (!found) {
     return undefined;
   }

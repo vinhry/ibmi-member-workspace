@@ -1,4 +1,5 @@
 import { PROGRAM_SOURCE_TYPES, SearchScopeKind } from "./dependencyResolve";
+import { errorMessage } from "./errors";
 import { RawReference, ReferenceKind, SCANNED_SOURCE_TYPES, scanReferences } from "./dependencyScan";
 import type { CheckedOutMember } from "./types";
 
@@ -70,7 +71,7 @@ export class ProviderAvailabilityCache {
     try {
       result = await probe();
     } catch (err) {
-      result = { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      result = { ok: false, reason: errorMessage(err) };
     }
     this.store(system).set(providerId, result);
     return result;
@@ -140,7 +141,7 @@ export async function runProviders(
       found.push(...result.references.map((ref) => ({ ...ref, foundBy: [provider.label] })));
       outcomes.push({ label: provider.label, status: "ran", count: result.references.length, note: result.note });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       if (err instanceof ProviderUnavailableError || isUnavailableError(message)) {
         cache.markUnavailable(context.system, provider.id, message);
         outcomes.push({ label: provider.label, status: "unavailable", reason: message });

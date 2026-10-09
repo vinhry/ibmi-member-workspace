@@ -1,4 +1,5 @@
 import type { DependencyLookup } from "./commands/dependencies";
+import { errorMessage } from "./errors";
 import { WHERE_USED_SNAPSHOT_MINUTES } from "./whereUsedSnapshot";
 import type {
   FileDescription,
@@ -503,7 +504,7 @@ export function createResearchTools(io: ResearchIo): McpTool[] {
             usedBy.push(...result.rows);
             snapshots[library] = result.snapshotTakenAt;
           } catch (err) {
-            failed.push({ library, error: err instanceof Error ? err.message : String(err) });
+            failed.push({ library, error: errorMessage(err) });
           }
           read.push(library);
         }

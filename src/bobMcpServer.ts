@@ -1,4 +1,5 @@
 import * as crypto from "node:crypto";
+import { errorMessage } from "./errors";
 import * as http from "node:http";
 
 /**
@@ -119,7 +120,7 @@ export async function handleMessage(
         });
       } catch (err) {
         return reply({
-          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+          content: [{ type: "text", text: errorMessage(err) }],
           isError: true,
         });
       }
@@ -179,7 +180,7 @@ export class BobMcpServer {
     const listen = (port: number) => new Promise<http.Server>((resolve, reject) => {
       const server = http.createServer((req, res) => {
         this.handle(req, res).catch((err) => {
-          this.log(`[mcp] Request failed: ${err instanceof Error ? err.message : String(err)}`);
+          this.log(`[mcp] Request failed: ${errorMessage(err)}`);
           // Never leave a client waiting for an answer that won't come.
           if (!res.headersSent) {
             res.writeHead(500, { "Content-Type": "application/json" });

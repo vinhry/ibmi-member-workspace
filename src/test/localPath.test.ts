@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { describe, it } from "node:test";
-import { assertNoLinkBelow, readCheckoutText } from "../localPath";
+import { assertNoLinkBelow, checkoutFilePath, readCheckoutText } from "../localPath";
 
 /** A checkout folder and a folder outside it, removed afterwards. */
 function folders(): { root: string; outside: string; cleanup: () => void } {
@@ -117,5 +117,14 @@ describe("readCheckoutText", () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+describe("checkoutFilePath", () => {
+  it("builds system/LIB/SRCFILE/MEMBER.EXT with the system name made safe", () => {
+    const paths = checkoutFilePath(`${sep}work`, { system: "dev:1*", library: "mylib", sourceFile: "qrpglesrc", memberName: "ord100", extension: "rpgle" });
+    assert.equal(paths.systemRoot, [`${sep}work`, "dev_1_"].join(sep));
+    assert.equal(paths.directory, [`${sep}work`, "dev_1_", "MYLIB", "QRPGLESRC"].join(sep));
+    assert.equal(paths.localPath, [`${sep}work`, "dev_1_", "MYLIB", "QRPGLESRC", "ORD100.RPGLE"].join(sep));
   });
 });

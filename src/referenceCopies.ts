@@ -1,4 +1,5 @@
 import { DOWNLOAD_CONCURRENCY, mapWithLimit } from "./concurrency";
+import { errorMessage } from "./errors";
 import type { MemberInfo } from "./memberInfo";
 import { CheckedOutMember, formatMemberPath, isReferenceCopy } from "./types";
 
@@ -101,7 +102,7 @@ async function bringOne(io: ReferenceCopyIo, m: MemberInfo, checkpointPaths: str
       readOnly: reference,
     };
   } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
+    const error = errorMessage(err);
     io.log(`[bob] Could not bring ${member}: ${error}`);
     return { member, status: "failed", error };
   }

@@ -1,4 +1,5 @@
 import { hashContent } from "./sync";
+import { errorMessage } from "./errors";
 import type { CheckedOutMember, CheckoutIndex } from "./types";
 
 /**
@@ -105,7 +106,7 @@ export class BaselineStore {
       await this.files.rename(temp, name);
       return true;
     } catch (err) {
-      this.log(`[baseline] Could not keep ${hash.substring(0, 12)}: ${err instanceof Error ? err.message : String(err)}`);
+      this.log(`[baseline] Could not keep ${hash.substring(0, 12)}: ${errorMessage(err)}`);
       return false;
     }
   }
@@ -139,7 +140,7 @@ export class BaselineStore {
         await this.files.delete(name);
         deleted++;
       } catch (err) {
-        this.log(`[baseline] Could not delete ${name}: ${err instanceof Error ? err.message : String(err)}`);
+        this.log(`[baseline] Could not delete ${name}: ${errorMessage(err)}`);
       }
     }
     return deleted;

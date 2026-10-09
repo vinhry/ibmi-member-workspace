@@ -10,7 +10,6 @@ import {
   RefreshTally,
   WorkItemCarry,
   buildCheckoutId,
-  buildLocalFileName,
   emptyTally,
   formatMemberPath,
   isReferenceCopy,
@@ -51,7 +50,9 @@ import {
 } from "./gitService";
 import { RepositoryTrust } from "./repositoryTrust";
 import { WorkItemHistory, pathIsInside } from "./workItemHistory";
-import { assertNoLinkBelow } from "./localPath";
+import { DOWNLOAD_CONCURRENCY } from "./concurrency";
+import { assertNoLinkBelow, checkoutFilePath } from "./localPath";
+import { runRefreshSteps } from "./refreshRun";
 import { GitIntegrationState, gitIntegrationState } from "./workspaceSettings";
 import { CheckoutIndexStore, IndexStorage } from "./checkoutIndexStore";
 import { SourceLayout, SourceProblem, describeProblem, sourceProblems, summarizeProblems } from "./sourceCheck";
@@ -998,15 +999,23 @@ export class CheckoutService implements vscode.Disposable {
     const uploadContent = normalizeForMemberUpload(localContent);
     // Checked again: the connection may have changed during the remote check.
     this.assertConnectedTo(entry.system);
+    // A write the IBM i never answers would otherwise hold the upload (and upload on save) until a disconnect.
+    const what = `uploading ${formatMemberPath(entry)}`;
+    const deadline = {
+      ms: DOWNLOAD_TIMEOUT_MS,
+      what,
+      slowMs: SLOW_WAIT_MS,
+      onSlow: () => this.log.appendLine(
+        `[ibmi] Still waiting for the IBM i after ${describeDuration(SLOW_WAIT_MS)} while ${what}; giving up after ${describeDuration(DOWNLOAD_TIMEOUT_MS)}.`
+      ),
+    };
     if (sourceDatesEnabled()) {
-      await uploadMemberContentWithDates(entry, uploadContent);
+      await withDeadline(uploadMemberContentWithDates(entry, uploadContent), deadline);
       this.log.appendLine(`[upload] ${formatMemberPath(entry)} uploaded with source dates`);
     } else {
-      const success = await uploadMemberContent(
-        entry.library,
-        entry.sourceFile,
-        entry.memberName,
-        uploadContent
+      const success = await withDeadline(
+        uploadMemberContent(entry.library, entry.sourceFile, entry.memberName, uploadContent),
+        deadline
       );
       if (!success) {
         return "failed";
@@ -1107,36 +1116,22 @@ export class CheckoutService implements vscode.Disposable {
         ...plan.missing.map(({ entry }) => ({ entry, run: () => this.markRemoteMissing(entry) })),
         ...plan.download.map(({ entry, stamp }) => ({ entry, run: () => this.refreshRemoteStatus(entry, stamp) })),
       ];
-      for (let i = 0; i < steps.length; i++) {
-        if (token?.isCancellationRequested) {
-          break;
-        }
-        const { entry, run } = steps[i];
-        progress?.report({ message: `${entry.memberName} (${i + 1}/${steps.length})` });
-        try {
-          const result = await run();
-          switch (result) {
-            case "in-sync":
-              tally.inSync++;
-              break;
-            case "modified":
-              tally.modified++;
-              break;
-            case "remote-changed":
-              tally.remoteChanged++;
-              break;
-            case "conflict":
-              tally.conflict++;
-              break;
-            case "remote-missing":
-              tally.remoteMissing++;
-              break;
+      // A few members at once, as batch checkouts download them; Cancel lets those under way finish.
+      const controller = new AbortController();
+      const cancel = token?.onCancellationRequested(() => controller.abort());
+      try {
+        const result = await runRefreshSteps(
+          steps.map(({ entry, run }) => ({ label: entry.memberName, detail: formatMemberPath(entry), run })),
+          {
+            concurrency: DOWNLOAD_CONCURRENCY,
+            signal: controller.signal,
+            onProgress: (message, increment) => progress?.report({ message, increment }),
+            onError: (step, err) => this.log.appendLine(`[refresh] Error for ${step.detail}: ${errorMessage(err)}`),
           }
-        } catch (err) {
-          tally.errors++;
-          this.log.appendLine(`[refresh] Error for ${formatMemberPath(entry)}: ${errorMessage(err)}`);
-        }
-        progress?.report({ increment: 100 / steps.length });
+        );
+        Object.assign(tally, result);
+      } finally {
+        cancel?.dispose();
       }
     });
 
@@ -1484,17 +1479,14 @@ export class CheckoutService implements vscode.Disposable {
     checkoutRoot: vscode.Uri,
     entry: CheckedOutMember
   ): Promise<string> {
-    const systemRoot = vscode.Uri.joinPath(checkoutRoot, sanitizeSystemName(entry.system));
-    const fileName = buildLocalFileName(entry);
-    const baseDir = vscode.Uri.joinPath(systemRoot, entry.library, entry.sourceFile);
-    const localPath = vscode.Uri.joinPath(baseDir, fileName).fsPath;
-    // joinPath resolves "..", so this also catches any name the validation above let through.
-    if (!pathIsInside(systemRoot.fsPath, localPath)) {
+    const { systemRoot, directory, localPath } = checkoutFilePath(checkoutRoot.fsPath, entry);
+    // path.join resolves "..", so this also catches any name the validation above let through.
+    if (!pathIsInside(systemRoot, localPath)) {
       throw new Error(`The checkout path for ${formatMemberPath(entry)} is outside the checkout folder.`);
     }
     this.assertLocalPathSafe(localPath);
 
-    await vscode.workspace.fs.createDirectory(baseDir);
+    await vscode.workspace.fs.createDirectory(vscode.Uri.file(directory));
 
     return localPath;
   }

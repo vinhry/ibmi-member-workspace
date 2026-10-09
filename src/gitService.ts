@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { errorMessage } from "./errors";
 import { promisify } from "node:util";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -472,7 +473,7 @@ export class GitService {
       }
       return { status: "success" };
     } catch (err) {
-      const details = err instanceof Error ? err.message : String(err);
+      const details = errorMessage(err);
       this.log.appendLine(`[git] Repository setup failed: ${details}`);
       return {
         status: "failure",

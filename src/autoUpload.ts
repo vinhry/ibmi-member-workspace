@@ -1,4 +1,5 @@
 import { CheckedOutMember, CheckoutStatus, isReferenceCopy } from "./types";
+import { errorMessage } from "./errors";
 
 export type AutoUploadMode = "off" | "ask" | "silent";
 
@@ -146,7 +147,7 @@ export class AutoUploadScheduler {
     try {
       await this.deps.upload(entry);
     } catch (err) {
-      this.deps.log(`[auto-upload] Upload failed for ${localPath}: ${err instanceof Error ? err.message : String(err)}`);
+      this.deps.log(`[auto-upload] Upload failed for ${localPath}: ${errorMessage(err)}`);
     } finally {
       this.inFlight.delete(localPath);
     }

@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { sanitizeSystemName } from "./types";
 
 /**
  * Throws unless `target` is below `root` without passing through a symbolic link or junction, so a
@@ -42,4 +43,27 @@ export function readCheckoutText(root: string | undefined, localPath: string): s
   }
   assertNoLinkBelow(root, localPath);
   return fs.readFileSync(localPath, "utf-8");
+}
+
+/** What names a checkout's local file: the parts of `CheckedOutMember` the path is built from. */
+export interface CheckoutPathParts {
+  system: string;
+  library: string;
+  sourceFile: string;
+  memberName: string;
+  extension: string;
+}
+
+/**
+ * Where a member's local file goes: `<checkout root>/<system>/<LIB>/<SRCFILE>/<MEMBER>.<EXT>`, the
+ * system name made safe for a folder name. Pure; the caller checks the result stays inside the root.
+ */
+export function checkoutFilePath(
+  checkoutRoot: string,
+  parts: CheckoutPathParts
+): { systemRoot: string; directory: string; localPath: string } {
+  const systemRoot = path.join(checkoutRoot, sanitizeSystemName(parts.system));
+  const directory = path.join(systemRoot, parts.library.toUpperCase(), parts.sourceFile.toUpperCase());
+  const fileName = `${parts.memberName}.${parts.extension}`.toUpperCase();
+  return { systemRoot, directory, localPath: path.join(directory, fileName) };
 }

@@ -1,4 +1,5 @@
 import type { Resolution, SourceMemberRow } from "./dependencyResolve";
+import { errorMessage } from "./errors";
 import { RawReference, isCobolType } from "./dependencyScan";
 import type { DependencySubject, ProviderOutcome } from "./dependencySources";
 
@@ -146,7 +147,7 @@ export async function walkDependencies(
       result.failed.push({
         member: subjectKey(current.subject),
         via: current.path.slice(0, -1),
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage(err),
       });
       continue;
     }

@@ -1,4 +1,3 @@
-import * as path from "node:path";
 import * as vscode from "vscode";
 import {
   MCP_SERVER_NAME,
@@ -7,6 +6,9 @@ import {
   readFileBelow,
   shouldRewriteRules,
   writeFileBelow,
+  CLAUDE_MCP_FILE,
+  CODEX_CONFIG_FILE,
+  fileBelow,
 } from "../agentFiles";
 import {
   AGENTS,
@@ -243,7 +245,7 @@ export function registerAgentCommands(ctx: CommandContext, { inBob }: { inBob: b
   };
 
   const connectClaude = async (folder: vscode.WorkspaceFolder) => {
-    if (await refuseCommitted(folder, "claude", ".mcp.json")) {
+    if (await refuseCommitted(folder, "claude", CLAUDE_MCP_FILE)) {
       return;
     }
     const choice = await vscode.window.showInformationMessage(
@@ -264,10 +266,10 @@ export function registerAgentCommands(ctx: CommandContext, { inBob }: { inBob: b
     }
     const root = folder.uri.fsPath;
     try {
-      const target = path.join(root, ".mcp.json");
+      const target = fileBelow(root, CLAUDE_MCP_FILE);
       writeFileBelow(root, target, mergeClaudeMcpConfig(readFileBelow(root, target), claudeServerEntry(server.port, server.token)));
-      const excluded = excludeFromGit(root, ".mcp.json");
-      const settings = path.join(root, ...CLAUDE_LOCAL_SETTINGS.split("/"));
+      const excluded = excludeFromGit(root, CLAUDE_MCP_FILE);
+      const settings = fileBelow(root, CLAUDE_LOCAL_SETTINGS);
       writeFileBelow(root, settings, mergeClaudeLocalSettings(readFileBelow(root, settings), true), 0o644);
       excludeFromGit(root, CLAUDE_LOCAL_SETTINGS);
       await setConnection({ agent: "claude", folder: folder.uri.toString() }, true);
@@ -275,14 +277,14 @@ export function registerAgentCommands(ctx: CommandContext, { inBob }: { inBob: b
         writeRules(root, "claude");
       }
       log.appendLine(`${LOG} Connected Claude Code in ${folder.name}: ${target}${excluded === "excluded" ? " (excluded from Git)" : ""}`);
-      reportConnected("Claude Code", folder, ".mcp.json", excluded, "Start a new Claude Code conversation to load them.");
+      reportConnected("Claude Code", folder, CLAUDE_MCP_FILE, excluded, "Start a new Claude Code conversation to load them.");
     } catch (err) {
       vscode.window.showErrorMessage(`Could not connect Claude Code: ${errorMessage(err)}`);
     }
   };
 
   const connectCodex = async (folder: vscode.WorkspaceFolder) => {
-    const file = ".codex/config.toml";
+    const file = CODEX_CONFIG_FILE;
     if (await refuseCommitted(folder, "codex", file)) {
       return;
     }
@@ -303,7 +305,7 @@ export function registerAgentCommands(ctx: CommandContext, { inBob }: { inBob: b
     }
     const root = folder.uri.fsPath;
     try {
-      const target = path.join(root, ".codex", "config.toml");
+      const target = fileBelow(root, CODEX_CONFIG_FILE);
       writeFileBelow(root, target, mergeCodexConfig(readFileBelow(root, target), codexServerLines(server.port, server.token)));
       const excluded = excludeFromGit(root, file);
       await setConnection({ agent: "codex", folder: folder.uri.toString() }, true);
@@ -364,19 +366,19 @@ export function registerAgentCommands(ctx: CommandContext, { inBob }: { inBob: b
     try {
       if (folder && connection.agent === "claude") {
         const root = folder.uri.fsPath;
-        const target = path.join(root, ".mcp.json");
+        const target = fileBelow(root, CLAUDE_MCP_FILE);
         const existing = readFileBelow(root, target);
         if (jsonMcpEntry(existing)) {
           writeFileBelow(root, target, mergeClaudeMcpConfig(existing, undefined));
         }
-        const settings = path.join(root, ...CLAUDE_LOCAL_SETTINGS.split("/"));
+        const settings = fileBelow(root, CLAUDE_LOCAL_SETTINGS);
         const current = readFileBelow(root, settings);
         if (current !== undefined) {
           writeFileBelow(root, settings, mergeClaudeLocalSettings(current, false), 0o644);
         }
       } else if (folder && connection.agent === "codex") {
         const root = folder.uri.fsPath;
-        const target = path.join(root, ".codex", "config.toml");
+        const target = fileBelow(root, CODEX_CONFIG_FILE);
         const existing = readFileBelow(root, target);
         if (codexEntryState(existing) !== "none") {
           writeFileBelow(root, target, mergeCodexConfig(existing, undefined));
@@ -432,7 +434,7 @@ function writeRules(root: string, agent: AgentId): void {
   if (!file) {
     return;
   }
-  const target = path.join(root, ...file.split("/"));
+  const target = fileBelow(root, file);
   const existing = readFileBelow(root, target);
   if (existing === undefined || shouldRewriteRules(existing, rulesText(agent), [])) {
     writeFileBelow(root, target, rulesText(agent), 0o644);
@@ -475,14 +477,14 @@ function refreshConnectedFiles(
     const root = folder.uri.fsPath;
     try {
       if (connection.agent === "claude") {
-        const target = path.join(root, ".mcp.json");
+        const target = fileBelow(root, CLAUDE_MCP_FILE);
         const existing = readFileBelow(root, target);
         if (jsonMcpEntry(existing) && !claudeEntryMatches(existing, port, token)) {
           writeFileBelow(root, target, mergeClaudeMcpConfig(existing, claudeServerEntry(port, token)));
           log.appendLine(`${LOG} Updated ${target} for port ${port}`);
         }
       } else if (connection.agent === "codex") {
-        const target = path.join(root, ".codex", "config.toml");
+        const target = fileBelow(root, CODEX_CONFIG_FILE);
         const existing = readFileBelow(root, target);
         if (codexEntryState(existing) !== "none" && !codexEntryMatches(existing, port, token)) {
           writeFileBelow(root, target, mergeCodexConfig(existing, codexServerLines(port, token)));
@@ -502,7 +504,7 @@ function refreshRules(root: string, agent: AgentId, log: vscode.OutputChannel): 
   if (!file) {
     return;
   }
-  const target = path.join(root, ...file.split("/"));
+  const target = fileBelow(root, file);
   if (shouldRewriteRules(readFileBelow(root, target), rulesText(agent), [])) {
     writeFileBelow(root, target, rulesText(agent), 0o644);
     log.appendLine(`${LOG} Updated ${target} to this version's rules`);

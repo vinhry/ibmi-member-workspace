@@ -11,6 +11,16 @@ import * as path from "node:path";
 /** The name of this extension's MCP server in every agent's configuration. */
 export const MCP_SERVER_NAME = "ibmi-member-workspace";
 
+/** Claude Code's project MCP configuration, relative to a workspace folder. */
+export const CLAUDE_MCP_FILE = ".mcp.json";
+/** Codex's project configuration, relative to a workspace folder. */
+export const CODEX_CONFIG_FILE = ".codex/config.toml";
+
+/** The path of a workspace-relative file (written with "/") under `root`. */
+export function fileBelow(root: string, file: string): string {
+  return path.join(root, ...file.split("/"));
+}
+
 /**
  * A JSON MCP configuration (`mcpServers`, as Bob's `.bob/mcp.json` and Claude Code's `.mcp.json`
  * hold it) with this extension's entry set, or removed with `entry` undefined, keeping every other
