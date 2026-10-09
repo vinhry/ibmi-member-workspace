@@ -311,18 +311,6 @@ describe("extension manifest", () => {
       assert.ok(entries.length > 0, name);
       assert.ok(entries.every((item) => !item.when?.includes("listMultiSelection")), name);
     }
-    // Research on IBM i: one submenu wherever a member is, and its commands in the palette while connected.
-    const research = command("research");
-    assert.ok(submenus.some((menu) => menu.id === research));
-    assert.equal(items.find((item) => item.submenu === research)?.when, anyCheckout);
-    const researchPlacements = tree.filter((item) => item.submenu === research).map((item) => item.when ?? "");
-    assert.ok(researchPlacements.some((when) => when.includes("checkoutView")));
-    assert.ok(researchPlacements.some((when) => when.includes("findMemberView") && when.includes("foundMember")));
-    assert.ok(researchPlacements.some((when) => when.includes("objectBrowser")));
-    for (const item of menus[research]) {
-      assert.ok(item.command?.startsWith(command("research.")), item.command);
-      assert.equal(palette(item.command!), "code-for-ibmi:connected", item.command);
-    }
     // Compare With from a file leaves out "Compare with Active File", which would be the file itself.
     const compare = command("editorCompareWith");
     assert.equal(items.find((item) => item.submenu === compare)?.when, anyCheckout);
@@ -340,6 +328,19 @@ describe("extension manifest", () => {
     assert.equal(palette(command("discardCheckout")), "false");
     assert.equal(palette(command("openLocalFile")), "false");
     assert.equal(palette(command("compareWithActive")), "false");
+
+    // Research on IBM i: one submenu wherever a member is, and its commands in the palette while connected.
+    const research = command("research");
+    assert.ok(submenus.some((menu) => menu.id === research));
+    assert.equal(items.find((item) => item.submenu === research)?.when, anyCheckout);
+    const researchPlacements = tree.filter((item) => item.submenu === research).map((item) => item.when ?? "");
+    assert.ok(researchPlacements.some((when) => when.includes("checkoutView")));
+    assert.ok(researchPlacements.some((when) => when.includes("findMemberView") && when.includes("foundMember")));
+    assert.ok(researchPlacements.some((when) => when.includes("objectBrowser")));
+    for (const item of menus[research]) {
+      assert.ok(item.command?.startsWith(command("research.")), item.command);
+      assert.equal(palette(item.command!), "code-for-ibmi:connected", item.command);
+    }
 
     // Keybindings, each with a Mac variant and only in a checkout's editor.
     const bound = Object.fromEntries(keybindings.map((binding) => [binding.command, binding]));
