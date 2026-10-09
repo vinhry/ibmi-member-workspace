@@ -1,5 +1,11 @@
 # Change Log
 
+## 1.8.12 - 2026-10-09
+
+- **Faster refresh.** Refreshing a selection of members, a source file or every checkout now compares members four at a time, as batch checkouts download them, so a refresh of many members takes a fraction of the time. Cancel lets the members under way finish. Find Member, Find Dependencies and the research tools now look for a program in all the search libraries with one query instead of one per library.
+- **Uploads can't hang.** An upload the IBM i never answers now gives up after 2 minutes with a message, as downloads have since 1.8.0, so upload on save can't be stuck until a disconnect.
+- Internal: the extension ships as one bundled file (`dist/extension.js`), so it loads faster and the VSIX is smaller; CI builds the VSIX on every push and keeps it as an artifact. Linting now uses type information (no dropped promises in extension code). The refresh runner and the checkout path are tested modules. Nothing changes in how the extension works.
+
 ## 1.8.11 - 2026-10-09
 
 - **Research on IBM i, for you.** The questions the AI research tools answer are on the menus too: right-click a member in Checked Out Members, Find Member, the Object Browser, the editor or the Explorer for **Find Where Used…** (with **Bring for Reference** for the programs found), **Describe File…**, **Describe Program…**, **Service Program Exports…** and **Show Job Log…**. From the Command Palette each asks for a name, suggesting the member open in the editor. Results open as read-only documents you can search and copy. See **Research on IBM i** in the README.

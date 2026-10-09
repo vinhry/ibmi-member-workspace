@@ -724,7 +724,8 @@ Unrelated changes in a system repository are never included in automatic checkpo
 git clone https://github.com/vinhry/ibmi-member-workspace.git
 cd ibmi-member-workspace
 npm ci             # install the locked dependencies
-npm run compile    # compile TypeScript into out/
+npm run compile    # compile TypeScript into out/ (what the tests run)
+npm run bundle     # bundle the extension into dist/extension.js (what VS Code loads)
 ```
 
 Other useful scripts:
@@ -732,10 +733,12 @@ Other useful scripts:
 | Command | What it does |
 |---------|--------------|
 | `npm run watch` | Recompile automatically whenever a source file changes |
-| `npm run lint` | Check the source with ESLint |
-| `npm test` | Compile and run the unit tests |
+| `npm run lint` | Check the source with ESLint, including the type-aware rules |
+| `npm test` | Compile, bundle and run the unit tests |
 | `npm run package:list` | Preview the files that will be included in the VSIX |
-| `npm run package` | Compile and build the installable VSIX |
+| `npm run package` | Bundle and build the installable VSIX |
+
+The VSIX holds one bundled file, `dist/extension.js`, built by esbuild from `src/`; CI builds it on every push and keeps it as a workflow artifact.
 
 ### Run Without Installing (Development)
 

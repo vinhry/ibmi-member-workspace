@@ -332,6 +332,20 @@ Agents could see relationships and source, but not a program's attributes, why a
 - `src/test/sqlGuard.test.ts` (blanking, accepted shapes, each refusal, limit clamping), `src/test/researchReport.test.ts` (table alignment and truncation, each report, usage bits), `src/test/bobMcpTools.test.ts` (`sql_query` gating, refusals as input errors, wrapping and truncation; `read_spool_file` newest-by-name, by job and number, `listOnly`, errors), `manifest.test.ts`.
 - The SQL behind `listSpooledFiles` and `readSpooledFile` (`OUTPUT_QUEUE_ENTRIES_BASIC` columns, `SPOOLED_FILE_DATA` named arguments) was written from IBM's documentation and not run against an IBM i before release; the first call on a real system validates it. Manual: Find Where Used from the three views and the editor, Bring for Reference from its quick pick; Describe File on a PF; Show Job Log after a failed command.
 
+### 21. Bundled build, concurrent refresh, batched object probes, upload time limit, type-aware lint (shipped in 1.8.12)
+
+- Build: `npm run bundle` (esbuild, `src/extension.ts` → `dist/extension.js`, platform node, target node20, CJS, `vscode` external, minified, external source map left out of the VSIX). `main` is `./dist/extension.js`; `out/` stays the compiled tree the tests run against and is excluded from the VSIX (`.vscodeignore`: `out/**`, `dist/**/*.map`); `manifest.test.ts` allows only `dist/extension.js` of the code and checks `main`. `npm test` bundles before running, so that test sees the file. CI packages the VSIX on Linux and uploads it (`actions/upload-artifact` v7.0.2, pinned by commit). The bundle was smoke-loaded under Node with a stubbed `vscode` module (exports `activate`/`deactivate`).
+- `refreshRun.ts` (vscode-free): `runRefreshSteps(steps, { concurrency, signal, onProgress, onError })` over `mapWithLimit`; `CheckoutService.refreshEntries` runs its steps through it with `DOWNLOAD_CONCURRENCY` (4) and an `AbortController` tied to the cancellation token (steps under way finish and are counted; the rest are not).
+- `localPath.ts` `checkoutFilePath(root, parts)` builds `<root>/<system>/<LIB>/<SRCFILE>/<MEMBER>.<EXT>` (pure; the service keeps the inside-the-root check, the link check and the directory creation).
+- `codeForIBMi.ts` `firstObjectRow`: one `UNION ALL` of `OBJECT_STATISTICS` per group of 25 libraries, in their order, falling back to one library at a time when the statement fails (an unknown or unauthorized library fails the whole statement); used by `findCompiledObject` and `describeObject`.
+- Upload write: `uploadMemberContentWithDates` / `uploadMemberContent` run under `withDeadline` with the download's 2 minutes and slow-wait log line.
+- ESLint: `projectService` type information for `src/**`; `no-floating-promises`, `no-misused-promises` (void-returning arguments allowed), `await-thenable`, `no-unnecessary-type-assertion`; tests exempt from `no-floating-promises` (`describe`/`it` return promises). The only finding in extension code was an unnecessary assertion in `getConnection`.
+- Cleanups: `errorMessage()` everywhere (no inline `err instanceof Error ? …` left); `agentFiles.ts` `CLAUDE_MCP_FILE`, `CODEX_CONFIG_FILE`, `fileBelow` replace the paths repeated in `commands/agents.ts`.
+
+**Validation**
+- `src/test/refreshRun.test.ts` (tally of every status and errors, at most N at once, cancel starts nothing more), `src/test/localPath.test.ts` (`checkoutFilePath`), `manifest.test.ts` (VSIX holds `dist/extension.js` only, `main`).
+- Manual: F5 from the bundled build (activation, a checkout, an upload, the research server, a checkpoint); Refresh All on a few hundred members.
+
 ## History
 
 Shipped before the requirements above were written down here (from the former HANDOFF.md):
