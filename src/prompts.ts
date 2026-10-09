@@ -1,18 +1,39 @@
 import * as vscode from "vscode";
 import { CheckoutService } from "./checkoutService";
 import { errorMessage } from "./errors";
-import { CheckedOutMember, TreeItemType, storedEntryFor } from "./types";
+import { CheckedOutMember, storedEntryFor } from "./types";
 
-/** The stored checkout a command's tree-item argument refers to; see {@link storedEntryFor}. */
-export function resolveMember(service: CheckoutService, item: TreeItemType | undefined): CheckedOutMember | undefined {
+/**
+ * The checkout a command's argument refers to: a Checked Out Members item (see
+ * {@link storedEntryFor}), a file from the Explorer or an editor menu, or, with no argument (the
+ * Command Palette or a keybinding), the file in the active editor.
+ */
+export function resolveMember(service: CheckoutService, item: unknown): CheckedOutMember | undefined {
+  if (item === undefined || item === null) {
+    return activeCheckout(service);
+  }
+  if (item instanceof vscode.Uri) {
+    return checkoutOfUri(service, item);
+  }
   return storedEntryFor(item, (system) => service.getEntriesForSystem(system));
 }
 
+/** The checkout open in the active editor, reference copies included. */
+export function activeCheckout(service: CheckoutService): CheckedOutMember | undefined {
+  const uri = vscode.window.activeTextEditor?.document.uri;
+  return uri ? checkoutOfUri(service, uri) : undefined;
+}
+
+function checkoutOfUri(service: CheckoutService, uri: vscode.Uri): CheckedOutMember | undefined {
+  return uri.scheme === "file" ? service.findEntryByLocalPath(uri.fsPath) : undefined;
+}
+
+/** The checkouts a multi-selection (tree items or Explorer files) stands for; see {@link resolveMember}. */
 export function resolveMemberSelections(
   service: CheckoutService,
-  item: TreeItemType,
-  allSelections?: TreeItemType[]
-): Extract<TreeItemType, { kind: "member" }>[] {
+  item: unknown,
+  allSelections?: unknown[]
+): Array<{ kind: "member"; entry: CheckedOutMember }> {
   const selections = allSelections && allSelections.length > 1 ? allSelections : [item];
   return selections.flatMap((selection) => {
     const entry = resolveMember(service, selection);

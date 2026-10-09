@@ -434,6 +434,17 @@ Right-click a checkout for comparison tools: **Select for Compare** (mark one ch
 - **Check In Through Change Management…** — run your change-management check-in command for uploaded members (see **Running Your Change-Management Check-In**)
 - **Discard Checkout** — delete the local file and stop tracking it (with confirmation)
 
+### From the Editor
+
+With a checked-out member open, you don't need the side bar:
+
+- **Editor title buttons** — **Upload to IBM i**, **Merge Back to IBM i** and **Refresh Remote Status** are at the top right of the editor. A read-only reference copy shows only Refresh.
+- **Right-click menu** — the **IBM i Member** submenu in the editor and in VS Code's Explorer has Upload, Merge Back, Refresh, Run Action, Check In Through Change Management, Open Remote File, Find Dependencies, Find All Dependencies, Compare With, Copy Member Path and Reveal in File Explorer. **Bob, Investigate** and **Investigate with AI** are next to it, as before in the Explorer.
+- **Command Palette** — the same commands are listed under **IBM i Member Workspace** while a checked-out member is the active editor.
+- **Keyboard** — `Ctrl+Alt+U` (`Cmd+Alt+U` on macOS) uploads the open member, `Ctrl+Alt+M` opens Merge Back, `Ctrl+Alt+R` refreshes its remote status and `Ctrl+Alt+K` checks it in through change management. Change them under **Keyboard Shortcuts** like any other.
+
+Actions that write to the IBM i (Upload, Merge Back, Run Action, Check In) aren't offered for reference copies or for members deleted on the IBM i.
+
 ### Multi-Select
 
 The Checked Out Members panel supports selecting multiple checkouts at once. **Open Local/Remote File, Run Action, Upload to IBM i, Refresh Remote Status,** and **Discard Checkout** all work on a multi-selection, each confirming with a message naming how many members the action will affect before proceeding. Actions that only make sense for one item at a time (Merge Back, Compare With, Copy Member Path, Reveal in File Explorer) are single-selection only.

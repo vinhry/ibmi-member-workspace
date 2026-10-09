@@ -10,6 +10,7 @@ import { CheckoutService } from "../checkoutService";
 import { getSystemName, isConnectionReadOnly } from "../codeForIBMi";
 import { errorMessage } from "../errors";
 import { MergeHandler } from "../mergeHandler";
+import { activeCheckout } from "../prompts";
 import { CheckedOutMember, formatMemberPath, isReferenceCopy, systemKey } from "../types";
 import { uploadWithConflictHandling } from "./uploadMember";
 
@@ -21,8 +22,10 @@ const MODE_LABELS: Record<AutoUploadMode, { label: string; detail: string }> = {
   silent: { label: "On", detail: "Upload saved checkouts without asking. Changes made on the IBM i still prompt." },
 };
 
-/** Context key: the active editor shows an editable checked-out member. */
+/** The active editor shows a checkout that can be uploaded (not a reference copy). */
 const EDITABLE_CHECKOUT_ACTIVE = "ibmi-member-workspace:editableCheckoutActive";
+/** The active editor shows a checkout, reference copies included. */
+const CHECKOUT_ACTIVE = "ibmi-member-workspace:checkoutActive";
 
 const MEMBER_MODE_DETAILS: Record<AutoUploadMode, string> = {
   off: "Don't upload this member when it is saved.",
@@ -44,11 +47,7 @@ async function setAutoUploadMode(mode: AutoUploadMode): Promise<void> {
 
 /** The editable checkout shown in the active editor, if any. */
 function activeEditableCheckout(service: CheckoutService): CheckedOutMember | undefined {
-  const uri = vscode.window.activeTextEditor?.document.uri;
-  if (uri?.scheme !== "file") {
-    return undefined;
-  }
-  const entry = service.findEntryByLocalPath(uri.fsPath);
+  const entry = activeCheckout(service);
   return entry && !isReferenceCopy(entry) ? entry : undefined;
 }
 
@@ -109,9 +108,15 @@ export function registerAutoUpload(options: {
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
   context.subscriptions.push(statusBar);
   let editableCheckoutActive: boolean | undefined;
+  let checkoutActive: boolean | undefined;
   const refreshStatusBar = () => {
     const setting = getAutoUploadMode();
-    const entry = activeEditableCheckout(service);
+    const active = activeCheckout(service);
+    const entry = active && !isReferenceCopy(active) ? active : undefined;
+    if (checkoutActive !== (active !== undefined)) {
+      checkoutActive = active !== undefined;
+      void vscode.commands.executeCommand("setContext", CHECKOUT_ACTIVE, checkoutActive);
+    }
     if (editableCheckoutActive !== (entry !== undefined)) {
       editableCheckoutActive = entry !== undefined;
       void vscode.commands.executeCommand("setContext", EDITABLE_CHECKOUT_ACTIVE, editableCheckoutActive);

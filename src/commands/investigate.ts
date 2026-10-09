@@ -13,18 +13,33 @@ import { CommandContext } from "./context";
  * only on checked-out files.
  */
 
-/** Keeps `ibmi-member-workspace:checkoutPaths` on the connected system's checkouts. */
+/**
+ * Keeps `ibmi-member-workspace:checkoutPaths` on the connected system's checkouts, and
+ * `ibmi-member-workspace:editableCheckoutPaths` on those that can be uploaded or merged (not
+ * reference copies, not members deleted on the IBM i). The Explorer and editor menus test
+ * `resourcePath in` them.
+ */
 export function trackCheckoutPaths(ctx: CommandContext): void {
   const { context, service } = ctx;
-  // Status changes fire often; the context key is set only when the list of paths changed.
+  // Status changes fire often; the context keys are set only when the lists of paths changed.
   let lastPaths: string | undefined;
+  let lastEditablePaths: string | undefined;
   const update = () => {
     const system = getSystemName();
-    const paths = system ? service.getEntriesForSystem(system).map((entry) => vscode.Uri.file(entry.localPath).fsPath) : [];
+    const entries = system ? service.getEntriesForSystem(system) : [];
+    const paths = entries.map((entry) => vscode.Uri.file(entry.localPath).fsPath);
+    const editablePaths = entries
+      .filter((entry) => !isReferenceCopy(entry) && entry.status !== "remote-missing")
+      .map((entry) => vscode.Uri.file(entry.localPath).fsPath);
     const key = paths.join("\n");
     if (key !== lastPaths) {
       lastPaths = key;
       void vscode.commands.executeCommand("setContext", "ibmi-member-workspace:checkoutPaths", paths);
+    }
+    const editableKey = editablePaths.join("\n");
+    if (editableKey !== lastEditablePaths) {
+      lastEditablePaths = editableKey;
+      void vscode.commands.executeCommand("setContext", "ibmi-member-workspace:editableCheckoutPaths", editablePaths);
     }
   };
   update();
