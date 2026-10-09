@@ -36,7 +36,7 @@ describe("extension manifest", () => {
 
     assert.equal(manifest.name, "ibmi-member-workspace");
     assert.equal(manifest.publisher, "vinhry");
-    assert.equal(manifest.version, "1.8.8");
+    assert.equal(manifest.version, "1.8.9");
   });
 
   it("contributes exactly the commands registered by the extension", () => {
@@ -146,7 +146,7 @@ describe("extension manifest", () => {
     const placements = Object.entries(menus).flatMap(([menu, items]) =>
       items.filter((item) => item.submenu === investigateMenu).map((item) => ({ menu, ...item }))
     );
-    assert.deepEqual(placements.map((item) => item.menu).sort(), ["explorer/context", "view/item/context", "view/item/context"]);
+    assert.deepEqual(placements.map((item) => item.menu).sort(), ["editor/context", "explorer/context", "view/item/context", "view/item/context"]);
     for (const item of [...placements, ...menus[investigateMenu]]) {
       assert.match(item.when ?? "", /(^|&& )ibmi-member-workspace:isBobIde( &&|$)/, JSON.stringify(item));
     }
@@ -242,8 +242,11 @@ describe("extension manifest", () => {
     assert.equal(direct?.group, "0_bob@2");
     assert.equal(all?.group, "0_bob@3");
     assert.equal(all?.when, direct?.when);
-    // It needs a checked-out member, so it isn't in the Command Palette.
-    assert.equal(menus.commandPalette.find((item) => item.command === "ibmi-member-workspace.findAllDependencies")?.when, "false");
+    // It needs a checked-out member: in the Command Palette only while one is open in the editor.
+    assert.equal(
+      menus.commandPalette.find((item) => item.command === "ibmi-member-workspace.findAllDependencies")?.when,
+      "ibmi-member-workspace:checkoutActive"
+    );
 
     const limits = (name: string) => {
       const setting = configuration.properties[`ibmi-member-workspace.dependencies.transitive.${name}`];
@@ -259,6 +262,83 @@ describe("extension manifest", () => {
     assert.equal(scope.enumDescriptions?.length, scope.enum?.length);
     assert.deepEqual(limits("maxDepth"), [3, 1, 10]);
     assert.deepEqual(limits("maxMembers"), [50, 5, 500]);
+  });
+
+  it("offers the member commands from the editor, the Explorer, the Command Palette and the keyboard", () => {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      contributes: {
+        submenus: Array<{ id: string; label: string }>;
+        menus: Record<string, Array<{ command?: string; submenu?: string; when?: string; group?: string }>>;
+        keybindings: Array<{ command: string; key: string; mac?: string; when?: string }>;
+      };
+    };
+    const { submenus, menus, keybindings } = manifest.contributes;
+    const command = (name: string) => `ibmi-member-workspace.${name}`;
+    const anyCheckout = "resourcePath in ibmi-member-workspace:checkoutPaths";
+    const editableCheckout = "resourcePath in ibmi-member-workspace:editableCheckoutPaths";
+    // Writes to the IBM i (or runs an action there) need a member that can be uploaded: not a
+    // reference copy, not deleted on the IBM i. The rest work on any checkout.
+    const writers = ["uploadToRemote", "mergeBack", "runAction", "checkinThroughChangeManagement"].map(command);
+    const readers = [
+      "refreshRemote", "openRemoteFile", "findDependencies", "findAllDependencies", "copyMemberPath", "revealInExplorer",
+    ].map(command);
+
+    // Editor title: upload, merge and refresh, in that order.
+    assert.deepEqual(menus["editor/title"].map((item) => [item.command, item.when]), [
+      [command("uploadToRemote"), editableCheckout],
+      [command("mergeBack"), editableCheckout],
+      [command("refreshRemote"), anyCheckout],
+    ]);
+
+    // One "IBM i Member" submenu in the editor's and the Explorer's right-click menus.
+    const member = command("member");
+    assert.ok(submenus.some((menu) => menu.id === member && menu.label === "IBM i Member"));
+    for (const placement of ["editor/context", "explorer/context"]) {
+      assert.equal(menus[placement].find((item) => item.submenu === member)?.when, anyCheckout, placement);
+    }
+    const items = menus[member];
+    for (const name of writers) {
+      assert.equal(items.find((item) => item.command === name)?.when, editableCheckout, name);
+    }
+    for (const name of readers) {
+      assert.equal(items.find((item) => item.command === name)?.when, anyCheckout, name);
+    }
+    // Compare With from a file leaves out "Compare with Active File", which would be the file itself.
+    const compare = command("editorCompareWith");
+    assert.equal(items.find((item) => item.submenu === compare)?.when, anyCheckout);
+    assert.ok(!menus[compare].some((item) => item.command === command("compareWithActive")));
+    assert.ok(menus[compare].some((item) => item.command === command("compareWithMember")));
+
+    // Command Palette: only while the active editor holds a checkout; Discard and Open Local File stay out.
+    const palette = (name: string) => menus.commandPalette.find((item) => item.command === name)?.when;
+    for (const name of writers) {
+      assert.equal(palette(name), "ibmi-member-workspace:editableCheckoutActive", name);
+    }
+    for (const name of readers) {
+      assert.equal(palette(name), "ibmi-member-workspace:checkoutActive", name);
+    }
+    assert.equal(palette(command("discardCheckout")), "false");
+    assert.equal(palette(command("openLocalFile")), "false");
+    assert.equal(palette(command("compareWithActive")), "false");
+
+    // Keybindings, each with a Mac variant and only in a checkout's editor.
+    const bound = Object.fromEntries(keybindings.map((binding) => [binding.command, binding]));
+    for (const name of [...writers.filter((n) => n !== command("runAction")), command("refreshRemote")]) {
+      const binding = bound[name];
+      assert.ok(binding?.key && binding.mac, name);
+      assert.match(binding.when ?? "", /^editorTextFocus && ibmi-member-workspace:(editableCheckoutActive|checkoutActive)$/, name);
+      assert.equal(binding.when?.includes("editableCheckoutActive"), writers.includes(name), name);
+    }
+    const keys = keybindings.map((binding) => binding.key);
+    assert.equal(new Set(keys).size, keys.length, "duplicate key");
+    // Every command these menus and keybindings name exists.
+    const commands = manifest.contributes as unknown as { commands: Array<{ command: string }> };
+    const names = new Set(commands.commands.map((c) => c.command));
+    for (const item of [...menus["editor/title"], ...items, ...menus[compare], ...keybindings]) {
+      if ("command" in item && item.command) {
+        assert.ok(names.has(item.command), item.command);
+      }
+    }
   });
 
   it("packages only the files the extension needs", async () => {

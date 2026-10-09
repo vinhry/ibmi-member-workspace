@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.8.9 - 2026-10-09
+
+- **Work on the open member without the side bar.** A checked-out member's editor now has **Upload to IBM i**, **Merge Back to IBM i** and **Refresh Remote Status** buttons in its title bar, and an **IBM i Member** submenu in the editor's and the Explorer's right-click menus with Upload, Merge Back, Refresh, Run Action, Check In Through Change Management, Open Remote File, Find Dependencies, Find All Dependencies, Compare With, Copy Member Path and Reveal in File Explorer. **Bob, Investigate** and **Investigate with AI** are in the editor's menu too. The same commands are in the Command Palette while a checked-out member is the active editor, and `Ctrl+Alt+U` (`Cmd+Alt+U` on macOS) uploads it, `Ctrl+Alt+M` opens Merge Back, `Ctrl+Alt+R` refreshes it and `Ctrl+Alt+K` checks it in. Actions that write to the IBM i aren't offered for reference copies or members deleted on the IBM i. See **From the Editor** in the README.
+
 ## 1.8.8 - 2026-10-07
 
 - **Find Dependencies reads more CL and fixed-form RPG.** In CL it now finds the files `DCLF` declares, the SQL script `RUNSQLSTM` runs (listed with the copybooks), and `CALL`s inside a quoted `SBMJOB CMD('…')`, `ADDJOBSCDE CMD('…')` or `RQSDTA('…')`. In fixed-form RPG it finds `CALL 'PGM'` and `CALLB 'PROC'` in C-specs, in RPG IV and RPG III columns. Calls through a field are still skipped, since the name is only known at run time.

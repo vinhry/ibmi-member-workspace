@@ -297,6 +297,17 @@ Agents could see relationships and source, but not a program's attributes, why a
 - `src/test/dependencyScan.test.ts`: DCLF, RUNSQLSTM, quoted SBMJOB/ADDJOBSCDE/RQSDTA (not messages), fixed-form CALL/CALLB in both layouts, skipped cases. `dependencyResolve.test.ts`: a RUNSQLSTM script resolves by its source file.
 - `src/test/checkoutTreeModel.test.ts`, `findMemberModel.test.ts`.
 
+### 18. Member commands from the editor, the Explorer, the palette and the keyboard (shipped in 1.8.9)
+
+- `resolveMember` / `resolveMemberSelections` (`prompts.ts`) accept a Checked Out Members item, a `vscode.Uri` (editor title, editor or Explorer menu, multi-selection of files) or nothing (Command Palette, keybinding: the active editor's file, via `activeCheckout`). The handlers are unchanged.
+- Context keys: `ibmi-member-workspace:checkoutPaths` (existing) and the new `ibmi-member-workspace:editableCheckoutPaths` (not a reference copy, not `remote-missing`), both arrays of local fsPaths kept by `trackCheckoutPaths` (`commands/investigate.ts`), tested by menus with `resourcePath in`; `ibmi-member-workspace:checkoutActive` and the existing `editableCheckoutActive` (the active editor's file) kept by the upload-on-save status bar (`commands/autoUpload.ts`), used by the palette and the keybindings.
+- Manifest: `editor/title` (Upload, Merge Back: editable; Refresh: any), the `ibmi-member-workspace.member` submenu ("IBM i Member") in `editor/context` and `explorer/context`, with `ibmi-member-workspace.editorCompareWith` (Compare With minus "Compare with Active File"); the Investigate submenus in `editor/context`; palette `when` clauses on the two active-editor keys; keybindings Ctrl/Cmd+Alt+U/M/R/K. Ctrl+Alt+I was avoided (Copilot Chat); Ctrl+Alt+U/M/R/K are not AltGr characters in the common European layouts.
+- Writers (Upload, Merge Back, Run Action, Check In) always use the editable key; Discard Checkout, Open Local File and Compare with Active File stay out of the palette.
+
+**Validation**
+- `src/test/manifest.test.ts`: "offers the member commands from the editor, the Explorer, the Command Palette and the keyboard" (title buttons and order, submenu placement and gating per command, compare submenu, palette gating, keybindings with Mac variants and unique keys, every named command exists); Investigate placements include `editor/context`.
+- Manual (Extension Development Host): title buttons and menu on a checkout and on a reference copy; palette entries appear and disappear with the active editor; the four shortcuts; Upload from the Explorer on a multi-selection.
+
 ## History
 
 Shipped before the requirements above were written down here (from the former HANDOFF.md):

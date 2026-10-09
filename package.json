@@ -2,7 +2,7 @@
   "name": "ibmi-member-workspace",
   "displayName": "IBM i Member Workspace",
   "description": "Work with IBM i source members locally, compare changes, and synchronize them safely. Works with Code for IBM i.",
-  "version": "1.8.8",
+  "version": "1.8.9",
   "publisher": "vinhry",
   "author": "Vinhry",
   "license": "GPL-3.0",
@@ -54,6 +54,14 @@
       {
         "id": "ibmi-member-workspace.agentsInvestigate",
         "label": "Investigate with AI"
+      },
+      {
+        "id": "ibmi-member-workspace.member",
+        "label": "IBM i Member"
+      },
+      {
+        "id": "ibmi-member-workspace.editorCompareWith",
+        "label": "Compare With"
       }
     ],
     "viewsContainers": {
@@ -497,11 +505,11 @@
         },
         {
           "command": "ibmi-member-workspace.findDependencies",
-          "when": "false"
+          "when": "ibmi-member-workspace:checkoutActive"
         },
         {
           "command": "ibmi-member-workspace.findAllDependencies",
-          "when": "false"
+          "when": "ibmi-member-workspace:checkoutActive"
         },
         {
           "command": "ibmi-member-workspace.findMember",
@@ -513,7 +521,7 @@
         },
         {
           "command": "ibmi-member-workspace.checkinThroughChangeManagement",
-          "when": "false"
+          "when": "ibmi-member-workspace:editableCheckoutActive"
         },
         {
           "command": "ibmi-member-workspace.findMember.rerun",
@@ -549,7 +557,7 @@
         },
         {
           "command": "ibmi-member-workspace.mergeBack",
-          "when": "false"
+          "when": "ibmi-member-workspace:editableCheckoutActive"
         },
         {
           "command": "ibmi-member-workspace.openLocalFile",
@@ -557,7 +565,7 @@
         },
         {
           "command": "ibmi-member-workspace.refreshRemote",
-          "when": "false"
+          "when": "ibmi-member-workspace:checkoutActive"
         },
         {
           "command": "ibmi-member-workspace.discardCheckout",
@@ -565,7 +573,7 @@
         },
         {
           "command": "ibmi-member-workspace.copyMemberPath",
-          "when": "false"
+          "when": "ibmi-member-workspace:checkoutActive"
         },
         {
           "command": "ibmi-member-workspace.refreshView",
@@ -573,7 +581,7 @@
         },
         {
           "command": "ibmi-member-workspace.selectForCompare",
-          "when": "false"
+          "when": "ibmi-member-workspace:checkoutActive"
         },
         {
           "command": "ibmi-member-workspace.compareWithActive",
@@ -581,35 +589,35 @@
         },
         {
           "command": "ibmi-member-workspace.compareWithSelected",
-          "when": "false"
+          "when": "ibmi-member-workspace:checkoutActive && ibmi-member-workspace:hasCompareSelection"
         },
         {
           "command": "ibmi-member-workspace.compareWithLocalFile",
-          "when": "false"
+          "when": "ibmi-member-workspace:checkoutActive"
         },
         {
           "command": "ibmi-member-workspace.compareWithIfsFile",
-          "when": "false"
+          "when": "ibmi-member-workspace:checkoutActive"
         },
         {
           "command": "ibmi-member-workspace.compareWithMember",
-          "when": "false"
+          "when": "ibmi-member-workspace:checkoutActive"
         },
         {
           "command": "ibmi-member-workspace.revealInExplorer",
-          "when": "false"
+          "when": "ibmi-member-workspace:checkoutActive"
         },
         {
           "command": "ibmi-member-workspace.runAction",
-          "when": "false"
+          "when": "ibmi-member-workspace:editableCheckoutActive"
         },
         {
           "command": "ibmi-member-workspace.openRemoteFile",
-          "when": "false"
+          "when": "ibmi-member-workspace:checkoutActive"
         },
         {
           "command": "ibmi-member-workspace.uploadToRemote",
-          "when": "false"
+          "when": "ibmi-member-workspace:editableCheckoutActive"
         },
         {
           "command": "ibmi-member-workspace.refreshAllRemote",
@@ -833,6 +841,11 @@
       ],
       "explorer/context": [
         {
+          "submenu": "ibmi-member-workspace.member",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "0_bob@0"
+        },
+        {
           "submenu": "ibmi-member-workspace.bobInvestigate",
           "when": "ibmi-member-workspace:isBobIde && resourcePath in ibmi-member-workspace:checkoutPaths",
           "group": "0_bob@1"
@@ -996,8 +1009,148 @@
           "when": "ibmi-member-workspace:agentAvailable",
           "group": "agents@3"
         }
+      ],
+      "editor/title": [
+        {
+          "command": "ibmi-member-workspace.uploadToRemote",
+          "when": "resourcePath in ibmi-member-workspace:editableCheckoutPaths",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ibmi-member-workspace.mergeBack",
+          "when": "resourcePath in ibmi-member-workspace:editableCheckoutPaths",
+          "group": "navigation@2"
+        },
+        {
+          "command": "ibmi-member-workspace.refreshRemote",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "navigation@3"
+        }
+      ],
+      "editor/context": [
+        {
+          "submenu": "ibmi-member-workspace.member",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "ibmi@1"
+        },
+        {
+          "submenu": "ibmi-member-workspace.bobInvestigate",
+          "when": "ibmi-member-workspace:isBobIde && resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "ibmi@2"
+        },
+        {
+          "submenu": "ibmi-member-workspace.agentsInvestigate",
+          "when": "ibmi-member-workspace:agentAvailable && resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "ibmi@2"
+        }
+      ],
+      "ibmi-member-workspace.member": [
+        {
+          "command": "ibmi-member-workspace.uploadToRemote",
+          "when": "resourcePath in ibmi-member-workspace:editableCheckoutPaths",
+          "group": "1_sync@1"
+        },
+        {
+          "command": "ibmi-member-workspace.mergeBack",
+          "when": "resourcePath in ibmi-member-workspace:editableCheckoutPaths",
+          "group": "1_sync@2"
+        },
+        {
+          "command": "ibmi-member-workspace.refreshRemote",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "1_sync@3"
+        },
+        {
+          "command": "ibmi-member-workspace.runAction",
+          "when": "resourcePath in ibmi-member-workspace:editableCheckoutPaths",
+          "group": "2_run@1"
+        },
+        {
+          "command": "ibmi-member-workspace.checkinThroughChangeManagement",
+          "when": "resourcePath in ibmi-member-workspace:editableCheckoutPaths",
+          "group": "2_run@2"
+        },
+        {
+          "command": "ibmi-member-workspace.openRemoteFile",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "3_open@1"
+        },
+        {
+          "command": "ibmi-member-workspace.findDependencies",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "4_deps@1"
+        },
+        {
+          "command": "ibmi-member-workspace.findAllDependencies",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "4_deps@2"
+        },
+        {
+          "submenu": "ibmi-member-workspace.editorCompareWith",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "5_compare@1"
+        },
+        {
+          "command": "ibmi-member-workspace.copyMemberPath",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "6_util@1"
+        },
+        {
+          "command": "ibmi-member-workspace.revealInExplorer",
+          "when": "resourcePath in ibmi-member-workspace:checkoutPaths",
+          "group": "6_util@2"
+        }
+      ],
+      "ibmi-member-workspace.editorCompareWith": [
+        {
+          "command": "ibmi-member-workspace.selectForCompare",
+          "group": "compare@1"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithSelected",
+          "when": "ibmi-member-workspace:hasCompareSelection",
+          "group": "compare@2"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithLocalFile",
+          "group": "compare@3"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithIfsFile",
+          "group": "compare@4"
+        },
+        {
+          "command": "ibmi-member-workspace.compareWithMember",
+          "group": "compare@5"
+        }
       ]
     },
+    "keybindings": [
+      {
+        "command": "ibmi-member-workspace.uploadToRemote",
+        "key": "ctrl+alt+u",
+        "mac": "cmd+alt+u",
+        "when": "editorTextFocus && ibmi-member-workspace:editableCheckoutActive"
+      },
+      {
+        "command": "ibmi-member-workspace.mergeBack",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "editorTextFocus && ibmi-member-workspace:editableCheckoutActive"
+      },
+      {
+        "command": "ibmi-member-workspace.refreshRemote",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "editorTextFocus && ibmi-member-workspace:checkoutActive"
+      },
+      {
+        "command": "ibmi-member-workspace.checkinThroughChangeManagement",
+        "key": "ctrl+alt+k",
+        "mac": "cmd+alt+k",
+        "when": "editorTextFocus && ibmi-member-workspace:editableCheckoutActive"
+      }
+    ],
     "configuration": {
       "title": "IBM i Member Workspace",
       "properties": {
