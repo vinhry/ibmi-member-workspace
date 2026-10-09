@@ -36,7 +36,7 @@ describe("extension manifest", () => {
 
     assert.equal(manifest.name, "ibmi-member-workspace");
     assert.equal(manifest.publisher, "vinhry");
-    assert.equal(manifest.version, "1.8.9");
+    assert.equal(manifest.version, "1.8.10");
   });
 
   it("contributes exactly the commands registered by the extension", () => {
@@ -281,6 +281,7 @@ describe("extension manifest", () => {
     const writers = ["uploadToRemote", "mergeBack", "runAction", "checkinThroughChangeManagement"].map(command);
     const readers = [
       "refreshRemote", "openRemoteFile", "findDependencies", "findAllDependencies", "copyMemberPath", "revealInExplorer",
+      "compareWithRemote", "showChangesSinceCheckout",
     ].map(command);
 
     // Editor title: upload, merge and refresh, in that order.
@@ -302,6 +303,13 @@ describe("extension manifest", () => {
     }
     for (const name of readers) {
       assert.equal(items.find((item) => item.command === name)?.when, anyCheckout, name);
+    }
+    // Merge Back, Compare with IBM i and Show Changes Since Checkout take a multi-selection in the tree.
+    const tree = menus["view/item/context"];
+    for (const name of ["mergeBack", "compareWithRemote", "showChangesSinceCheckout"].map(command)) {
+      const entries = tree.filter((item) => item.command === name);
+      assert.ok(entries.length > 0, name);
+      assert.ok(entries.every((item) => !item.when?.includes("listMultiSelection")), name);
     }
     // Compare With from a file leaves out "Compare with Active File", which would be the file itself.
     const compare = command("editorCompareWith");
