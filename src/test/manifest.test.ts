@@ -372,11 +372,13 @@ describe("extension manifest", () => {
       /^NOTICE$/,
       /^images\/icon\.png$/,
       /^resources\/[^/]+\.svg$/,
-      /^out\/(?!test\/)[^/]+(?:\/[^/]+)*\.js$/,
+      // The whole extension, bundled by esbuild; the compiled out/ tree (and the tests) stay out.
+      /^dist\/extension\.js$/,
     ];
     const files = await listFiles({ cwd: root, packageManager: PackageManager.None });
 
     assert.deepEqual(files.filter((file) => !allowed.some((pattern) => pattern.test(file))), []);
-    assert.ok(files.includes("out/extension.js"));
+    assert.ok(files.includes("dist/extension.js"));
+    assert.equal(JSON.parse(readFileSync(manifestPath, "utf8")).main, "./dist/extension.js");
   });
 });

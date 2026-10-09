@@ -34,7 +34,7 @@
   "extensionDependencies": [
     "halcyontechltd.code-for-ibmi"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": false,
@@ -1509,11 +1509,12 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run bundle",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --target=node20 --format=cjs --external:vscode --outfile=dist/extension.js --minify --sourcemap=external",
     "lint": "eslint src",
-    "test": "npm run compile && node --test \"out/test/**/*.test.js\"",
+    "test": "npm run compile && npm run bundle && node --test \"out/test/**/*.test.js\"",
     "package": "vsce package",
     "package:list": "vsce ls"
   },
@@ -1523,6 +1524,7 @@
     "@types/node": "^20.19.43",
     "@types/vscode": "~1.90.0",
     "@vscode/vsce": "4.0.0",
+    "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.70.0"

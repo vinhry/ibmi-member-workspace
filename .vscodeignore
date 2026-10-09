@@ -11,7 +11,8 @@ node_modules/**
 **/*.map
 eslint.config.mjs
 *.vsix
-out/test/**
+out/**
+dist/**/*.map
 .github/**
 CLAUDE.md
 docs/**
